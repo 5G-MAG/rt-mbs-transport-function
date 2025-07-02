@@ -1,0 +1,17 @@
+name: reftools_5g-mag_mbs-transport-function-local
+
+services:
+  nrf:
+    image: "ghcr.io/5g-mag/nrf:latest"
+    env_file:
+      -   path: ./nrf.env
+          required: false
+    volumes:
+      - ./nrf.yaml:/etc/open5gs/default/nrf.yaml:z
+      - ./logs/nrf:/open5gs/install/var/log/open5gs
+  mbs-transport-function:
+    build:
+      context: ../../
+      dockerfile: docker/dsi/Dockerfile
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
