@@ -79,7 +79,7 @@ The MBS Transport Function requires a running 5G Core NRF Network Function to re
 sudo /usr/local/bin/open5gs-nrfd &
 ```
 
-Make sure the IP address and port details of the NRF you are running are configured in the `nrf` section of `/usr/local/etc/open5gs/mbstf.conf` and then run the MBS Transport Function. For example:
+Make sure the IP address and port details of the NRF you are running are configured in the `nrf` section of `/usr/local/etc/open5gs/mbstf.yaml` and then run the MBS Transport Function. For example:
 
 ```bash
 sudo /usr/local/bin/open5gs-mbstfd &
