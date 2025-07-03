@@ -9,9 +9,27 @@ services:
     volumes:
       - ./nrf.yaml:/etc/open5gs/default/nrf.yaml:z
       - ./logs/nrf:/open5gs/install/var/log/open5gs
+    networks:
+      - internal
   mbs-transport-function:
     build:
       context: ../../
       dockerfile: docker/dsi/Dockerfile
     environment:
       - DEBIAN_FRONTEND=noninteractive
+      - no_proxy=127.0.0.0/8,nrf
+    volumes:
+      - ./mbstf.yaml:/etc/open5gs/mbstf.yaml:z
+      - ./logs/mbstf:/var/log/open5gs
+    networks:
+      - internal
+      - default
+    ports:
+      - "7777:7777"
+networks:
+  internal:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
+  default: {}
+      
