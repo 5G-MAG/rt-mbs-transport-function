@@ -15,12 +15,14 @@ RUN apt-get update && \
     python3 -m pip install --break-system-packages --upgrade meson
 
 COPY . /source/rt-mbs-transport-function
+COPY docker/local/mbstf.yaml.in /source/rt-mbs-transport-function/src/mbstf/mbstf.yaml.in
 WORKDIR /source/rt-mbs-transport-function
 
 RUN rm -rf build
 RUN meson setup --prefix /usr --sysconfdir /etc --localstatedir /var build
 RUN meson compile -C build
 RUN DESTDIR=/install meson install -C build
+RUN mkdir -p /install/etc/open5gs && cp build/src/mbstf/mbstf.yaml /install/etc/open5gs/mbstf.yaml
 
 # Default configuration for container
 RUN rm -f /install/usr/bin/open5gs-[a-ln-z]*
@@ -34,6 +36,9 @@ RUN apt update && \
 
 # Copy built files from the builder stage
 COPY --from=building /install/ /
+
+# Update dynamic library links and cache for the image
+RUN ldconfig -v
 
 # Container entrypoint
 ENTRYPOINT ["/usr/bin/open5gs-mbstfd"]
