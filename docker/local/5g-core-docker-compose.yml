@@ -1,0 +1,63 @@
+name: reftools_5g-mag_open5gs-local
+
+services:
+  nrf:
+    image: "ghcr.io/5g-mag/nrf:latest"
+    env_file:
+      - path: ./nrf.env
+        required: false
+    environment:
+      - no_proxy=127.0.0.0/8,nrf,scp,mb-smf,mb-upf
+    volumes:
+      - ./nrf.yaml:/etc/open5gs/default/nrf.yaml:z
+      - ./logs/nrf:/open5gs/install/var/log/open5gs:z
+    networks:
+      - 5g-core
+  scp:
+    image: "ghcr.io/5g-mag/scp:latest"
+    env_file:
+      - path: ./scp.env
+        required: false
+    environment:
+      - no_proxy=127.0.0.0/8,nrf,scp,mb-smf,mb-upf
+    volumes:
+      - ./scp.yaml:/etc/open5gs/default/scp.yaml:z
+      - ./logs/scp:/open5gs/install/var/log/open5gs:z
+    networks:
+      - 5g-core
+  mb-smf:
+    image: "ghcr.io/5g-mag/smf_mb-smf:latest"
+    env_file:
+      - path: ./mb-smf.env
+        required: false
+    environment:
+      - no_proxy=127.0.0.0/8,nrf,scp,mb-smf,mb-upf
+    ports:
+      - "7777:7777"
+    volumes:
+      - ./mb-smf.yaml:/etc/open5gs/default/smf.yaml:z
+      - ./logs/mb-smf:/open5gs/install/var/log/open5gs:z
+    networks:
+      - 5g-core
+  mb-upf:
+    image: "ghcr.io/5g-mag/upf_mb-upf:latest"
+    env_file:
+      - path: ./mb-upf.env
+        required: false
+    environment:
+      - no_proxy=127.0.0.0/8,nrf,scp,mb-smf,mb-upf
+    volumes:
+      - ./mb-upf.yaml:/etc/open5gs/default/upf.yaml:z
+      - ./logs/mb-upf:/open5gs/install/var/log/open5gs:z
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - 5g-core
+
+networks:
+  5g-core:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.4"
