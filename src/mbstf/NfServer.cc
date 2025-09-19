@@ -294,7 +294,7 @@ static bool send_problem(Open5GSSBIStream &stream, OpenAPI_problem_details_t *pr
                          const std::optional<NfServer::InterfaceMetadata> &interface, const NfServer::AppMetadata &app)
 {
     Open5GSSBIMessage message(new ogs_sbi_message_t({}), true);;
-    char *content_type = ogs_strdup("application/problem+json");
+    char *content_type = ogs_strdup(OGS_SBI_CONTENT_PROBLEM_TYPE);
     message.contentType(content_type);
     message.problemDetails(problem);
 

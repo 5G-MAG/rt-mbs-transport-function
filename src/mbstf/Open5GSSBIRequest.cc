@@ -71,6 +71,40 @@ std::string Open5GSSBIRequest::headerValue(const std::string &field, const std::
     return defval;
 }
 
+std::string Open5GSSBIRequest::parameterValue(const std::string &field, const std::string &defval) const
+{
+    for (auto hi = ogs_hash_first(m_request->http.params); hi; hi = ogs_hash_next(hi)) {
+        std::string_view hdr_field(reinterpret_cast<const char*>(ogs_hash_this_key(hi)));
+        if (field.compare(hdr_field)==0) {
+            return std::string(reinterpret_cast<const char*>(ogs_hash_this_val(hi)));
+        }
+    }
+
+    return defval;
+}
+
+void Open5GSSBIRequest::headersMap(const Open5GSSBIRequest::HeadersMap &map) const
+{
+    for (auto hi = ogs_hash_first(m_request->http.headers); hi; hi = ogs_hash_next(hi)) {
+        CaseInsensitiveString hdr_field(reinterpret_cast<const char*>(ogs_hash_this_key(hi)));
+        auto it = map.find(hdr_field);
+        if (it != map.end()) {
+            it->second(it->first, reinterpret_cast<const char*>(ogs_hash_this_val(hi)));
+        }
+    }
+}
+
+void Open5GSSBIRequest::parametersMap(const Open5GSSBIRequest::ParametersMap &map) const
+{
+    for (auto hi = ogs_hash_first(m_request->http.params); hi; hi = ogs_hash_next(hi)) {
+        std::string param_field(reinterpret_cast<const char*>(ogs_hash_this_key(hi)));
+        auto it = map.find(param_field);
+        if (it != map.end()) {
+            it->second(it->first, reinterpret_cast<const char*>(ogs_hash_this_val(hi)));
+        }
+    }
+}
+
 MBSTF_NAMESPACE_STOP
 
 /* vim:ts=8:sts=4:sw=4:expandtab:

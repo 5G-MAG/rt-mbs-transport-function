@@ -33,6 +33,13 @@ public:
     DistributionSession &distributionSession() {return m_distributionSession;};
     const DistributionSession &distributionSession() const {return m_distributionSession;};
 
+    virtual void reconfigure() {};
+
+    virtual void establishInactiveInputs() = 0; /* Inactive state for DistSession */
+    virtual void establishActiveInputs() = 0;   /* Established state for DistSession */
+    virtual void activateOutput() = 0;          /* Active state for DistSession */
+    virtual void deactivateOutput() = 0;        /* Deactivating state for DistSession */
+
 private:
     DistributionSession &m_distributionSession;
 };

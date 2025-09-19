@@ -218,6 +218,7 @@ public:
     const Object &operator[](const std::string& object_id) const;
     bool isStale(const std::string& object_id) const;
     std::map<std::string, const Object&> getStale() const;
+    const std::map<std::string, Object> &getObjects() const { return m_store; };
 
     const Metadata *findMetadataByURL(const std::string &url) const;
 

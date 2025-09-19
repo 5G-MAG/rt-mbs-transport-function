@@ -68,6 +68,29 @@ const char *Open5GSSBIResponse::getHeader(const char *header)
     return NULL;
 }
 
+std::string Open5GSSBIResponse::headerValue(const std::string &field, const std::string &defval) const
+{
+    typedef std::string::value_type C;
+    std::basic_string_view<C, CaseInsensitiveTraits<C> > lfield(field.c_str());
+    for (auto hi = ogs_hash_first(m_response->http.headers); hi; hi = ogs_hash_next(hi)) {
+        std::basic_string_view<C, CaseInsensitiveTraits<C> > hdr_field(reinterpret_cast<const char*>(ogs_hash_this_key(hi)));
+        if (lfield.compare(hdr_field)==0) {
+            return std::string(reinterpret_cast<const char*>(ogs_hash_this_val(hi)));
+        }
+    }
+
+    return defval;
+}
+
+void Open5GSSBIResponse::headersMap(const Open5GSSBIResponse::HeadersMap &map) const
+{
+    for (auto hi = ogs_hash_first(m_response->http.headers); hi; hi = ogs_hash_next(hi)) {
+        CaseInsensitiveString hdr_field(reinterpret_cast<const char*>(ogs_hash_this_key(hi)));
+        auto it = map.find(hdr_field);
+        if (it != map.end()) it->second(it->first, reinterpret_cast<const char*>(ogs_hash_this_val(hi)));
+    }
+}
+
 
 MBSTF_NAMESPACE_STOP
 

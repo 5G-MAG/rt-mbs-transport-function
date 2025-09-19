@@ -48,12 +48,10 @@ ObjectManifestController::ObjectManifestController(DistributionSession &dist_ses
 {
     validate_pull_acquisition_method(dist_session);
     validate_push_acquisition_method(dist_session);
-
-    initObjectIngester();
 };
 
 
-void ObjectManifestController::initPullObjectIngester()
+void ObjectManifestController::initPullObjectIngesters()
 {
     const std::optional<std::string> &object_ingest_base_url = distributionSession().getObjectIngestBaseUrl();
     const std::optional<std::string> &object_distribution_base_url = distributionSession().objectDistributionBaseUrl();
@@ -92,22 +90,11 @@ void ObjectManifestController::initPushObjectIngester()
 {
     const std::string objIngestBaseUrl;
 
-    PushObjectIngester *pushIngester = new PushObjectIngester(objectStore(), *this);
+    PushObjectIngester *push_ingester = new PushObjectIngester(objectStore(), *this);
 
-    distributionSession().setObjectIngestBaseUrl(pushIngester->getIngestServerPrefix());
-    subscribeTo({"ObjectPushStart"}, *pushIngester);
-    setPushIngester(pushIngester);
-}
-
-void ObjectManifestController::initObjectIngester()
-{
-    if (distributionSession().getObjectAcquisitionMethod() == "PULL") {
-        initPullObjectIngester();
-    } else if (distributionSession().getObjectAcquisitionMethod() == "PUSH") {
-        initPushObjectIngester();
-    } else {
-        ogs_error("Invalid Acq. method");
-    }
+    distributionSession().setObjectIngestBaseUrl(push_ingester->getIngestServerPrefix());
+    subscribeTo({"ObjectPushStart"}, *push_ingester);
+    pushObjectIngester(push_ingester);
 }
 
 std::string ObjectManifestController::nextObjectId()
@@ -156,7 +143,7 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
 
 	std::list<PullObjectIngester::IngestItem> urls;
 
-        std::list<std::shared_ptr<PullObjectIngester>> &ingesters = controller->getPullObjectIngesters();
+        auto &ingesters = controller->getPullObjectIngesters();
 	while (ingesters.size() < next_ingest_items.second.size()) {
 	    controller->addPullObjectIngester(new PullObjectIngester(controller->objectStore(), *controller, urls));
 	}
@@ -257,6 +244,28 @@ void ObjectManifestController::manifestUrl()
     m_manifestUrl = manifest_url;
 }
 
+void ObjectManifestController::reconfigurePushObjectIngester()
+{
+    auto &push_obj_ingester = pushObjectIngester();
+    if (push_obj_ingester) {
+        if (distributionSession().getObjectAcquisitionMethod() == "PUSH") {
+            /* update settings for PushObjectIngester (preserves the push HTTP server) */
+        } else {
+            /* remove push_obj_ingester */
+            pushObjectIngester(nullptr);
+        }
+    } else if (distributionSession().getObjectAcquisitionMethod() == "PUSH") {
+        initPushObjectIngester();
+    }
+}
+
+void ObjectManifestController::reconfigurePullObjectIngesters()
+{
+    removeAllPullObjectIngesters();
+    if (distributionSession().getObjectAcquisitionMethod() == "PULL") {
+        initPullObjectIngesters();
+    }
+}
 
 static void validate_pull_acquisition_method(DistributionSession &distributionSession) {
     if (distributionSession.getObjectAcquisitionMethod() == "PULL") {

@@ -21,15 +21,22 @@
 
 #include "ogs-sbi.h"
 
-#include <string>
+#include <functional>
+#include <map>
 #include <optional>
+#include <string>
 
 #include "common.hh"
+#include "CaseInsensitiveTraits.hh"
 
 MBSTF_NAMESPACE_START
 
 class Open5GSSBIRequest {
 public:
+    using CaseInsensitiveString = std::basic_string<char, CaseInsensitiveTraits<char> >;
+    using HeadersMap = std::map<CaseInsensitiveString, std::function<void(const CaseInsensitiveString &field, const char *val)> >;
+    using ParametersMap = std::map<std::string, std::function<void(const std::string &param, const char *val)> >;
+
     Open5GSSBIRequest(ogs_sbi_request_t *request, bool owner = true) :m_request(request), m_owner(owner) {};
     Open5GSSBIRequest(const std::string &method, const std::string &uri, const std::string &apiVersion, const std::optional<std::string> &data, const std::optional<std::string> &type);
     Open5GSSBIRequest() = delete;
@@ -45,10 +52,14 @@ public:
     operator bool() const { return !!m_request; };
 
     std::string headerValue(const std::string &field, const std::string &defval = std::string()) const;
+    std::string parameterValue(const std::string &field, const std::string &defval = std::string()) const;
+    void headersMap(const HeadersMap &map) const;
+    void parametersMap(const ParametersMap &map) const;
 
     const char *content() const { return m_request?m_request->http.content:nullptr; };
     const char *uri() const { return m_request?m_request->h.uri:nullptr; };
     void setOwner(bool owner) { m_owner = owner; };
+    bool getOwner() const { return m_owner; };
 
 private:
     ogs_sbi_request_t *m_request;

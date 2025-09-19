@@ -54,15 +54,15 @@ ObjectListController::ObjectListController(DistributionSession &distributionSess
     }
 
     subscribeToService(objectStore());
-    initObjectIngester();
-    setObjectListPackager();
+    //initObjectIngester();
+    //setObjectListPackager();
 }
 
 ObjectListController::~ObjectListController()
 {
 }
 
-std::shared_ptr<ObjectListPackager> ObjectListController::setObjectListPackager() {
+void ObjectListController::setObjectPackager() {
     std::optional<std::string> dest_ip_addr = distributionSession().getDestIpAddr();
     std::optional<std::string> tunnel_addr = distributionSession().getTunnelAddr();
     uint32_t rate_limit = distributionSession().getRateLimit();
@@ -70,8 +70,25 @@ std::shared_ptr<ObjectListPackager> ObjectListController::setObjectListPackager(
     in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
     //TODO: get the MTU for the dest_ip_addr or tunnel_addr
     unsigned short mtu = 1490; // 1500 - GTP overhead; to allow for downstream encapsulation to the gNodeB
-    setPackager(new ObjectListPackager(objectStore(), *this, dest_ip_addr, rate_limit, mtu, port, tunnel_addr, tunnel_port));
-    return getObjectListPackager();
+    const auto &obj_list = objectStore().getObjects();
+    packager(new ObjectListPackager(objectStore(), *this, dest_ip_addr, rate_limit, mtu, port, tunnel_addr, tunnel_port));
+    // Send all objects that are in the ObjectStore
+    for (const auto &[obj_id, object] : obj_list) {
+        sendToPackager(obj_id);
+    }
+}
+
+void ObjectListController::sendToPackager(const std::string &objectId)
+{
+    ObjectListPackager::PackageItem item(objectId);
+    auto packager = getObjectListPackager();
+    if (packager) {
+        packager->add(item);
+    }
+}
+
+void ObjectListController::unsetObjectPackager() {
+    packager(nullptr);
 }
 
 std::shared_ptr<ObjectListPackager> ObjectListController::getObjectListPackager() const
@@ -85,13 +102,7 @@ void ObjectListController::processEvent(Event &event, SubscriptionService &event
         std::string objectId = objAddedEvent.objectId();
         ogs_info("Object added with ID: %s", objectId.c_str());
 
-        ObjectListPackager::PackageItem item(objectId);
-        std::shared_ptr<ObjectListPackager> packager(getObjectListPackager());
-        if (packager) {
-            packager->add(item);
-        } else {
-            ogs_error("ObjectListPackager is not initialized.");
-        }
+        sendToPackager(objectId);
     } else if (event.eventName() == "ObjectPushStart") {
         PushObjectIngester::ObjectPushEvent &obj_push_event = dynamic_cast<PushObjectIngester::ObjectPushEvent&>(event);
         const PushObjectIngester::Request &request(obj_push_event.request());
@@ -120,7 +131,7 @@ std::string ObjectListController::generateUUID() {
     return std::string(uuid_str);
 }
 
-void ObjectListController::initPullObjectIngester()
+void ObjectListController::initPullObjectIngesters()
 {
     std::optional<std::string> object_ingest_base_url = distributionSession().getObjectIngestBaseUrl();
     std::optional<std::string> object_distribution_base_url = distributionSession().objectDistributionBaseUrl();
@@ -164,23 +175,40 @@ void ObjectListController::initPushObjectIngester()
 
     distributionSession().setObjectIngestBaseUrl(pushIngester->getIngestServerPrefix());
     subscribeTo({"ObjectPushStart"}, *pushIngester);
-    setPushIngester(pushIngester);
-}
-
-void ObjectListController::initObjectIngester()
-{
-    if (distributionSession().getObjectAcquisitionMethod() == "PULL") {
-        initPullObjectIngester();
-    } else if (distributionSession().getObjectAcquisitionMethod() == "PUSH") {
-        initPushObjectIngester();
-    } else {
-        ogs_error("Invalid Acq. method");
-    }
+    pushObjectIngester(pushIngester);
 }
 
 std::string ObjectListController::nextObjectId()
 {
     return generateUUID();
+}
+
+void ObjectListController::reconfigurePushObjectIngester()
+{
+    auto &push_obj_ingester = pushObjectIngester();
+    if (push_obj_ingester) {
+        if (distributionSession().getObjectAcquisitionMethod() == "PUSH") {
+            /* update settings for PushObjectIngester (preserves the push HTTP server) */
+        } else {
+            /* remove push_obj_ingester */
+            pushObjectIngester(nullptr);
+        }
+    } else if (distributionSession().getObjectAcquisitionMethod() == "PUSH") {
+        initPushObjectIngester();
+    }
+}
+
+void ObjectListController::reconfigurePullObjectIngesters()
+{
+    removeAllPullObjectIngesters();
+    if (distributionSession().getObjectAcquisitionMethod() == "PULL") {
+        initPullObjectIngesters();
+    }
+}
+
+void ObjectListController::reconfigureObjectPackager()
+{
+    setObjectPackager();
 }
 
 namespace {

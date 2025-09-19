@@ -25,6 +25,7 @@
 
 #include <chrono>
 #include <memory>
+#include "openapi/model/DistSessionState.h"
 #include "openapi/model/ObjDistributionData.h"
 #include "common.hh"
 #include "BitRate.hh"
@@ -37,7 +38,6 @@ namespace fiveg_mag_reftools {
 namespace reftools::mbstf {
     class CreateReqData;
     class ObjDistributionData;
-    class DistSessionState;
 }
 
 MBSTF_NAMESPACE_START
@@ -50,7 +50,7 @@ public:
     using SysTimeMS = std::chrono::system_clock::time_point;
 
     DistributionSession(fiveg_mag_reftools::CJson &json, bool as_request);
-    DistributionSession(const std::shared_ptr<reftools::mbstf::CreateReqData> &create_req_data);
+    //DistributionSession(const std::shared_ptr<reftools::mbstf::CreateReqData> &create_req_data);
     DistributionSession() = delete;
     DistributionSession(DistributionSession &&other) = delete;
     DistributionSession(const DistributionSession &other) = delete;
@@ -64,6 +64,7 @@ public:
     static const std::shared_ptr<DistributionSession> &find(const std::string &id); // throws std::out_of_range if id does not exist
     const std::string &distributionSessionId() const { return m_distributionSessionId; };
     const std::shared_ptr<reftools::mbstf::CreateReqData> &distributionSessionReqData() const {return m_createReqData;};
+    DistributionSession &distributionSessionReqData(const std::shared_ptr<reftools::mbstf::CreateReqData> &req_data);
     const SysTimeMS &generated() const {return m_generated;};
     const std::string &hash() const {return m_hash;};
     void setController(std::shared_ptr<Controller> controller) {m_controller = controller;};
@@ -71,6 +72,7 @@ public:
     static bool processEvent(Open5GSEvent &event);
 
     const reftools::mbstf::DistSessionState &getState() const;
+    DistributionSession &setState(const reftools::mbstf::DistSessionState &state);
     const reftools::mbstf::ObjDistributionData::ObjAcquisitionIdsPullType &getObjectAcquisitionPullUrls() const;
     const std::string &getObjectDistributionOperatingMode() const;
     const std::optional<std::string> &getDestIpAddr() const;
@@ -90,6 +92,53 @@ public:
     // virtual void processEvent(Event &event, SubscriptionService &event_service);
 
 private:
+    class InitStateAction;
+    class StateTransitionAction;
+
+    class Action {
+    public:
+        typedef enum {
+            INIT_STATE,
+            STATE_TRANSITION
+        } ActionType;
+
+        Action(ActionType typ): m_type(typ) {};
+        virtual ~Action() {};
+
+        ActionType getType() const { return m_type; };
+
+        static InitStateAction initState();
+        static StateTransitionAction stateTransition(reftools::mbstf::DistSessionState::Enum new_state);
+    protected:
+        ActionType m_type;
+    };
+
+    class InitStateAction : public Action {
+    public:
+        InitStateAction() :Action(Action::INIT_STATE) {};
+    };
+
+    class StateTransitionAction : public Action {
+    public:
+        StateTransitionAction(reftools::mbstf::DistSessionState::Enum new_state) :Action(Action::STATE_TRANSITION), m_newState(new_state) {};
+        virtual ~StateTransitionAction() {};
+
+        reftools::mbstf::DistSessionState::Enum newState() const { return m_newState; };
+
+    private:
+        reftools::mbstf::DistSessionState::Enum m_newState;
+    };
+
+    void _transitionTo(reftools::mbstf::DistSessionState::Enum new_state);
+    void _changeState(void (DistributionSession::*f)(const DistributionSession::Action &action));
+    void _constructedState(const Action &action);
+    void _inactiveState(const Action &action);
+    void _establishedState(const Action &action);
+    void _activeState(const Action &action);
+    void _deactivatingState(const Action &action);
+    void _setLastUsed();
+    void _setHash();
+
     std::shared_ptr<reftools::mbstf::CreateReqData> m_createReqData;
     SysTimeMS m_generated;
     SysTimeMS m_lastUsed;
@@ -98,6 +147,7 @@ private:
     std::shared_ptr<Controller> m_controller;
     // MBSTF event notification (TODO)
     //std::list<DistributionSessionSubscription> m_eventSubscriptions;
+    std::function<void(const Action&)> m_currentStateFunction;
 };
 
 MBSTF_NAMESPACE_STOP

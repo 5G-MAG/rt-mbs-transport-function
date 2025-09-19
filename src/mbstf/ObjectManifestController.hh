@@ -63,11 +63,13 @@ public:
     std::string &getManifestUrl();
     void manifestUrl();
 
+    virtual void reconfigurePushObjectIngester();
+    virtual void reconfigurePullObjectIngesters();
+
 protected:
     void startWorker();
-    void initObjectIngester();
-    void initPullObjectIngester();
-    void initPushObjectIngester();
+    virtual void initPullObjectIngesters();
+    virtual void initPushObjectIngester();
 
     ObjectManifestController &manifestHandler(std::unique_ptr<ManifestHandler> manifest_handler) {
         std::lock_guard guard(m_manifestHandlerMutex);

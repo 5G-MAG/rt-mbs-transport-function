@@ -41,13 +41,7 @@ public:
     ObjectListController &operator=(const ObjectListController &) = delete;
     ObjectListController &operator=(ObjectListController &&) = delete;
 
-    void initObjectIngester();
-    void initPullObjectIngester();
-    void initPushObjectIngester();
-
-
     void fetchItems();
-    std::shared_ptr<ObjectListPackager> setObjectListPackager();
     std::shared_ptr<ObjectListPackager> getObjectListPackager() const;
 
     // Subscriber virtual methods
@@ -60,9 +54,22 @@ public:
     }
     virtual std::string nextObjectId();
 
+    virtual void reconfigurePushObjectIngester();
+    virtual void reconfigurePullObjectIngesters();
+    virtual void reconfigureObjectPackager();
+
     static unsigned int factoryPriority() { return 100; };
 
+protected:
+
+    virtual void initPushObjectIngester();
+    virtual void initPullObjectIngesters();
+    virtual void setObjectPackager();
+    virtual void unsetObjectPackager();
+
 private:
+    void sendToPackager(const std::string &objectId);
+
     std::string generateUUID();
 };
 

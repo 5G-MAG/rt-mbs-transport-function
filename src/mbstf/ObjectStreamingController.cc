@@ -47,9 +47,8 @@ ObjectStreamingController::ObjectStreamingController(DistributionSession &distri
 {
     validate_distribution_session(distributionSession);
     subscribeToService(objectStore());
-    setObjectListPackager();
-    subscribeToService(*getObjectListPackager());
-    startWorker();
+    //setObjectListPackager();
+    //startWorker();
 }
 
 ObjectStreamingController::~ObjectStreamingController()
@@ -57,7 +56,7 @@ ObjectStreamingController::~ObjectStreamingController()
     abort();
 }
 
-std::shared_ptr<ObjectListPackager> ObjectStreamingController::setObjectListPackager()
+void ObjectStreamingController::setObjectPackager()
 {
     const std::optional<std::string> &dest_ip_addr = distributionSession().getDestIpAddr();
     const std::optional<std::string> &tunnel_addr = distributionSession().getTunnelAddr();
@@ -66,8 +65,19 @@ std::shared_ptr<ObjectListPackager> ObjectStreamingController::setObjectListPack
     in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
     //TODO: get the MTU for the dest_ip_addr
     unsigned short mtu = 1490; // 1500 - GTP overhead; need to bodge this so that there's enough room in downstream gNodeB packets
-    setPackager(new ObjectListPackager(objectStore(), *this, dest_ip_addr, rate_limit, mtu, port, tunnel_addr, tunnel_port));
-    return getObjectListPackager();
+    packager(new ObjectListPackager(objectStore(), *this, dest_ip_addr, rate_limit, mtu, port, tunnel_addr, tunnel_port));
+    auto pkgr = getObjectListPackager();
+    subscribeToService(*pkgr);
+    startWorker();
+    const auto &obj_list = objectStore().getObjects();
+    for (const auto &[obj_id, object] : obj_list) {
+        sendToPackager(obj_id);
+    }
+}
+
+void ObjectStreamingController::unsetObjectPackager()
+{
+    packager(nullptr);
 }
 
 std::shared_ptr<ObjectListPackager> ObjectStreamingController::getObjectListPackager() const
@@ -92,13 +102,7 @@ void ObjectStreamingController::processEvent(Event &event, SubscriptionService &
 			return;
 		    }
 		    startWorker();
-
-                    if (!packager()) {
-                        setObjectListPackager();
-                    }
-
-		    ObjectListPackager::PackageItem item(objectId);
-		    getObjectListPackager()->add(item);
+                    sendToPackager(objectId);
 	        } catch (std::exception &ex) {
                     ogs_error("Invalid Manifest update: %s", ex.what());
 		    unsetObjectListPackager();
@@ -109,27 +113,31 @@ void ObjectStreamingController::processEvent(Event &event, SubscriptionService &
 	    } else {
 		std::unique_ptr<ManifestHandler> manifest_handler(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL"));
                 manifestHandler(std::move(manifest_handler));
-                if (!packager()) {
-                    setObjectListPackager();
-                }
-
-		ObjectListPackager::PackageItem item(objectId);
-		getObjectListPackager()->add(item);
+                sendToPackager(objectId);
             }
 	} else {
-            if (!packager()) {
-                setObjectListPackager();
-            }
-
-	    ObjectListPackager::PackageItem item(objectId);
-            getObjectListPackager()->add(item);
+            sendToPackager(objectId);
         }
     }
     ObjectManifestController::processEvent(event, event_service);
 }
 
+void ObjectStreamingController::sendToPackager(const std::string &objectId)
+{
+    auto packager = getObjectListPackager();
+    if (packager) {
+        ObjectListPackager::PackageItem item(objectId);
+        packager->add(item);
+    }
+}
+
 const std::optional<std::string> &ObjectStreamingController::getObjectDistributionBaseUrl() const {
     return distributionSession().objectDistributionBaseUrl();
+}
+
+void ObjectStreamingController::reconfigureObjectPackager()
+{
+    setObjectPackager();
 }
 
 namespace {

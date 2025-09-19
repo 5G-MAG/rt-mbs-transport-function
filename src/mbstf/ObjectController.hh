@@ -52,7 +52,7 @@ public:
     const ObjectStore &objectStore() const { return m_objectStore; };
     ObjectStore &objectStore() { return m_objectStore; };
 
-    std::list<std::shared_ptr<PullObjectIngester>> &getPullObjectIngesters() {return m_pullIngesters;};
+    const std::list<std::shared_ptr<PullObjectIngester>> &getPullObjectIngesters() const {return m_pullIngesters;};
 
     virtual void processEvent(Event &event, SubscriptionService &event_service);
 
@@ -60,12 +60,34 @@ public:
 
     const std::optional<std::string> &getObjectDistributionBaseUrl() const;
 
+    virtual void reconfigure() {
+        this->reconfigurePushObjectIngester();
+        this->reconfigurePullObjectIngesters();
+        this->reconfigureObjectPackager();
+    };
+    virtual void reconfigurePushObjectIngester() =0;
+    virtual void reconfigurePullObjectIngesters() = 0;
+    virtual void reconfigureObjectPackager() = 0;
+
+    virtual void establishInactiveInputs(); /* Inactive state for DistSession */
+    virtual void establishActiveInputs();   /* Established state for DistSession */
+    virtual void activateOutput();          /* Active state for DistSession */
+    virtual void deactivateOutput();        /* Deactivating state for DistSession */
+
 protected:
     const std::shared_ptr<PullObjectIngester> &addPullObjectIngester(PullObjectIngester*);
     bool removePullObjectIngester(std::shared_ptr<PullObjectIngester> &);
-    const std::shared_ptr<PushObjectIngester> &setPushIngester(PushObjectIngester* pushIngester);
+    bool removeAllPullObjectIngesters();
+    const std::shared_ptr<PushObjectIngester> &pushObjectIngester() const { return m_pushIngester; };
+    const std::shared_ptr<PushObjectIngester> &pushObjectIngester(PushObjectIngester* pushIngester);
+    bool removePushObjectIngester();
     const std::shared_ptr<ObjectPackager> &packager() const { return m_packager; };
-    const std::shared_ptr<ObjectPackager> &setPackager(ObjectPackager*);
+    const std::shared_ptr<ObjectPackager> &packager(ObjectPackager*);
+
+    virtual void initPushObjectIngester() = 0;
+    virtual void initPullObjectIngesters() = 0;
+    virtual void setObjectPackager() = 0;
+    virtual void unsetObjectPackager() = 0;
 
 private:
     ObjectStore m_objectStore;

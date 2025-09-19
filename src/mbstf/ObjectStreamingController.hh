@@ -41,7 +41,6 @@ public:
     ObjectStreamingController &operator=(const ObjectStreamingController&) = delete;
     ObjectStreamingController &operator=(ObjectStreamingController&&) = delete;
 
-    std::shared_ptr<ObjectListPackager> setObjectListPackager();
     std::shared_ptr<ObjectListPackager> getObjectListPackager() const;
     const std::optional<std::string> &getObjectDistributionBaseUrl() const;
     //virtual std::string nextObjectId();
@@ -60,11 +59,17 @@ public:
 
     void unsetObjectListPackager() {
         // Reset the shared pointer to release ownership.
-        setPackager(nullptr);
+        packager(nullptr);
     };
 
+    virtual void reconfigureObjectPackager();
+
+protected:
+    virtual void setObjectPackager();
+    virtual void unsetObjectPackager();
 
 private:
+    void sendToPackager(const std::string &object_id);
     //std::string generateUUID();
     //std::shared_ptr<ObjectListPackager> m_objectListPackager;
 //    std::thread m_ingestSchedulingThread;

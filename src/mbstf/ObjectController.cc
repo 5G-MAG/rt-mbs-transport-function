@@ -25,13 +25,15 @@
 
 MBSTF_NAMESPACE_START
 
-const std::shared_ptr<PullObjectIngester> &ObjectController::addPullObjectIngester(PullObjectIngester *ingester) {
+const std::shared_ptr<PullObjectIngester> &ObjectController::addPullObjectIngester(PullObjectIngester *ingester)
+{
     // Transfer ownership from unique_ptr to shared_ptr
     m_pullIngesters.emplace_back(ingester);
     return m_pullIngesters.back();
 }
 
-bool ObjectController::removePullObjectIngester(std::shared_ptr<PullObjectIngester> &pullIngester) {
+bool ObjectController::removePullObjectIngester(std::shared_ptr<PullObjectIngester> &pullIngester)
+{
     auto it = std::find(m_pullIngesters.begin(), m_pullIngesters.end(), pullIngester);
     if (it != m_pullIngesters.end()) {
         m_pullIngesters.erase(it);
@@ -40,12 +42,20 @@ bool ObjectController::removePullObjectIngester(std::shared_ptr<PullObjectIngest
     return false;
 }
 
-const std::shared_ptr<PushObjectIngester> &ObjectController::setPushIngester(PushObjectIngester *pushIngester) {
+bool ObjectController::removeAllPullObjectIngesters()
+{
+    m_pullIngesters.clear();
+    return true;
+}
+
+const std::shared_ptr<PushObjectIngester> &ObjectController::pushObjectIngester(PushObjectIngester *pushIngester)
+{
     m_pushIngester.reset(pushIngester);
     return m_pushIngester;
 }
 
-void ObjectController::processEvent(Event &event, SubscriptionService &event_service) {
+void ObjectController::processEvent(Event &event, SubscriptionService &event_service)
+{
     if (event.eventName() == "ObjectSendCompleted") {
 	ObjectPackager::ObjectSendCompleted &objSendEvent = dynamic_cast<ObjectPackager::ObjectSendCompleted&>(event);
         std::string object_id = objSendEvent.objectId();
@@ -71,7 +81,7 @@ std::string ObjectController::nextObjectId()
     return oss.str();
 }
 
-const std::shared_ptr<ObjectPackager> &ObjectController::setPackager(ObjectPackager *packager)
+const std::shared_ptr<ObjectPackager> &ObjectController::packager(ObjectPackager *packager)
 {
     m_packager.reset(packager);
     return m_packager;
@@ -79,6 +89,28 @@ const std::shared_ptr<ObjectPackager> &ObjectController::setPackager(ObjectPacka
 
 const std::optional<std::string> &ObjectController::getObjectDistributionBaseUrl() const {
     return distributionSession().objectDistributionBaseUrl();
+}
+
+void ObjectController::establishInactiveInputs()
+{
+    m_pullIngesters.clear();
+    m_packager.reset();
+    if (distributionSession().getObjectAcquisitionMethod() == "PUSH" && !m_pushIngester) initPushObjectIngester();
+}
+
+void ObjectController::establishActiveInputs()
+{
+    if (distributionSession().getObjectAcquisitionMethod() == "PULL") initPullObjectIngesters();
+}
+
+void ObjectController::activateOutput()
+{
+    if (!m_packager) setObjectPackager();
+}
+
+void ObjectController::deactivateOutput()
+{
+    if (m_packager) unsetObjectPackager();
 }
 
 MBSTF_NAMESPACE_STOP
