@@ -242,8 +242,8 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                                                      "Error while populating MBSTF Distribution Session");
                                     return true;
                                 } catch (std::exception &err) {
-                                    ogs_error("Error while populating MBSTF Distribution Session: %s", err.what());
-                                    char *error = ogs_msprintf("Bad request: %s", err.what());
+                                    char *error = ogs_msprintf("Error while populating MBSTF Distribution Session: %s", err.what());
+                                    ogs_error("%s", error);
                                     ogs_assert(true == NfServer::sendError(stream, ProblemCause::INVALID_MSG_FORMAT, 1, message,
                                                                            app_meta, api, "Bad Request", error));
                                     ogs_free(error);
