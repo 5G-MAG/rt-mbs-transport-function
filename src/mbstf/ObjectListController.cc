@@ -34,8 +34,11 @@
 #include "PushObjectIngester.hh"
 #include "SubscriptionService.hh"
 #include "utilities.hh"
+#include "openapi/model/DistSessionState.h"
 
 #include "ObjectListController.hh"
+
+using reftools::mbstf::DistSessionState;
 
 MBSTF_NAMESPACE_START
 
@@ -187,13 +190,12 @@ void ObjectListController::reconfigurePushObjectIngester()
 {
     auto &push_obj_ingester = pushObjectIngester();
     if (push_obj_ingester) {
-        if (distributionSession().getObjectAcquisitionMethod() == "PUSH") {
-            /* update settings for PushObjectIngester (preserves the push HTTP server) */
-        } else {
+        if (distributionSession().getObjectAcquisitionMethod() != "PUSH") {
             /* remove push_obj_ingester */
             pushObjectIngester(nullptr);
-        }
+        } /* else the existing PushObjectIngester will just pick up the changes from the DistSession object */
     } else if (distributionSession().getObjectAcquisitionMethod() == "PUSH") {
+        /* change from PULL to PUSH, so create PushObjectIngester */
         initPushObjectIngester();
     }
 }
@@ -201,14 +203,19 @@ void ObjectListController::reconfigurePushObjectIngester()
 void ObjectListController::reconfigurePullObjectIngesters()
 {
     removeAllPullObjectIngesters();
-    if (distributionSession().getObjectAcquisitionMethod() == "PULL") {
+    /* create the ingesters if DistSession is not INACTIVE */
+    if (distributionSession().getObjectAcquisitionMethod() == "PULL" &&
+        distributionSession().getState() != DistSessionState::VAL_INACTIVE) {
         initPullObjectIngesters();
     }
 }
 
 void ObjectListController::reconfigureObjectPackager()
 {
-    setObjectPackager();
+    /* only set the packager in the ACTIVE state */
+    if (distributionSession().getState() == DistSessionState::VAL_ACTIVE) {
+        setObjectPackager();
+    }
 }
 
 namespace {

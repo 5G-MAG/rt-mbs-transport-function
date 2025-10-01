@@ -30,9 +30,11 @@
 #include "PushObjectIngester.hh"
 #include "SubscriptionService.hh"
 #include "utilities.hh"
+#include "openapi/model/DistSessionState.h"
 
 #include "ObjectManifestController.hh"
 
+using reftools::mbstf::DistSessionState;
 
 MBSTF_NAMESPACE_START
 
@@ -248,13 +250,12 @@ void ObjectManifestController::reconfigurePushObjectIngester()
 {
     auto &push_obj_ingester = pushObjectIngester();
     if (push_obj_ingester) {
-        if (distributionSession().getObjectAcquisitionMethod() == "PUSH") {
-            /* update settings for PushObjectIngester (preserves the push HTTP server) */
-        } else {
-            /* remove push_obj_ingester */
+        if (distributionSession().getObjectAcquisitionMethod() != "PUSH") {
+            /* remove push_obj_ingester on change from PUSH to PULL mode */
             pushObjectIngester(nullptr);
         }
     } else if (distributionSession().getObjectAcquisitionMethod() == "PUSH") {
+        /* Add a push ingester on change from PULL to PUSH mode */
         initPushObjectIngester();
     }
 }
@@ -262,7 +263,8 @@ void ObjectManifestController::reconfigurePushObjectIngester()
 void ObjectManifestController::reconfigurePullObjectIngesters()
 {
     removeAllPullObjectIngesters();
-    if (distributionSession().getObjectAcquisitionMethod() == "PULL") {
+    if (distributionSession().getObjectAcquisitionMethod() == "PULL" &&
+        distributionSession().getState() != DistSessionState::VAL_INACTIVE) {
         initPullObjectIngesters();
     }
 }

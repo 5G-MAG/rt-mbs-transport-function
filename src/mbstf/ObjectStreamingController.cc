@@ -34,8 +34,11 @@
 #include "PushObjectIngester.hh"
 #include "SubscriptionService.hh"
 #include "ObjectListPackager.hh"
+#include "openapi/model/DistSessionState.h"
 
 #include "ObjectStreamingController.hh"
+
+using reftools::mbstf::DistSessionState;
 
 MBSTF_NAMESPACE_START
 
@@ -137,7 +140,9 @@ const std::optional<std::string> &ObjectStreamingController::getObjectDistributi
 
 void ObjectStreamingController::reconfigureObjectPackager()
 {
-    setObjectPackager();
+    if (distributionSession().getState() == DistSessionState::VAL_ACTIVE) {
+        setObjectPackager();
+    }
 }
 
 namespace {
