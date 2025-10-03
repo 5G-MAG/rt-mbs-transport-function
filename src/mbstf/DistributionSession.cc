@@ -776,44 +776,24 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
         ex.addInvalidParameter("distSession.objDistributionData.objDistributionOperatingMode",
                                 "Cannot change objDistributionOperatingMode");
     }
-    auto old_up_traffic_flow_info = old_dist_session->getUpTrafficFlowInfo();
-    auto new_up_traffic_flow_info = new_dist_session->getUpTrafficFlowInfo();
-    bool up_traffic_flow_info_changed = false;
-    if (!!old_up_traffic_flow_info != !!new_up_traffic_flow_info) {
-        up_traffic_flow_info_changed = true;
-    } else if (old_up_traffic_flow_info && *old_up_traffic_flow_info.value() != *new_up_traffic_flow_info.value()) {
-        up_traffic_flow_info_changed = true;
-    }
-    if (new_dist_session->getMbr() != old_dist_session->getMbr() && !up_traffic_flow_info_changed) {
-        ex.addInvalidParameter("distSession.mbr", "mbr cannot be changed without an accompanying change to upTrafficFlowInfo "
-                                        "due to implementation restrictions");
-    }
-    auto old_mb_upf_tun_addr = old_dist_session->getMbUpfTunAddr();
-    auto new_mb_upf_tun_addr = new_dist_session->getMbUpfTunAddr();
-    bool mb_upf_tun_addr_changed = false;
-    if (!!old_mb_upf_tun_addr  != !!new_mb_upf_tun_addr) {
-        mb_upf_tun_addr_changed = true;
-    } else if (old_mb_upf_tun_addr && *old_mb_upf_tun_addr.value() != *new_mb_upf_tun_addr.value()) {
-        mb_upf_tun_addr_changed = true;
-    }
-    if (mb_upf_tun_addr_changed && !up_traffic_flow_info_changed) {
-        ex.addInvalidParameter("distSession.mbUpfTunAddr", "mbUpfTunAddr cannot be changed without an accompanying change to "
-                                        "upTrafficFlowInfo due to implementation restrictions");
-    }
 
+    /* If errors then report them */
     if (!ex.invalidParams.empty()) {
         throw ex;
     }
 
+    /* New CreateReqData is valid, replace old one */
     m_createReqData = new_create_req_data;
 
+    /* Reconfigure the controller using the new CreateReqData */
     if (m_controller) {
         m_controller->reconfigure();
     }
 
-
+    /* Make sure we are in the right state */
     _transitionTo(new_dist_session->getDistSessionState()->getValue());
 
+    /* Update the last-used and hash values to reflect the new CreateReqData */
     _setLastUsed();
     _setHash();
 

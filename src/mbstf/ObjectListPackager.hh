@@ -74,6 +74,10 @@ public:
     bool add(const PackageItem &item);
     bool add(PackageItem &&item);
 
+    bool updateFluteInfo(const std::string &address, in_port_t port,
+                         uint32_t rateLimit,
+                         const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
+
 protected:
     virtual void doObjectPackage();
 

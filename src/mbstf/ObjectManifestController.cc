@@ -132,9 +132,12 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
     while (!controller->m_scheduledPullCancel) {
 
         std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> next_ingest_items;
+        ManifestHandler::durn_type default_deadline;
         // Get the next ingest items
 	try {
+            std::lock_guard<std::recursive_mutex> lock(controller->m_manifestHandlerMutex);
             next_ingest_items = controller->manifestHandler()->nextIngestItems();
+            default_deadline = controller->manifestHandler()->getDefaultDeadline();
 	} catch ( std::domain_error &err) {
 	    ogs_error("Next Ingest Item: %s", err.what());
 	}
@@ -145,9 +148,12 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
 
 	std::list<PullObjectIngester::IngestItem> urls;
 
-        auto &ingesters = controller->getPullObjectIngesters();
-	while (ingesters.size() < next_ingest_items.second.size()) {
-	    controller->addPullObjectIngester(new PullObjectIngester(controller->objectStore(), *controller, urls));
+        {
+            std::lock_guard<std::recursive_mutex> lock(controller->m_pullObjectIngestersMutex);
+            auto &ingesters = controller->getPullObjectIngesters();
+            while (ingesters.size() < next_ingest_items.second.size()) {
+	        controller->addPullObjectIngester(new PullObjectIngester(controller->objectStore(), *controller, urls));
+            }
 	}
 
         // Wait until the fetch_time
@@ -158,15 +164,19 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
 	}
 	std::this_thread::sleep_until(fetch_time);
 
-        // Add the URLs to the PullObjectIngester instances
-        for (auto ingester_it = ingesters.begin(); ingester_it!= ingesters.end(); ++ingester_it) {
-            if (next_ingest_items.second.empty()) break;
-            auto ingest_item = next_ingest_items.second.front();
-            next_ingest_items.second.pop_front();  // remove the item
-	    //ingest_item.deadline(std::nullopt);
-            ingest_item.deadline(std::chrono::system_clock::now() + controller->manifestHandler()->getDefaultDeadline());
-            if (!(*ingester_it)->fetch(ingest_item)) {
-                ogs_debug("Failed to fetch item: %s", ingest_item.url().c_str());
+        {
+            std::lock_guard<std::recursive_mutex> lock(controller->m_pullObjectIngestersMutex);
+            // Add the URLs to the PullObjectIngester instances
+            auto &ingesters = controller->getPullObjectIngesters();
+            for (auto ingester_it = ingesters.begin(); ingester_it!= ingesters.end(); ++ingester_it) {
+                if (next_ingest_items.second.empty()) break;
+                auto ingest_item = next_ingest_items.second.front();
+                next_ingest_items.second.pop_front();  // remove the item
+	        //ingest_item.deadline(std::nullopt);
+                ingest_item.deadline(std::chrono::system_clock::now() + default_deadline);
+                if (!(*ingester_it)->fetch(ingest_item)) {
+                    ogs_debug("Failed to fetch item: %s", ingest_item.url().c_str());
+                }
             }
 	}
     }
@@ -262,6 +272,7 @@ void ObjectManifestController::reconfigurePushObjectIngester()
 
 void ObjectManifestController::reconfigurePullObjectIngesters()
 {
+    std::lock_guard<std::recursive_mutex> lock(this->m_pullObjectIngestersMutex);
     removeAllPullObjectIngesters();
     if (distributionSession().getObjectAcquisitionMethod() == "PULL" &&
         distributionSession().getState() != DistSessionState::VAL_INACTIVE) {

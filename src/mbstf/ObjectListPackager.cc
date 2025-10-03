@@ -121,6 +121,38 @@ bool ObjectListPackager::add(PackageItem &&item) {
     return true;
 }
 
+bool ObjectListPackager::updateFluteInfo(const std::string &address, in_port_t port,
+                                         uint32_t rateLimit,
+                                         const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
+{
+    /* Do nothing if we don't have a Transmitter */
+    if (!m_transmitter) return false;
+
+    /* set destination endpoint address if it has changed */
+    boost::asio::ip::udp::endpoint dest_addr(boost::asio::ip::make_address(address), port);
+    if (dest_addr != m_transmitter->endpoint()) {
+        m_transmitter->endpoint(dest_addr);
+    }
+
+    /* set new MBR if it has changed */
+    if (rateLimit != m_transmitter->rate_limit()) {
+        m_transmitter->rate_limit(rateLimit);
+    }
+
+    /* set new tunnel address if it has changed */
+    auto curr_tun_addr = m_transmitter->udp_tunnel_address();
+    if (tunnel_address) {
+        m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::make_address(tunnel_address.value()), tunnel_port);
+    } else {
+        m_tunnelEndpoint = std::nullopt;
+    }
+    if (curr_tun_addr != m_tunnelEndpoint) {
+        m_transmitter->udp_tunnel_address(m_tunnelEndpoint);
+    }
+
+    return true;
+}
+
 void ObjectListPackager::doObjectPackage() {
     try {
         std::optional<std::string> destAddr = destIpAddr();

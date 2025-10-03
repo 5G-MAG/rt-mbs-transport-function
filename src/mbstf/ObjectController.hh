@@ -13,6 +13,7 @@
  */
 
 #include <memory>
+#include <mutex>
 #include <list>
 
 #include "common.hh"
@@ -88,6 +89,8 @@ protected:
     virtual void initPullObjectIngesters() = 0;
     virtual void setObjectPackager() = 0;
     virtual void unsetObjectPackager() = 0;
+
+    std::recursive_mutex m_pullObjectIngestersMutex;
 
 private:
     ObjectStore m_objectStore;

@@ -141,7 +141,18 @@ const std::optional<std::string> &ObjectStreamingController::getObjectDistributi
 void ObjectStreamingController::reconfigureObjectPackager()
 {
     if (distributionSession().getState() == DistSessionState::VAL_ACTIVE) {
-        setObjectPackager();
+        auto packager = getObjectListPackager();
+        if (packager) {
+            const std::optional<std::string> &dest_ip_addr = distributionSession().getDestIpAddr();
+            const std::optional<std::string> &tunnel_addr = distributionSession().getTunnelAddr();
+            uint32_t mbr = distributionSession().getRateLimit();
+            in_port_t port = distributionSession().getPortNumber();
+            in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
+
+            if (dest_ip_addr) {
+                packager->updateFluteInfo(dest_ip_addr.value(), port, mbr, tunnel_addr, tunnel_port);
+            }
+        }
     }
 }
 

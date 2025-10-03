@@ -27,6 +27,7 @@ MBSTF_NAMESPACE_START
 
 const std::shared_ptr<PullObjectIngester> &ObjectController::addPullObjectIngester(PullObjectIngester *ingester)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_pullObjectIngestersMutex);
     // Transfer ownership from unique_ptr to shared_ptr
     m_pullIngesters.emplace_back(ingester);
     return m_pullIngesters.back();
@@ -34,6 +35,7 @@ const std::shared_ptr<PullObjectIngester> &ObjectController::addPullObjectIngest
 
 bool ObjectController::removePullObjectIngester(std::shared_ptr<PullObjectIngester> &pullIngester)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_pullObjectIngestersMutex);
     auto it = std::find(m_pullIngesters.begin(), m_pullIngesters.end(), pullIngester);
     if (it != m_pullIngesters.end()) {
         m_pullIngesters.erase(it);
@@ -44,6 +46,7 @@ bool ObjectController::removePullObjectIngester(std::shared_ptr<PullObjectIngest
 
 bool ObjectController::removeAllPullObjectIngesters()
 {
+    std::lock_guard<std::recursive_mutex> lock(m_pullObjectIngestersMutex);
     m_pullIngesters.clear();
     return true;
 }
