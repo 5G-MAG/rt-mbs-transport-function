@@ -67,7 +67,7 @@ void ObjectStreamingController::setObjectPackager()
     in_port_t port = distributionSession().getPortNumber();
     in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
     //TODO: get the MTU for the dest_ip_addr
-    unsigned short mtu = 1490; // 1500 - GTP overhead; need to bodge this so that there's enough room in downstream gNodeB packets
+    unsigned short mtu = 1498; // 1500 - GTP overhead; need to bodge this so that there's enough room in downstream gNodeB packets
     packager(new ObjectListPackager(objectStore(), *this, dest_ip_addr, rate_limit, mtu, port, tunnel_addr, tunnel_port));
     auto pkgr = getObjectListPackager();
     subscribeToService(*pkgr);
