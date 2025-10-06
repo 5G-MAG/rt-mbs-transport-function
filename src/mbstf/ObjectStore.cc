@@ -298,6 +298,15 @@ const ObjectStore::Metadata *ObjectStore::findMetadataByURL(const std::string &u
     return nullptr;
 }
 
+void ObjectStore::reconfigureMetadatas(const std::optional<std::string> &ingest_base_url,
+                                       const std::optional<std::string> &distribution_base_url)
+{
+    for (auto &[obj_id, obj] : m_store) {
+        obj.second.objIngestBaseUrl(ingest_base_url);
+        obj.second.objDistributionBaseUrl(distribution_base_url);
+    }
+}
+
 MBSTF_NAMESPACE_STOP
 
 /* vim:ts=8:sts=4:sw=4:expandtab:

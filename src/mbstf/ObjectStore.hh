@@ -224,6 +224,8 @@ public:
 
     const ObjectController &objectController() const { return m_controller; };
 
+    void reconfigureMetadatas(const std::optional<std::string> &ingest_base_url,
+                              const std::optional<std::string> &distribution_base_url);
 private:
     void checkExpiredObjects();
     mutable std::recursive_mutex m_mutex;

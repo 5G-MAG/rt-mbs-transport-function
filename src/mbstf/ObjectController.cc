@@ -94,6 +94,12 @@ const std::optional<std::string> &ObjectController::getObjectDistributionBaseUrl
     return distributionSession().objectDistributionBaseUrl();
 }
 
+void ObjectController::reconfigureObjectStore()
+{
+    auto &dist_session = distributionSession();
+    m_objectStore.reconfigureMetadatas(dist_session.getObjectIngestBaseUrl(), dist_session.objectDistributionBaseUrl());
+}
+
 void ObjectController::establishInactiveInputs()
 {
     m_pullIngesters.clear();

@@ -62,11 +62,13 @@ public:
     const std::optional<std::string> &getObjectDistributionBaseUrl() const;
 
     virtual void reconfigure() {
+        this->reconfigureObjectStore();
         this->reconfigurePushObjectIngester();
         this->reconfigurePullObjectIngesters();
         this->reconfigureObjectPackager();
     };
-    virtual void reconfigurePushObjectIngester() =0;
+    virtual void reconfigureObjectStore();
+    virtual void reconfigurePushObjectIngester() = 0;
     virtual void reconfigurePullObjectIngesters() = 0;
     virtual void reconfigureObjectPackager() = 0;
 
