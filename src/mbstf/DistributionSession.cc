@@ -885,13 +885,7 @@ void DistributionSession::_establishedState(const DistributionSession::Action &a
     case Action::INIT_STATE:
         ogs_debug("DistributionSession(%p) entering ESTABLISHED state", this);
         m_controller->establishActiveInputs();
-        if (getState().getValue() == DistSessionState::VAL_ESTABLISHED) {
-            DistSessionState next_state;
-            next_state = DistSessionState::VAL_ACTIVE;
-            setState(next_state);
-        } else {
-            _changeState(&DistributionSession::_activeState);
-        }
+        if (getState().getValue() != DistSessionState::VAL_ESTABLISHED) _changeState(&DistributionSession::_activeState);
         break;
     case Action::STATE_TRANSITION:
         {
