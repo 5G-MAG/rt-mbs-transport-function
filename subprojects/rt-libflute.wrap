@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/5G-MAG/rt-libflute.git
-revision = development
+revision = rt-libflute-0.11.0
 method = cmake
 
 #diff_files = rt-libflute/IpSec-xfrm_algo.patch
