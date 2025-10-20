@@ -115,21 +115,37 @@ std::string ObjectManifestController::generateUUID()
 
 void ObjectManifestController::workerLoop(ObjectManifestController *controller)
 {
+    /* Don't process if the session is inactive or deactivating */
+    {
+        const auto &session_state = controller->distributionSession().getState();
+        if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) return;
+    }
 
+    /* wait for a ManifestHandler to be created */
     while (true) {
         {
             std::lock_guard<std::recursive_mutex> lock(controller->m_manifestHandlerMutex);
-            if ( controller->m_scheduledPullCancel || controller->m_manifestHandler != nullptr) {
+            if (controller->m_scheduledPullCancel || controller->m_manifestHandler != nullptr) {
                 break;
             }
+            const auto &session_state = controller->distributionSession().getState();
+            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) return;
         }
         // Avoid a tight busy-loop: yield or sleep for a short time.
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
     if (controller->m_scheduledPullCancel) return;
+    {
+        const auto &session_state = controller->distributionSession().getState();
+        if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) return;
+    }
 
     while (!controller->m_scheduledPullCancel) {
+        {
+            const auto &session_state = controller->distributionSession().getState();
+            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) return;
+        }
 
         std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> next_ingest_items;
         ManifestHandler::durn_type default_deadline;
@@ -163,6 +179,10 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
 	    ogs_debug("Sleeping until...%s", oss.str().c_str());
 	}
 	std::this_thread::sleep_until(fetch_time);
+        {
+            const auto &session_state = controller->distributionSession().getState();
+            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) return;
+        }
 
         {
             std::lock_guard<std::recursive_mutex> lock(controller->m_pullObjectIngestersMutex);
