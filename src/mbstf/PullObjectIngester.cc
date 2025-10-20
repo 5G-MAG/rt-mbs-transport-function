@@ -150,7 +150,12 @@ void PullObjectIngester::doObjectIngest() {
             try {
                 auto &meta = objectStore().getMetadata(item.objectId());
                 old_meta = &meta;
-                ogs_debug("Refetching %s (TOI %u)...", item.url().c_str(), meta.fluteFileDescription()->toi());
+                auto &file_desc = meta.fluteFileDescription();
+                if (file_desc) {
+                    ogs_debug("Refetching %s (TOI %u)...", item.url().c_str(), file_desc->toi());
+                } else {
+                    ogs_debug("Refetching %s...", item.url().c_str());
+                }
             } catch (const std::out_of_range &ex) {
                 ogs_debug("Fetching %s...", item.url().c_str());
             }
