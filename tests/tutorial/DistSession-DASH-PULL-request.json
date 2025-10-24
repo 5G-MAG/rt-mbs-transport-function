@@ -1,7 +1,7 @@
 {
     "distSession": {
         "distSessionId": "541ebbd2-ebf9-496b-a3b8-dcd1c17fbc9d",
-        "distSessionState": "ACTIVE",
+        "distSessionState": "INACTIVE",
         "mbUpfTunAddr": {
             "ipv4Addr": "127.0.0.7",
             "portNumber": 5678
