@@ -16,6 +16,8 @@
  * See the License for the specific language governing permissions and limitations
  * under the License.
  */
+#include <chrono>
+#include <format>
 #include <string>
 
 #include "common.hh"
@@ -37,6 +39,14 @@ std::string time_point_to_http_datetime_str(const std::chrono::system_clock::tim
     return std::format("%b, %d %b %Y %T GMT", datetime);
 }
 
+std::string time_point_to_iso8601_utc_str(const std::chrono::system_clock::time_point &datetime)
+{
+    std::ostringstream oss;
+    auto datetime_us = std::chrono::time_point_cast<std::chrono::microseconds>(datetime);
+    oss.imbue(std::locale("C"));
+    oss << std::format("{0:%F}T{0:%T}Z", datetime_us);
+    return oss.str();
+}
 
 MBSTF_NAMESPACE_STOP
 

@@ -30,6 +30,7 @@ MBSTF_NAMESPACE_START
 
 class Open5GSSBIStream;
 class Open5GSSBIMessage;
+class Open5GSSBIRequest;
 
 class Open5GSSBIClient {
 public:

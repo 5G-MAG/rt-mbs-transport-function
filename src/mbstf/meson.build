@@ -90,10 +90,17 @@ libmbstf_dist_sources = files('''
     DASHManifestHandler.hh
     DistributionSession.cc
     DistributionSession.hh
+    DistributionSessionEvents.cc
+    DistributionSessionEvents.hh
+    DistributionSessionNotificationEvent.cc
+    DistributionSessionNotificationEvent.hh
+    DistributionSessionSubscription.cc
+    DistributionSessionSubscription.hh
     Event.cc
     Event.hh
     EventHandler.hh
     hash.hh
+    LocalEvents.hh
     ManifestHandler.hh
     ManifestHandlerFactory.cc
     ManifestHandlerFactory.hh

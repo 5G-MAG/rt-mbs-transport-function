@@ -1,7 +1,7 @@
-#ifndef _MBS_TF_UTILITIES_HH_
-#define _MBS_TF_UTILITIES_HH_
+#ifndef _MBS_TF_LOCAL_EVENTS_HH_
+#define _MBS_TF_LOCAL_EVENTS_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Common utility functions
+ * 5G-MAG Reference Tools: MBS Traffic Function: Local Events
  ******************************************************************************
  * Copyright: (C)2025 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>
@@ -18,20 +18,21 @@
  * See the License for the specific language governing permissions and limitations
  * under the License.
  */
-#include <chrono>
-#include <string>
+#include "ogs-proto.h"
 
 #include "common.hh"
 
 MBSTF_NAMESPACE_START
 
-std::string trim_slashes(const std::string &path);
-
-std::string time_point_to_http_datetime_str(const std::chrono::system_clock::time_point &datetime);
-std::string time_point_to_iso8601_utc_str(const std::chrono::system_clock::time_point &datetime);
+class LocalEvents {
+public:
+    typedef enum {
+        SEND_NOTIFICATION = OGS_MAX_NUM_OF_PROTO_EVENT+1000
+    } LocalEventIds;
+};
 
 MBSTF_NAMESPACE_STOP
 
 /* vim:ts=8:sts=4:sw=4:expandtab:
  */
-#endif /* _MBS_TF_UTILITIES_HH_ */
+#endif /* _MBS_TF_LOCAL_EVENTS_HH_ */
