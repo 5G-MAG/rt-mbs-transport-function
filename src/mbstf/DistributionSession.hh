@@ -29,7 +29,7 @@
 #include "openapi/model/ObjDistributionData.h"
 #include "common.hh"
 #include "BitRate.hh"
-//#include "Subscriber.hh"
+#include "Subscriber.hh"
 #include "DistributionSessionEvents.hh"
 #include "DistributionSessionSubscription.hh"
 #include "NfServer.hh"
@@ -52,7 +52,7 @@ class Open5GSSBIMessage;
 class Open5GSSBIRequest;
 class Controller;
 
-class DistributionSession : public std::enable_shared_from_this<DistributionSession> { // : public Subscriber {
+class DistributionSession : public std::enable_shared_from_this<DistributionSession>, public Subscriber {
 public:
     using SysTimeMS = std::chrono::system_clock::time_point;
 
@@ -76,6 +76,7 @@ public:
     const std::string &hash() const {return m_hash;};
     void setController(std::shared_ptr<Controller> controller) {m_controller = controller;};
 
+    virtual void processEvent(Event &event, SubscriptionService &event_service);
     static bool processEvent(Open5GSEvent &event);
 
     const reftools::mbstf::DistSessionState &getState() const;

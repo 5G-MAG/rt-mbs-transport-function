@@ -13,12 +13,13 @@
  */
 
 #include "common.hh"
+#include "SubscriptionService.hh"
 
 MBSTF_NAMESPACE_START
 
 class DistributionSession;
 
-class Controller { // : public SubscriptionService {
+class Controller : public SubscriptionService {
 public:
     Controller() = delete;
     Controller(DistributionSession &distributionSession);

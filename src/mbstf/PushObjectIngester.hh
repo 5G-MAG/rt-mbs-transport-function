@@ -28,7 +28,7 @@ MBSTF_NAMESPACE_START
 class ObjectStore;
 class ObjectController;
 
-class PushObjectIngester : public ObjectIngester, public SubscriptionService {
+class PushObjectIngester : public ObjectIngester {
 public:
 
     class Request {

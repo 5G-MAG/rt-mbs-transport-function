@@ -170,6 +170,12 @@ void PushObjectIngester::Request::requestHandler(struct MHD_Connection *connecti
         processRequest();
     }
 
+    if (m_statusCode >= 400 && m_statusCode <= 499) {
+        m_pushObjectIngester.emitObjectIngestFailedEvent(m_urlPath, ObjectIngester::IngestFailedEvent::CLIENT_ERROR);
+    } else if (m_statusCode >= 500 && m_statusCode <= 599) {
+        m_pushObjectIngester.emitObjectIngestFailedEvent(m_urlPath, ObjectIngester::IngestFailedEvent::SERVER_ERROR);
+    }
+
     ogs_info("Queue response (%u) for %s to microhttpd", m_statusCode, m_urlPath.c_str());
     // Queue the request
     MHD_queue_response(connection, m_statusCode, m_mhdResponse);

@@ -41,6 +41,7 @@ public:
         ,m_pushIngester()
         ,m_packager()
         ,m_nextId(1)
+        ,m_consecutiveIngestFailures(0)
     {};
     ObjectController(const ObjectController &) = delete;
     ObjectController(ObjectController &&) = delete;
@@ -100,6 +101,7 @@ private:
     std::shared_ptr<PushObjectIngester> m_pushIngester;
     std::shared_ptr<ObjectPackager> m_packager;
     std::atomic_int m_nextId;
+    int m_consecutiveIngestFailures;
 };
 
 MBSTF_NAMESPACE_STOP

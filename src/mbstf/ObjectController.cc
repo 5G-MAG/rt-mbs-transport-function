@@ -14,14 +14,18 @@
 #include <list>
 
 #include "common.hh"
+#include "App.hh"
 #include "Controller.hh"
 #include "DistributionSession.hh"
 #include "ObjectStore.hh"
 #include "ObjectPackager.hh"
 #include "PullObjectIngester.hh"
 #include "PushObjectIngester.hh"
+#include "openapi/model/DistSessionState.h"
 
 #include "ObjectController.hh"
+
+using reftools::mbstf::DistSessionState;
 
 MBSTF_NAMESPACE_START
 
@@ -29,8 +33,9 @@ const std::shared_ptr<PullObjectIngester> &ObjectController::addPullObjectIngest
 {
     std::lock_guard<std::recursive_mutex> lock(m_pullObjectIngestersMutex);
     // Transfer ownership from unique_ptr to shared_ptr
-    m_pullIngesters.emplace_back(ingester);
-    return m_pullIngesters.back();
+    auto &listed_ingester = m_pullIngesters.emplace_back(ingester);
+    subscribeTo({ObjectIngester::IngestFailedEvent::event_name}, *listed_ingester);
+    return listed_ingester;
 }
 
 bool ObjectController::removePullObjectIngester(std::shared_ptr<PullObjectIngester> &pullIngester)
@@ -54,6 +59,7 @@ bool ObjectController::removeAllPullObjectIngesters()
 const std::shared_ptr<PushObjectIngester> &ObjectController::pushObjectIngester(PushObjectIngester *pushIngester)
 {
     m_pushIngester.reset(pushIngester);
+    subscribeTo({ObjectIngester::IngestFailedEvent::event_name}, *m_pushIngester);
     return m_pushIngester;
 }
 
@@ -72,8 +78,18 @@ void ObjectController::processEvent(Event &event, SubscriptionService &event_ser
 	} else {
             ogs_debug("Keeping object [%s] in object store after sending...", object_id.c_str());
 	}
+    } else if (event.eventName() == ObjectIngester::IngestFailedEvent::event_name) {
+        ObjectIngester::IngestFailedEvent &ingest_failed_event = dynamic_cast<ObjectIngester::IngestFailedEvent&>(event);
+        ogs_debug("Object ingest failed for %s: reason = %i", ingest_failed_event.url().c_str(), ingest_failed_event.failureType());
+        m_consecutiveIngestFailures++;
+        sendEventSynchronous(event); /* repeat ingest failure event to subscribers of this ObjectController */
+        auto max_failures = App::self().context()->consecutiveIngestFailuresBeforeAbort;
+        if (max_failures != 0 && m_consecutiveIngestFailures >= max_failures) {
+            DistSessionState inactive_state;
+            inactive_state = DistSessionState::VAL_INACTIVE;
+            distributionSession().setState(inactive_state);
+        }
     }
-
 }
 
 std::string ObjectController::nextObjectId()

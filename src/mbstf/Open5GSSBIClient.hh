@@ -47,7 +47,7 @@ public:
     ogs_sockaddr_t *ogsSockaddr(std::shared_ptr<Open5GSSBIClient> &client);
     ogs_sbi_client_t *ogsSBIClient() { return m_ogsClient; };
 
-    /*static*/ bool sendRequest(ogs_sbi_client_cb_f client_notify_cb,  std::shared_ptr<Open5GSSBIRequest> request, void *data);
+    /*static*/ bool sendRequest(ogs_sbi_client_cb_f client_notify_cb, std::shared_ptr<Open5GSSBIRequest> request, void *data);
 
     operator bool() const { return !!m_ogsClient; };
 

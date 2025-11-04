@@ -42,6 +42,7 @@
 #include "MBSTFNetworkFunction.hh"
 #include "ModelParamsException.hh"
 #include "NfServer.hh"
+#include "ObjectIngester.hh"
 #include "Open5GSEvent.hh"
 #include "Open5GSSBIMessage.hh"
 #include "Open5GSSBIRequest.hh"
@@ -105,7 +106,9 @@ static void send_model_params_error(const ModelParamsException &err, Open5GSSBIS
 /**** public: ****/
 
 DistributionSession::DistributionSession(CJson &json, bool as_request)
-    :m_createReqData(new CreateReqData(json, as_request))
+    :std::enable_shared_from_this<DistributionSession>()
+    ,Subscriber()
+    ,m_createReqData(new CreateReqData(json, as_request))
     //,m_generated
     //,m_lastUsed
     //,m_hash
@@ -163,6 +166,14 @@ const std::shared_ptr<DistributionSession> &DistributionSession::find(const std:
         throw std::out_of_range("MBST Distribution session not found");
     }
     return it->second;
+}
+
+void DistributionSession::processEvent(Event &event, SubscriptionService &event_service)
+{
+    if (event.eventName() == ObjectIngester::IngestFailedEvent::event_name) {
+        //ObjectIngester::IngestFailedEvent &ingest_failed_event = dynamic_cast<ObjectIngester::IngestFailedEvent&>(event);
+        _registerEvent(DistributionSessionEvents::DATA_INGEST_FAILURE);
+    }
 }
 
 bool DistributionSession::processEvent(Open5GSEvent &event)
@@ -402,6 +413,7 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
         {
             DistributionSessionNotificationEvent dist_event(event);
             const auto &subsc = dist_event.distributionSessionSubscription();
+            ogs_debug("Sending notifications for subscription %p", &subsc);
             subsc.sendNotifications();
             return true;
         }
@@ -1007,7 +1019,8 @@ void DistributionSession::_apiSessionCreate(Open5GSSBIStream &stream, Open5GSSBI
     distributionSession->_transitionTo(distributionSession->getState().getValue());
     App::self().context()->addDistributionSession(distributionSession);
 
-    // TODO: Subscribe to Events from the Controller - to be forwarded to DistributionSessionSubscriptions
+    // Subscribe to Events from the Controller - to be forwarded to DistributionSessionSubscriptions
+    distributionSession->subscribeTo({ObjectIngester::IngestFailedEvent::event_name}, *distributionSession->m_controller);
     distributionSession->_sendSubscriptionNotifications();
 
     CJson create_rsp_data_json(distributionSession->json(false, true));

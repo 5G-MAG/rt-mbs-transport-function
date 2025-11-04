@@ -13,20 +13,54 @@
  */
 
 
-#include "common.hh"
-#include <thread>
 #include <atomic>
+#include <string>
+#include <thread>
+
+#include "common.hh"
+#include "Event.hh"
+#include "SubscriptionService.hh"
 
 MBSTF_NAMESPACE_START
 
 class ObjectStore;
 class ObjectController;
 
-class ObjectIngester {
+class ObjectIngester : public SubscriptionService {
 public:
+    class IngestFailedEvent : public Event {
+    public:
+        static constexpr const char *event_name = "ObjectIngestFailed";
+        typedef enum {
+            TIMED_OUT = 1,
+            GENERAL_ERROR,
+            CLIENT_ERROR,
+            SERVER_ERROR
+        } FailureType;
+
+        IngestFailedEvent(const std::string& url, FailureType fail_type)
+            : Event(event_name), m_url(url), m_failureType(fail_type) {};
+        IngestFailedEvent(const IngestFailedEvent &other)
+            : Event(other), m_url(other.m_url), m_failureType(other.m_failureType) {};
+        IngestFailedEvent(IngestFailedEvent &&other)
+            : Event(std::move(other)), m_url(std::move(other.m_url)), m_failureType(std::move(other.m_failureType)) {};
+
+        virtual ~IngestFailedEvent() {};
+
+        IngestFailedEvent &operator=(const IngestFailedEvent &other) { Event::operator=(other); m_url = other.m_url; m_failureType = other.m_failureType; return *this; };
+        IngestFailedEvent &operator=(IngestFailedEvent &&other) { Event::operator=(std::move(other)); m_url = std::move(other.m_url); m_failureType = std::move(other.m_failureType); return *this; };
+
+        const std::string &url() const { return m_url; };
+        FailureType failureType() const { return m_failureType; };
+
+    private:
+        std::string m_url;
+        FailureType m_failureType;
+    };
+
     ObjectIngester() = delete;
     ObjectIngester(ObjectStore &objectStore, ObjectController &controller)
-        : m_objectStore(objectStore), m_controller(controller), m_workerThread(), m_workerCancel(false) {}
+        : SubscriptionService(), m_objectStore(objectStore), m_controller(controller), m_workerThread(), m_workerCancel(false) {}
 
     void abort() {
 	m_workerCancel = true;
@@ -49,6 +83,9 @@ protected:
     void startWorker(){m_workerThread = std::thread(workerLoop, this);};
 
     virtual void doObjectIngest() = 0;
+
+    /* subscription events */
+    void emitObjectIngestFailedEvent(const std::string &url, IngestFailedEvent::FailureType fail_type);
 
 private:
     static void workerLoop(ObjectIngester*);

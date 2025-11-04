@@ -230,20 +230,27 @@ void DistributionSessionSubscription::sendNotifications() const
 {
     if (!m_cache) return; /* being destroyed or this DistributionSessionSubscription has been moved to another */
 
+    ogs_debug("DistributionSessionSubscription[%p]: Sending notifications", this);
     const auto &notify_uri = m_distSessionSubscription.getNotifyUri();
     if (notify_uri) {
+        ogs_debug("DistributionSessionSubscription[%p]: notify URL = %s", this, notify_uri.value().c_str());
         auto report_list = makeReportList();
         const auto &reports = report_list->getEventReportList();
         if (!reports.empty()) {
+            ogs_debug("DistributionSessionSubscription[%p]: have events to send", this);
             if (!m_cache->client) {
+                ogs_debug("DistributionSessionSubscription[%p]: create new client", this);
                 m_cache->client.reset(new Open5GSSBIClient(notify_uri.value()));
             }
+            ogs_debug("DistributionSessionSubscription[%p]: building notify request", this);
             std::shared_ptr<StatusNotifyReqData> status_notify_req_data(new StatusNotifyReqData);
             status_notify_req_data->setReportList(report_list);
             CJson json = status_notify_req_data->toJSON(true);
             std::string body(json.serialise());
-            std::shared_ptr<Open5GSSBIRequest> request(new Open5GSSBIRequest(OGS_SBI_HTTP_METHOD_POST, notify_uri.value(),
-                                                std::format("{}/{}", StatusNotifyReqData::apiName, StatusNotifyReqData::apiVersion),
+            ogs_debug("DistributionSessionSubscription[%p]: sending: %s", this, body.c_str());
+            static const std::string post_method(OGS_SBI_HTTP_METHOD_POST);
+            static const std::string api_version(std::format("{}/{}", StatusNotifyReqData::apiName, StatusNotifyReqData::apiVersion));
+            std::shared_ptr<Open5GSSBIRequest> request(new Open5GSSBIRequest(post_method, notify_uri.value(), api_version,
                                                 body, OGS_SBI_CONTENT_JSON_TYPE));
             RequestData *data = new RequestData{this, request};
             m_cache->client->sendRequest(ogs_sbi_client_handler, request, data);

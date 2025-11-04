@@ -46,6 +46,7 @@ Context::Context()
     ,servers()
     ,cacheControl({60, 60})
     ,totalMaxBitRateSoftLimit(100)
+    ,consecutiveIngestFailuresBeforeAbort(5)
 {
 }
 
@@ -112,6 +113,17 @@ bool Context::parseConfig()
                         }
                     } else {
                         throw std::out_of_range("Bad configuration node at mbstf.totalMaxBitRateSoftLimit");
+                    }
+                } else if (mbstf_key == "consecutiveIngestFailuresBeforeAbort") {
+                    if (mbstf_iter.type() == YAML_MAPPING_NODE) {
+                        std::string num_val(mbstf_iter.value());
+                        size_t idx = 0;
+                        consecutiveIngestFailuresBeforeAbort = std::stoi(num_val, &idx);
+                        if (idx != num_val.size()) {
+                            throw std::out_of_range("Bad configuration value at mbstf.consecutiveIngestFailuresBeforeAbort");
+                        }
+                    } else {
+                        throw std::out_of_range("Bad configuration node at mbstf.consecutiveIngestFailuresBeforeAbort");
                     }
                 } else {
                     ogs_warn("Unknown key `mbstf.%s` in configuration", mbstf_key.c_str());

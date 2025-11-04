@@ -17,7 +17,7 @@
 MBSTF_NAMESPACE_START
 
 Controller::Controller(DistributionSession &distributionSession)
-    :m_distributionSession(distributionSession)
+    :SubscriptionService(), m_distributionSession(distributionSession)
 {
 }
 

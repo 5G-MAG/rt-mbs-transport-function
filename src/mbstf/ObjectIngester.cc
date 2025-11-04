@@ -24,6 +24,11 @@ void ObjectIngester::workerLoop(ObjectIngester *ingester)
 
 }
 
+void ObjectIngester::emitObjectIngestFailedEvent(const std::string &url, ObjectIngester::IngestFailedEvent::FailureType fail_type)
+{
+    sendEventAsynchronous(IngestFailedEvent(url, fail_type));
+}
+
 MBSTF_NAMESPACE_STOP
 
 /* vim:ts=8:sts=4:sw=4:expandtab:

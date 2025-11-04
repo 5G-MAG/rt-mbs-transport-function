@@ -47,7 +47,6 @@ Open5GSSBIClient::Open5GSSBIClient(ogs_sbi_client_t *client)
 Open5GSSBIClient::Open5GSSBIClient(const std::string &url)
 {
 
-    ogs_sbi_client_t *client = NULL;
     OpenAPI_uri_scheme_e scheme = OpenAPI_uri_scheme_NULL;
     ogs_sockaddr_t *addr = NULL;
     bool rc;
@@ -58,7 +57,7 @@ Open5GSSBIClient::Open5GSSBIClient(const std::string &url)
          throw std::runtime_error("Failed to get sockaddr from uri!");
      }
      m_ogsClient = ogs_sbi_client_add(scheme, addr);
-     ogs_assert(client);
+     ogs_assert(m_ogsClient);
      ogs_freeaddrinfo(addr);
 }
 

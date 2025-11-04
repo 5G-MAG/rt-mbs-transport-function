@@ -135,7 +135,10 @@ void PullObjectIngester::sortListByPolicy() {
 }
 
 void PullObjectIngester::doObjectIngest() {
-    if(!m_curl) m_curl = std::make_shared<Curl>();
+    if (!m_curl) {
+        m_curl = std::make_shared<Curl>();
+    }
+
     {
         std::lock_guard<std::recursive_mutex> lock(*m_ingestItemsMutex);
         if (m_fetchList.empty()) {
@@ -196,10 +199,10 @@ void PullObjectIngester::doObjectIngest() {
 
             } else if (bytesReceived == -1) {
                 ogs_error("Request timed out.");
-                // emitObjectIngestFailedEvent();
+                emitObjectIngestFailedEvent(item.url(), ObjectIngester::IngestFailedEvent::TIMED_OUT);
             } else {
                 ogs_error("An error occurred while fetching the data.");
-                // emitObjectIngestFailedEvent();
+                emitObjectIngestFailedEvent(item.url(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
             }
             m_ingestItemsMutex->lock();
 	}
