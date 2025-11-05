@@ -83,7 +83,7 @@ void ObjectController::processEvent(Event &event, SubscriptionService &event_ser
         ogs_debug("Object ingest failed for %s: reason = %i", ingest_failed_event.url().c_str(), ingest_failed_event.failureType());
         m_consecutiveIngestFailures++;
         sendEventSynchronous(event); /* repeat ingest failure event to subscribers of this ObjectController */
-        auto max_failures = App::self().context()->consecutiveIngestFailuresBeforeAbort;
+        auto max_failures = App::self().context()->consecutiveIngestFailuresBeforeDeactivate;
         if (max_failures != 0 && m_consecutiveIngestFailures >= max_failures) {
             DistSessionState inactive_state;
             inactive_state = DistSessionState::VAL_INACTIVE;

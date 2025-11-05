@@ -70,7 +70,7 @@ public:
         unsigned int defaultObjectMaxAge; // Use if not given by push/pull resource Cache-Control.
     } cacheControl;
     int totalMaxBitRateSoftLimit; // total maximum bit rate this MBSTF ought to asked to handle
-    int consecutiveIngestFailuresBeforeAbort; // The number of consecutive ingest failures allowed before the session aborts
+    int consecutiveIngestFailuresBeforeDeactivate; // The number of consecutive ingest failures allowed before the session aborts
 
 private:
     void parseCacheControl(Open5GSYamlIter &iter);

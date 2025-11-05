@@ -188,7 +188,7 @@ mbstf:
       - addr: 127.0.0.61
         port: 0 # ephemeral
     totalMaxBitRateSoftLimit: 1000 # 1Gbps
-    consecutiveIngestFailuresBeforeAbort: 5
+    consecutiveIngestFailuresBeforeDeactivate: 5
     serverResponseCacheControl:
       - distMaxAge: 60
         ObjectMaxAge: 60
