@@ -89,6 +89,9 @@ void ObjectController::processEvent(Event &event, SubscriptionService &event_ser
             inactive_state = DistSessionState::VAL_INACTIVE;
             distributionSession().setState(inactive_state);
         }
+    } else if (event.eventName() == "ObjectAdded") {
+        /* object successfully added to the object store */
+        m_consecutiveIngestFailures = 0;
     }
 }
 

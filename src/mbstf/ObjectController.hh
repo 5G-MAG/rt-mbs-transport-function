@@ -42,7 +42,7 @@ public:
         ,m_packager()
         ,m_nextId(1)
         ,m_consecutiveIngestFailures(0)
-    {};
+    { subscribeTo({"ObjectAdded"}, m_objectStore); };
     ObjectController(const ObjectController &) = delete;
     ObjectController(ObjectController &&) = delete;
 
