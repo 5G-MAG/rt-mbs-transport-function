@@ -46,10 +46,13 @@ using fiveg_mag_reftools::ModelException;
 
 MBSTF_NAMESPACE_START
 
-struct RequestData {
-    const DistributionSessionSubscription *subscription;
-    std::shared_ptr<Open5GSSBIRequest> request;
-};
+namespace {
+    struct RequestData {
+        ~RequestData() {};
+        const DistributionSessionSubscription *subscription;
+        std::shared_ptr<Open5GSSBIRequest> request;
+    };
+}
 
 /* Constructors and Destructor */
 DistributionSessionSubscription::DistributionSessionSubscription(const std::weak_ptr<DistributionSession> &dist_session,
@@ -230,19 +233,19 @@ void DistributionSessionSubscription::sendNotifications() const
 {
     if (!m_cache) return; /* being destroyed or this DistributionSessionSubscription has been moved to another */
 
-    ogs_debug("DistributionSessionSubscription[%p]: Sending notifications", this);
+    //ogs_debug("DistributionSessionSubscription[%p]: Sending notifications", this);
     const auto &notify_uri = m_distSessionSubscription.getNotifyUri();
     if (notify_uri) {
-        ogs_debug("DistributionSessionSubscription[%p]: notify URL = %s", this, notify_uri.value().c_str());
+        //ogs_debug("DistributionSessionSubscription[%p]: notify URL = %s", this, notify_uri.value().c_str());
         auto report_list = makeReportList();
         const auto &reports = report_list->getEventReportList();
         if (!reports.empty()) {
-            ogs_debug("DistributionSessionSubscription[%p]: have events to send", this);
+            //ogs_debug("DistributionSessionSubscription[%p]: have events to send", this);
             if (!m_cache->client) {
-                ogs_debug("DistributionSessionSubscription[%p]: create new client", this);
+                //ogs_debug("DistributionSessionSubscription[%p]: create new client", this);
                 m_cache->client.reset(new Open5GSSBIClient(notify_uri.value()));
             }
-            ogs_debug("DistributionSessionSubscription[%p]: building notify request", this);
+            //ogs_debug("DistributionSessionSubscription[%p]: building notify request", this);
             std::shared_ptr<StatusNotifyReqData> status_notify_req_data(new StatusNotifyReqData);
             status_notify_req_data->setReportList(report_list);
             CJson json = status_notify_req_data->toJSON(true);
@@ -265,8 +268,9 @@ bool DistributionSessionSubscription::processClientResponse(const Open5GSEvent &
     {
         RequestData *req_data = reinterpret_cast<RequestData*>(event.sbiData());
         if (req_data && req_data->subscription == this) {
-            auto resp = event.sbiResponse();
+            auto resp = event.sbiResponse(true);
             ogs_debug("Got %i response from notification(s) to %s", resp.status(), req_data->request->uri());
+            req_data->request.reset();
             delete req_data;
             return true;
         }

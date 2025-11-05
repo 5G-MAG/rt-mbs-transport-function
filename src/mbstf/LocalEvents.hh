@@ -21,6 +21,7 @@
 #include "ogs-proto.h"
 
 #include "common.hh"
+#include "Open5GSEvent.hh"
 
 MBSTF_NAMESPACE_START
 
@@ -29,6 +30,12 @@ public:
     typedef enum {
         SEND_NOTIFICATION = OGS_MAX_NUM_OF_PROTO_EVENT+1000
     } LocalEventIds;
+
+    static const char *getEventName(Open5GSEvent &event) {
+        if (event.id() < OGS_MAX_NUM_OF_PROTO_EVENT) return ogs_event_get_name(event.ogsEvent());
+        if (event.id() == SEND_NOTIFICATION) return "SEND_NOTIFICATION";
+        return "Unknown event";
+    };
 };
 
 MBSTF_NAMESPACE_STOP

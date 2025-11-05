@@ -31,12 +31,17 @@
 
 MBSTF_NAMESPACE_START
 
+Open5GSSBIRequest::Open5GSSBIRequest(ogs_sbi_request_t *request, bool owner)
+    :m_request(request)
+    ,m_owner(owner)
+{
+    //ogs_debug("Open5GSSBIRequest[%p]: created from ogs_sbi_request_t %p (owner=%i)", this, m_request, m_owner);
+}
+
 Open5GSSBIRequest::Open5GSSBIRequest(const std::string &method, const std::string &uri, const std::string &apiVersion, const std::optional<std::string> &data, const std::optional<std::string> &type)
     :m_request(ogs_sbi_request_new())
     ,m_owner(true)
 {
-
-    m_request = ogs_sbi_request_new();
     m_request->h.method = ogs_strdup(method.c_str());
     m_request->h.uri = ogs_strdup(uri.c_str());
     m_request->h.api.version = ogs_strdup(apiVersion.c_str());
@@ -55,6 +60,16 @@ Open5GSSBIRequest::Open5GSSBIRequest(const std::string &method, const std::strin
         ogs_sbi_header_set(m_request->http.headers, "Content-Type", nullptr);
     }
 
+    //ogs_debug("Open5GSSBIRequest[%p]: created from parameters, ogs_sbi_request_t = %p", this, m_request);
+}
+
+Open5GSSBIRequest::~Open5GSSBIRequest()
+{
+    //ogs_debug("Open5GSSBIRequest[%p]: deleting", this);
+    if (m_owner && m_request) {
+        //ogs_debug("Open5GSSBIRequest[%p]: freeing ogs_sbi_request_t %p", this, m_request);
+        ogs_sbi_request_free(m_request);
+    }
 }
 
 std::string Open5GSSBIRequest::headerValue(const std::string &field, const std::string &defval) const

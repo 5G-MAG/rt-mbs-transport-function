@@ -25,6 +25,7 @@
 
 #include "common.hh"
 #include "DistributionSession.hh"
+#include "LocalEvents.hh"
 #include "Open5GSEvent.hh"
 #include "Open5GSFSM.hh"
 #include "Open5GSSBIServer.hh"
@@ -41,7 +42,7 @@ MBSTF_NAMESPACE_START
 void MBSTFEventHandler::dispatch(Open5GSFSM &fsm, Open5GSEvent &event)
 {
     // Handle Open5GS FSM events here
-    ogs_debug("MBSTF Event: %s", ogs_event_get_name(event.ogsEvent()));
+    ogs_debug("MBSTF Event: %s", LocalEvents::getEventName(event));
 
     if (DistributionSession::processEvent(event)) return;
 
@@ -55,7 +56,7 @@ void MBSTFEventHandler::dispatch(Open5GSFSM &fsm, Open5GSEvent &event)
 
     case OGS_EVENT_SBI_SERVER:
         {
-            Open5GSSBIRequest request(event.sbiRequest());
+            auto request = event.sbiRequest(true);
             Open5GSSBIStream stream(reinterpret_cast<ogs_sbi_stream_t*>(event.sbiData()));
 
             Open5GSSBIMessage message;

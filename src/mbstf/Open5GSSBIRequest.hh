@@ -37,14 +37,14 @@ public:
     using HeadersMap = std::map<CaseInsensitiveString, std::function<void(const CaseInsensitiveString &field, const char *val)> >;
     using ParametersMap = std::map<std::string, std::function<void(const std::string &param, const char *val)> >;
 
-    Open5GSSBIRequest(ogs_sbi_request_t *request, bool owner = true) :m_request(request), m_owner(owner) {};
+    Open5GSSBIRequest(ogs_sbi_request_t *request, bool owner = true);
     Open5GSSBIRequest(const std::string &method, const std::string &uri, const std::string &apiVersion, const std::optional<std::string> &data, const std::optional<std::string> &type);
     Open5GSSBIRequest() = delete;
     Open5GSSBIRequest(Open5GSSBIRequest &&other) = delete;
     Open5GSSBIRequest(const Open5GSSBIRequest &other) = delete;
     Open5GSSBIRequest &operator=(Open5GSSBIRequest &&other) = delete;
     Open5GSSBIRequest &operator=(const Open5GSSBIRequest &other) = delete;
-    virtual ~Open5GSSBIRequest() {if (m_owner) ogs_sbi_request_free(m_request);};
+    virtual ~Open5GSSBIRequest();
 
     ogs_sbi_request_t *ogsSBIRequest() { return m_request; };
     const ogs_sbi_request_t *ogsSBIRequest() const { return m_request; };

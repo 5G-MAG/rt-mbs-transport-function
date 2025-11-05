@@ -118,6 +118,8 @@ void ObjectListController::processEvent(Event &event, SubscriptionService &event
         }
         // event.preventDefault() if checks fail
     }
+    ObjectController::processEvent(event, event_service);
+
     // TODO: Forward ingest and packager events for DistributionSessionSubscriptions notifications
     // else if (event.eventName() == "ObjectIngestFailed") { emitDataIngestFailedEvent(); }
     // else if (event.eventName() == "FluteSessionStarted") { emitSessionActivatedEvent(); }

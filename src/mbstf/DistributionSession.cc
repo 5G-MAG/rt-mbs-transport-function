@@ -408,6 +408,7 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                     if (subsc.processClientResponse(event)) return true;
                 }
             }
+            break;
         }
     case LocalEvents::SEND_NOTIFICATION:
         {
@@ -415,6 +416,7 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
             const auto &subsc = dist_event.distributionSessionSubscription();
             ogs_debug("Sending notifications for subscription %p", &subsc);
             subsc.sendNotifications();
+            dist_event.releaseEventData();
             return true;
         }
     default:
