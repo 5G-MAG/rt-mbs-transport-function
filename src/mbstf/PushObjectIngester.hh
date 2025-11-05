@@ -47,7 +47,7 @@ public:
         Request &operator=(const Request&) = delete;
         Request &operator=(Request&&) = delete;
 
-	const std::string &method() const { return m_urlPath; };
+	const std::string &method() const { return m_method; };
 
 	Request &method(const std::string &method) { m_method = method; return *this; };
         Request &method(std::string &&method) { m_method = std::move(method); return *this; };
@@ -56,7 +56,7 @@ public:
         Request &urlPath(const std::string &url_path) { m_urlPath = url_path; return *this; };
         Request &urlPath(std::string &&url_path) { m_urlPath = std::move(url_path); return *this; };
 
-        const std::string &protocolVersion() const { return m_urlPath; };
+        const std::string &protocolVersion() const { return m_protocolVersion; };
         Request &protocolVersion(const std::string &proto_ver) { m_protocolVersion = proto_ver; return *this; };
 
 	Request &protocolVersion(std::string &&proto_ver) { m_protocolVersion = std::move(proto_ver); return *this;};
@@ -91,6 +91,8 @@ public:
 	void requestHandler(struct MHD_Connection *connection);
 	typedef bool (*HeaderProcessingCallback)(const std::string &key, const std::string &value, void *data);
 	void processRequestHeader(HeaderProcessingCallback callback, void *data) const;
+
+        virtual std::string reprString() const;
 
     protected:
 	//Request(const std::string &url, const std::string &method, const std::string &version);
@@ -134,15 +136,28 @@ public:
         static ObjectPushEvent *makeStartEvent(const std::shared_ptr<Request> &request);
         static ObjectPushEvent *makeBlockReceivedEvent(const std::shared_ptr<Request> &request);
         static ObjectPushEvent *makeTrailersReceivedEvent(const std::shared_ptr<Request> &request);
-        ObjectPushEvent(const ObjectPushEvent&) = delete;
-        ObjectPushEvent(ObjectPushEvent&&) = delete;
+        ObjectPushEvent(const ObjectPushEvent &other) :Event(other), m_request(other.m_request) {};
+        ObjectPushEvent(ObjectPushEvent &&other) :Event(std::move(other)), m_request(std::move(other.m_request)) {};
 
         virtual ~ObjectPushEvent();
 
-        ObjectPushEvent &operator=(const ObjectPushEvent &) = delete;
-        ObjectPushEvent &operator=(ObjectPushEvent &&) = delete;
+        ObjectPushEvent &operator=(const ObjectPushEvent &other) {
+            Event::operator=(other);
+            m_request = other.m_request;
+            return *this;
+        };
+        ObjectPushEvent &operator=(ObjectPushEvent &&other) {
+            Event::operator=(std::move(other));
+            m_request = std::move(other.m_request);
+            return *this;
+        };
 
         const Request &request() const { return *m_request; };
+
+        virtual Event clone() const { return ObjectPushEvent(*this); };
+        virtual Event *newClone() const { return new ObjectPushEvent(*this); };
+
+        virtual std::string reprString() const { return std::format("ObjectPushEvent(\"{}\", {})", eventName(), m_request->reprString()); };
 
     private:
         ObjectPushEvent(const std::string &typ, const std::shared_ptr<Request> &request);

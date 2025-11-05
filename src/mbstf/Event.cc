@@ -84,9 +84,14 @@ void Event::preventDefault()
     m_preventDefault = true;
 }
 
-Event Event::clone()
+Event Event::clone() const
 {
     return Event(*this);
+}
+
+Event *Event::newClone() const
+{
+    return new Event(*this);
 }
 
 MBSTF_NAMESPACE_STOP

@@ -17,6 +17,7 @@
 #include <string>
 
 #include "common.hh"
+#include "Event.hh"
 #include "ObjectIngester.hh"
 #include "ObjectStore.hh"
 
@@ -29,6 +30,15 @@ class PullObjectIngester : public ObjectIngester {
 public:
 
     using time_type = std::chrono::system_clock::time_point;
+
+    class ObjectPullQueueExhaustedEvent : public Event {
+    public:
+        static constexpr const char *event_name = "ObjectPullQueueExhausted";
+        ObjectPullQueueExhaustedEvent() :Event(event_name) {};
+        virtual Event clone() const { return ObjectPullQueueExhaustedEvent(); };
+        virtual Event *newClone() const { return new ObjectPullQueueExhaustedEvent; };
+        virtual std::string reprString() const { return "ObjectPullQueueExhaustedEvent()"; };
+    };
 
     class IngestItem {
     public:

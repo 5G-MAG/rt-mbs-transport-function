@@ -205,6 +205,7 @@ void PullObjectIngester::doObjectIngest() {
                 emitObjectIngestFailedEvent(item.url(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
             }
             m_ingestItemsMutex->lock();
+            if (m_fetchList.empty()) sendEventAsynchronous(new ObjectPullQueueExhaustedEvent);
 	}
     }
 }

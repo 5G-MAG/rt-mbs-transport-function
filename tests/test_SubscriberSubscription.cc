@@ -13,6 +13,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <exception>
+#include <format>
 #include <iostream>
 #include <optional>
 #include <mutex>
@@ -30,10 +31,13 @@ class EventType1 : public Event
 {
 public:
     EventType1(int data) :Event("Type1"),m_data(data) {};
+    EventType1(const EventType1 &other) :Event(other), m_data(other.m_data) {};
 
     virtual ~EventType1() {};
 
-    virtual Event clone() {return EventType1(m_data);};
+    virtual Event clone() const {return EventType1(*this);};
+    virtual Event *newClone() const {return new EventType1(*this);};
+    virtual std::string reprString() const { return std::format("EventType1({})", m_data); };
 
     int data() const { return m_data; };
 
@@ -45,10 +49,13 @@ class EventType2 : public Event
 {
 public:
     EventType2(int data) :Event("Type2"),m_data(data) {};
+    EventType2(const EventType2 &other) :Event(other), m_data(other.m_data) {};
 
     virtual ~EventType2() {};
 
-    virtual Event clone() {return EventType2(m_data);};
+    virtual Event clone() const {return EventType2(*this);};
+    virtual Event *newClone() const {return new EventType2(*this);};
+    virtual std::string reprString() const { return std::format("EventType2({})", m_data); };
 
     int data() const { return m_data; };
 

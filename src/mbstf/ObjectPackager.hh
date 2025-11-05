@@ -13,6 +13,7 @@
  */
 
 #include <atomic>
+#include <format>
 #include <memory>
 #include <optional>
 #include <thread>
@@ -39,11 +40,28 @@ class ObjectPackager: public SubscriptionService {
 public:
    class ObjectSendCompleted : public Event {
     public:
-        ObjectSendCompleted(const std::string& object_id)
-            : Event("ObjectSendCompleted"), m_object_id(object_id) {}
+        ObjectSendCompleted(const std::string& object_id) :Event("ObjectSendCompleted"), m_object_id(object_id) {};
+        ObjectSendCompleted(const ObjectSendCompleted &other) :Event(other), m_object_id(other.m_object_id) {};
+        ObjectSendCompleted(ObjectSendCompleted &&other) :Event(std::move(other)), m_object_id(std::move(other.m_object_id)) {};
 
-        std::string objectId() const { return m_object_id; }
         virtual ~ObjectSendCompleted() {};
+
+        ObjectSendCompleted &operator=(const ObjectSendCompleted &other) {
+            Event::operator=(other);
+            m_object_id = other.m_object_id;
+            return *this;
+        };
+        ObjectSendCompleted &operator=(ObjectSendCompleted &&other) {
+            Event::operator=(std::move(other));
+            m_object_id = std::move(other.m_object_id);
+            return *this;
+        };
+
+        std::string objectId() const { return m_object_id; };
+
+        virtual Event clone() const { return ObjectSendCompleted(*this); };
+        virtual Event *newClone() const { return new ObjectSendCompleted(*this); };
+        virtual std::string reprString() const { return std::format("ObjectSendCompleted(\"{}\")", m_object_id); };
 
     private:
         std::string m_object_id;

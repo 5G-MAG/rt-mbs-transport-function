@@ -10,11 +10,21 @@
  * https://drive.google.com/file/d/1cinCiA778IErENZ3JN52VFW-1ffHpx7Z/view
  */
 
+#include <sstream>
+#include <string>
+
 #include "common.hh"
 
 #include "ObjectIngester.hh"
 
 MBSTF_NAMESPACE_START
+
+std::string ObjectIngester::IngestFailedEvent::reprString() const
+{
+    std::ostringstream oss;
+    oss << "ObjectIngester::IngestFailedEvent(\"" << m_url << "\", " << m_failureType << ")";
+    return oss.str();
+}
 
 void ObjectIngester::workerLoop(ObjectIngester *ingester)
 {

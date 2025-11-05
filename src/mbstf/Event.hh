@@ -40,7 +40,8 @@ public:
     bool stopProcessingFlag() const { return m_stopProcessing; };
     bool preventDefaultFlag() const { return m_preventDefault; };
 
-    virtual Event clone();
+    virtual Event clone() const;
+    virtual Event *newClone() const;
 
     virtual std::string reprString() const { return std::string("Event(\"") + m_eventName + "\")"; };
 private:

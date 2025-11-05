@@ -53,6 +53,11 @@ public:
         const std::string &url() const { return m_url; };
         FailureType failureType() const { return m_failureType; };
 
+        virtual Event clone() const { return IngestFailedEvent(*this); };
+        virtual Event *newClone() const { return new IngestFailedEvent(*this); };
+
+        virtual std::string reprString() const;
+
     private:
         std::string m_url;
         FailureType m_failureType;

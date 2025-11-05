@@ -57,8 +57,7 @@ ObjectListController::ObjectListController(DistributionSession &distributionSess
     }
 
     subscribeToService(objectStore());
-    //initObjectIngester();
-    //setObjectListPackager();
+    subscribeTo({PullObjectIngester::ObjectPullQueueExhaustedEvent::event_name}, *this);
 }
 
 ObjectListController::~ObjectListController()
@@ -117,6 +116,18 @@ void ObjectListController::processEvent(Event &event, SubscriptionService &event
             event.preventDefault();
         }
         // event.preventDefault() if checks fail
+    } else if (event.eventName() == PullObjectIngester::ObjectPullQueueExhaustedEvent::event_name) {
+        /* this is a PULL list and we've finished it, so go INACTIVE */
+        try {
+            dynamic_cast<ObjectListController&>(event_service);
+            DistSessionState inactive_state;
+            inactive_state = DistSessionState::VAL_INACTIVE;
+            distributionSession().setState(inactive_state);
+        } catch (std::bad_cast &ex) {
+            /* event came from one of my PullObjectIngesters, so resend to ourselves to avoid deleting active PullObjectIngester */
+            sendEventAsynchronous(event.newClone());
+        }
+        event.preventDefault();
     }
     ObjectController::processEvent(event, event_service);
 
@@ -167,7 +178,9 @@ void ObjectListController::initPullObjectIngesters()
             }
         }
 
-        addPullObjectIngester(new PullObjectIngester(objectStore(), *this, urls));
+        PullObjectIngester *pull_obj_ingest = new PullObjectIngester(objectStore(), *this, urls);
+        subscribeTo({PullObjectIngester::ObjectPullQueueExhaustedEvent::event_name}, *pull_obj_ingest);
+        addPullObjectIngester(pull_obj_ingest);
     }
 }
 

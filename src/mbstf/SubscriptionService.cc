@@ -273,7 +273,7 @@ bool SubscriptionService::sendEventSynchronous(Event &event)
 void SubscriptionService::sendEventAsynchronous(Event &&event)
 {
     std::lock_guard guard(*m_asyncMutex);
-    m_asyncEventQueue.emplace_back(std::shared_ptr<Event>(new Event(std::move(event))));
+    m_asyncEventQueue.emplace_back(std::shared_ptr<Event>(event.newClone()));
     m_asyncCondVar.notify_all();
     startAsyncLoop();
 }

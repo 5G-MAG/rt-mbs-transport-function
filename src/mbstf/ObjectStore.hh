@@ -48,11 +48,28 @@ public:
 
     class ObjectAddedEvent : public Event {
     public:
-        ObjectAddedEvent(const std::string& object_id)
-            : Event("ObjectAdded"), m_object_id(object_id) {}
+        ObjectAddedEvent(const std::string& object_id) :Event("ObjectAdded"), m_object_id(object_id) {};
+        ObjectAddedEvent(const ObjectAddedEvent &other) :Event(other), m_object_id(other.m_object_id) {};
+        ObjectAddedEvent(ObjectAddedEvent &&other) :Event(std::move(other)), m_object_id(std::move(other.m_object_id)) {};
+
+        virtual ~ObjectAddedEvent() {};
+
+        ObjectAddedEvent &operator=(const ObjectAddedEvent &other) {
+            Event::operator=(other);
+            m_object_id = other.m_object_id;
+            return *this;
+        };
+        ObjectAddedEvent &operator=(ObjectAddedEvent &&other) {
+            Event::operator=(std::move(other));
+            m_object_id = std::move(other.m_object_id);
+            return *this;
+        };
 
         std::string objectId() const { return m_object_id; }
-        virtual ~ObjectAddedEvent() {};
+
+        virtual Event clone() const { return ObjectAddedEvent(*this); };
+        virtual Event *newClone() const { return new ObjectAddedEvent(*this); };
+        virtual std::string reprString() const { return std::format("ObjectAddedEvent(\"{}\")", m_object_id); };
 
     private:
         std::string m_object_id;
@@ -60,11 +77,28 @@ public:
 
     class ObjectDeletedEvent : public Event {
     public:
-        ObjectDeletedEvent(const std::string& object_id)
-            : Event("ObjectDeleted"), m_object_id(object_id) {}
+        ObjectDeletedEvent(const std::string& object_id) :Event("ObjectDeleted"), m_object_id(object_id) {};
+        ObjectDeletedEvent(const ObjectDeletedEvent &other) :Event(other), m_object_id(other.m_object_id) {};
+        ObjectDeletedEvent(ObjectDeletedEvent &&other) :Event(std::move(other)), m_object_id(std::move(other.m_object_id)) {};
+
+        virtual ~ObjectDeletedEvent() {};
+
+        ObjectDeletedEvent &operator=(const ObjectDeletedEvent &other) {
+            Event::operator=(other);
+            m_object_id = other.m_object_id;
+            return *this;
+        };
+        ObjectDeletedEvent &operator=(ObjectDeletedEvent &&other) {
+            Event::operator=(std::move(other));
+            m_object_id = std::move(other.m_object_id);
+            return *this;
+        };
 
         std::string objectId() const { return m_object_id; }
-        virtual ~ObjectDeletedEvent() {};
+
+        virtual Event clone() const { return ObjectDeletedEvent(*this); };
+        virtual Event *newClone() const { return new ObjectDeletedEvent(*this); };
+        virtual std::string reprString() const { return std::format("ObjectDeletedEvent(\"{}\")", m_object_id); };
 
     private:
         std::string m_object_id;

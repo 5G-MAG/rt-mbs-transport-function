@@ -182,6 +182,27 @@ void PushObjectIngester::Request::requestHandler(struct MHD_Connection *connecti
     MHD_destroy_response(m_mhdResponse);
 }
 
+std::string PushObjectIngester::Request::reprString() const
+{
+    std::ostringstream oss;
+    oss << "PushObjectIngester::Request().method(\"" << m_method << "\").urlPath(\"" << m_urlPath << "\").protocolVersion(\""
+        << m_protocolVersion << "\")";
+    if (m_etag) {
+        oss << ".etag(\"" << m_etag.value() << "\")";
+    }
+    if (m_contentType) {
+        oss << ".contentType(\"" << m_contentType.value() << "\")";
+    }
+    if (m_expires) {
+        oss << ".expiryTime(\"" << m_expires.value() << "\")";
+    }
+    if (m_lastModified) {
+        oss << ".lastModified(\"" << m_lastModified.value() << "\")";
+    }
+
+    return oss.str();
+}
+
 /********************** PushObjectIngester::ObjectPushEvent ***************/
 
 PushObjectIngester::ObjectPushEvent *PushObjectIngester::ObjectPushEvent::makeStartEvent(const std::shared_ptr<Request> &request)
