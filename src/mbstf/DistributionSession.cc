@@ -1191,7 +1191,7 @@ void DistributionSession::_apiSubscriptionCreate(Open5GSSBIStream &stream, Open5
         rsp.setReportList(immediate_notifications);
     }
     std::string rsp_body(rsp.toJSON(false).serialise());
-    std::string location = std::format("{}/{}/subscriptions/{}", request.uri(), distributionSessionId(), subsc->subscriptionId());
+    std::string location = std::format("{}/{}", request.uri(), subsc->subscriptionId());
     std::optional<std::string> content_type;
     if (!rsp_body.empty()) content_type = "application/json";
     std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(location, content_type, std::nullopt /* last-modified */,
