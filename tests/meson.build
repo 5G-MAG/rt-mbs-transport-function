@@ -19,7 +19,7 @@ test('test_object_store',
     ,verbose: true, timeout: 600, protocol: 'exitcode')
 
 test('test_subscriber_subscription',
-    executable('testSubscriberSubscription', 'test_SubscriberSubscription.cc', test_source_subscriber_subscription, install:false, include_directories:[libmbstf_libinc, libinc])
+    executable('testSubscriberSubscription', 'test_SubscriberSubscription.cc', test_source_subscriber_subscription, install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
     ,verbose: true, timeout: 600, protocol: 'exitcode')
 
 #test('test_pull_object_ingester', 

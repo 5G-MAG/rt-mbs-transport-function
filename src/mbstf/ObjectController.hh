@@ -79,7 +79,8 @@ public:
     virtual void deactivateOutput();        /* Deactivating state for DistSession */
 
 protected:
-    const std::shared_ptr<PullObjectIngester> &addPullObjectIngester(PullObjectIngester*);
+    const std::shared_ptr<PullObjectIngester> &addPullObjectIngester(const std::shared_ptr<PullObjectIngester> &pull_obj_ingester);
+    const std::shared_ptr<PullObjectIngester> &addPullObjectIngester(PullObjectIngester *pull_obj_ingester);
     bool removePullObjectIngester(std::shared_ptr<PullObjectIngester> &);
     bool removeAllPullObjectIngesters();
     const std::shared_ptr<PushObjectIngester> &pushObjectIngester() const { return m_pushIngester; };

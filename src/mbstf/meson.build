@@ -40,6 +40,8 @@ zlib_dep = dependency('zlib', required: true)
 libmpdpp_dep = dependency('mpd++', fallback: ['libmpdpp'])
 
 test_source_subscriber_subscription = files('''
+  App.cc
+  App.hh
   SubscriptionService.cc
   SubscriptionService.hh
   Subscriber.cc

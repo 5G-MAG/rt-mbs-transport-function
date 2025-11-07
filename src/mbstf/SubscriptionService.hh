@@ -24,13 +24,14 @@
 #include <thread>
 
 #include "common.hh"
+#include "LocalEvents.hh"
 
 MBSTF_NAMESPACE_START
 
 class Subscriber;
 class Event;
 
-class SubscriptionService
+class SubscriptionService : public std::enable_shared_from_this<SubscriptionService>
 {
 public:
     SubscriptionService();

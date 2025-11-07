@@ -173,8 +173,7 @@ void MBSTFEventHandler::dispatch(Open5GSFSM &fsm, Open5GSEvent &event)
                     ogs_error("Invalid resource name [%s]", resource.c_str());
                 }
             } else {
-                ogs_error("Invalid service name [%s]", service_name.c_str());
-                ogs_assert_if_reached();
+                ogs_warn("Invalid service name [%s], may be a rogue notification response", service_name.c_str());
             }
         }
         break;
@@ -239,8 +238,11 @@ void MBSTFEventHandler::dispatch(Open5GSFSM &fsm, Open5GSEvent &event)
         }
         break;
 
+    case LocalEvents::RELEASE_SUBSCRIPTION_SVC:
+        delete reinterpret_cast<std::shared_ptr<SubscriptionService>*>(event.sbiData());
+        break;
     default:
-        ogs_error("No handler for event %s", ogs_event_get_name(event.ogsEvent()));
+        ogs_error("No handler for event %s", LocalEvents::getEventName(event));
         break;
     }
 }

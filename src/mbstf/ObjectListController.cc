@@ -178,7 +178,7 @@ void ObjectListController::initPullObjectIngesters()
             }
         }
 
-        PullObjectIngester *pull_obj_ingest = new PullObjectIngester(objectStore(), *this, urls);
+        std::shared_ptr<PullObjectIngester> pull_obj_ingest(new PullObjectIngester(objectStore(), *this, urls));
         subscribeTo({PullObjectIngester::ObjectPullQueueExhaustedEvent::event_name}, *pull_obj_ingest);
         addPullObjectIngester(pull_obj_ingest);
     }

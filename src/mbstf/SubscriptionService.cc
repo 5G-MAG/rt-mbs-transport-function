@@ -20,6 +20,7 @@
 #include <thread>
 
 #include "common.hh"
+#include "App.hh"
 #include "Subscriber.hh"
 #include "Event.hh"
 
@@ -28,7 +29,8 @@
 MBSTF_NAMESPACE_START
 
 SubscriptionService::SubscriptionService()
-    :m_allEventSubscriptions()
+    :std::enable_shared_from_this<SubscriptionService>()
+    ,m_allEventSubscriptions()
     ,m_namedEventSubscriptions()
     ,m_asyncThread()
     ,m_asyncEventQueue()
@@ -39,7 +41,8 @@ SubscriptionService::SubscriptionService()
 }
 
 SubscriptionService::SubscriptionService(const SubscriptionService &other)
-    :m_allEventSubscriptions(std::move(other.m_allEventSubscriptions))
+    :std::enable_shared_from_this<SubscriptionService>(other)
+    ,m_allEventSubscriptions(std::move(other.m_allEventSubscriptions))
     ,m_namedEventSubscriptions(std::move(other.m_namedEventSubscriptions))
     ,m_asyncThread()
     ,m_asyncEventQueue()
@@ -56,7 +59,8 @@ SubscriptionService::SubscriptionService(const SubscriptionService &other)
 }
 
 SubscriptionService::SubscriptionService(SubscriptionService &&other)
-    :m_allEventSubscriptions(std::move(other.m_allEventSubscriptions))
+    :std::enable_shared_from_this<SubscriptionService>(std::move(other))
+    ,m_allEventSubscriptions(std::move(other.m_allEventSubscriptions))
     ,m_namedEventSubscriptions(std::move(other.m_namedEventSubscriptions))
     ,m_asyncThread()
     ,m_asyncEventQueue()
@@ -95,6 +99,7 @@ SubscriptionService &SubscriptionService::operator=(const SubscriptionService &o
 {
     std::lock_guard guard(*m_asyncMutex);
     std::lock_guard other_guard(*other.m_asyncMutex);
+    std::enable_shared_from_this<SubscriptionService>::operator=(other);
     m_allEventSubscriptions = other.m_allEventSubscriptions;
     m_namedEventSubscriptions = other.m_namedEventSubscriptions;
     if (other.m_asyncThread.get_id() != std::thread::id() &&
@@ -115,6 +120,7 @@ SubscriptionService &SubscriptionService::operator=(SubscriptionService &&other)
 {
     std::lock_guard guard(*m_asyncMutex);
     std::lock_guard other_guard(*other.m_asyncMutex);
+    std::enable_shared_from_this<SubscriptionService>::operator=(std::move(other));
     m_allEventSubscriptions = std::move(other.m_allEventSubscriptions);
     m_namedEventSubscriptions = std::move(other.m_namedEventSubscriptions);
     if (other.m_asyncThread.get_id() != std::thread::id() &&
@@ -251,6 +257,7 @@ std::string SubscriptionService::reprString() const
 bool SubscriptionService::sendEventSynchronous(Event &event)
 {
     std::lock_guard guard(*m_asyncMutex);
+    auto self = shared_from_this(); /* make sure we don't get deleted while sending events */
     auto it = m_namedEventSubscriptions.find(event.eventName());
     if (it != m_namedEventSubscriptions.end()) {
         for (auto &subsc : it->second) {
@@ -303,10 +310,12 @@ void SubscriptionService::startAsyncLoop()
 
 void SubscriptionService::stopAsyncLoop()
 {
-    if (m_asyncThread.get_id() == std::thread::id()) return;
-    m_asyncCancel = true;
-    m_asyncCondVar.notify_all();
-    m_asyncThread.join();
+    {
+        std::lock_guard guard(*m_asyncMutex);
+        m_asyncCancel = true;
+        m_asyncCondVar.notify_all();
+    }
+    if (m_asyncThread.get_id() != std::this_thread::get_id() && m_asyncThread.joinable()) m_asyncThread.join();
 }
 
 void SubscriptionService::asyncEventsLoopRunner(SubscriptionService *svc)
@@ -317,7 +326,8 @@ void SubscriptionService::asyncEventsLoopRunner(SubscriptionService *svc)
 void SubscriptionService::asyncEventsLoop()
 {
     using namespace std::literals;
-    while (!m_asyncCancel) {
+    auto self = shared_from_this(); /* make sure we don't get deleted while sending events, but exit if we are the last holder */
+    while (!m_asyncCancel && self.use_count() > 1) {
         std::lock_guard guard(*m_asyncMutex);
         while (!m_asyncCancel && m_asyncEventQueue.empty()) {
             m_asyncCondVar.wait_for(*m_asyncMutex, 500ms);
@@ -333,6 +343,12 @@ void SubscriptionService::asyncEventsLoop()
             }
             m_asyncMutex->lock();
         }
+    }
+    if (self.use_count() == 1) {
+        std::shared_ptr<Open5GSEvent> evt(new Open5GSEvent(new ogs_event_t));
+        evt->ogsEvent()->id = LocalEvents::RELEASE_SUBSCRIPTION_SVC;
+        evt->setSbiData(new std::shared_ptr<SubscriptionService>(self));
+        App::self().queuePush(evt);
     }
 }
 

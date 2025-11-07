@@ -29,13 +29,18 @@ using reftools::mbstf::DistSessionState;
 
 MBSTF_NAMESPACE_START
 
-const std::shared_ptr<PullObjectIngester> &ObjectController::addPullObjectIngester(PullObjectIngester *ingester)
+const std::shared_ptr<PullObjectIngester> &ObjectController::addPullObjectIngester(
+                                                                    const std::shared_ptr<PullObjectIngester> &pull_obj_ingester)
 {
     std::lock_guard<std::recursive_mutex> lock(m_pullObjectIngestersMutex);
-    // Transfer ownership from unique_ptr to shared_ptr
-    auto &listed_ingester = m_pullIngesters.emplace_back(ingester);
+    auto &listed_ingester = m_pullIngesters.emplace_back(pull_obj_ingester);
     subscribeTo({ObjectIngester::IngestFailedEvent::event_name}, *listed_ingester);
     return listed_ingester;
+}
+
+const std::shared_ptr<PullObjectIngester> &ObjectController::addPullObjectIngester(PullObjectIngester *ingester)
+{
+    return addPullObjectIngester(std::shared_ptr<PullObjectIngester>(ingester));
 }
 
 bool ObjectController::removePullObjectIngester(std::shared_ptr<PullObjectIngester> &pullIngester)
