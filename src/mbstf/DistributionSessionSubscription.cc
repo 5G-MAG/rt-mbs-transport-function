@@ -46,6 +46,8 @@ using fiveg_mag_reftools::ModelException;
 
 MBSTF_NAMESPACE_START
 
+static int __notify_client_cb(int status, ogs_sbi_response_t *response, void *data);
+
 namespace {
     struct RequestData {
         ~RequestData() {};
@@ -256,7 +258,7 @@ void DistributionSessionSubscription::sendNotifications() const
             std::shared_ptr<Open5GSSBIRequest> request(new Open5GSSBIRequest(post_method, notify_uri.value(), api_version,
                                                 body, OGS_SBI_CONTENT_JSON_TYPE));
             RequestData *data = new RequestData{this, request};
-            m_cache->client->sendRequest(ogs_sbi_client_handler, request, data);
+            m_cache->client->sendRequest(__notify_client_cb, request, data);
         }
     }
 }
@@ -268,8 +270,12 @@ bool DistributionSessionSubscription::processClientResponse(const Open5GSEvent &
     {
         RequestData *req_data = reinterpret_cast<RequestData*>(event.sbiData());
         if (req_data && req_data->subscription == this) {
-            auto resp = event.sbiResponse(true);
-            ogs_debug("Got %i response from notification(s) to %s", resp.status(), req_data->request->uri());
+            if (event.sbiState() == OGS_OK) {
+                auto resp = event.sbiResponse(true);
+                ogs_debug("Got %i response from notification(s) to %s", resp.status(), req_data->request->uri());
+            } else {
+                ogs_debug("Problem sending notification(s) to %s", req_data->request->uri());
+            }
             req_data->request.reset();
             delete req_data;
             return true;
@@ -336,6 +342,37 @@ void DistributionSessionSubscription::_setSubscriptionId()
     char uuid_str[37];
     uuid_unparse(uuid, uuid_str);
     m_subscriptionId = uuid_str;
+}
+
+static int __notify_client_cb(int status, ogs_sbi_response_t *response, void *data)
+{
+    ogs_event_t *e = ogs_event_new(OGS_EVENT_SBI_CLIENT);
+    int rv;
+    RequestData *req_data = reinterpret_cast<RequestData*>(data);
+
+    e = ogs_event_new(OGS_EVENT_SBI_CLIENT);
+    ogs_assert(e);
+    e->sbi.request = req_data->request->ogsSBIRequest();
+    e->sbi.response = response;
+    e->sbi.data = data;
+    e->sbi.state = status;
+
+    if (status != OGS_OK) {
+        ogs_log_message(status == OGS_DONE ? OGS_LOG_DEBUG : OGS_LOG_WARN, 0,
+                        "MBS Distribution Session Notification failed [%d]", status);
+    } else {
+        ogs_assert(response);
+    }
+
+    rv = ogs_queue_push(ogs_app()->queue, e);
+    if (rv != OGS_OK) {
+        ogs_error("ogs_queue_push() failed:%d", (int)rv);
+        ogs_sbi_response_free(response);
+        ogs_event_free(e);
+        return OGS_ERROR;
+    }
+
+    return OGS_OK;
 }
 
 MBSTF_NAMESPACE_STOP
