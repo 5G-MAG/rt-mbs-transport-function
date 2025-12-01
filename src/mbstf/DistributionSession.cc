@@ -730,6 +730,11 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
     return *this;
 }
 
+void DistributionSession::haveEmptyQueue()
+{
+    _haveEmptyQueue();
+}
+
 /**** private: ****/
 
 DistributionSession::InitStateAction DistributionSession::Action::initState()
@@ -742,6 +747,11 @@ DistributionSession::StateTransitionAction DistributionSession::Action::stateTra
     return DistributionSession::StateTransitionAction(new_state);
 }
 
+DistributionSession::EmptyQueueAction DistributionSession::Action::emptyQueue()
+{
+    return DistributionSession::EmptyQueueAction();
+}
+
 void DistributionSession::_transitionTo(DistSessionState::Enum new_state)
 {
     auto act = Action::stateTransition(new_state);
@@ -752,6 +762,11 @@ void DistributionSession::_changeState(void (DistributionSession::*f)(const Dist
 {
     m_currentStateFunction = std::bind(f, this, std::placeholders::_1);
     m_currentStateFunction(Action::initState());
+}
+
+void DistributionSession::_haveEmptyQueue()
+{
+    m_currentStateFunction(Action::emptyQueue());
 }
 
 void DistributionSession::_constructedState(const DistributionSession::Action &action)
@@ -883,6 +898,8 @@ void DistributionSession::_deactivatingState(const DistributionSession::Action &
     case Action::INIT_STATE:
         ogs_debug("DistributionSession(%p) entering DEACTIVATING state", this);
         m_controller->deactivateOutput();
+        break;
+    case Action::EMPTY_QUEUE:
         _registerEvent(DistributionSessionEvents::DATA_INGEST_SESSION_TERMINATED);
         /* once we've deactivated everything, always go to inactive state */
         if (getState().getValue() == DistSessionState::VAL_DEACTIVATING) {
@@ -902,7 +919,6 @@ void DistributionSession::_deactivatingState(const DistributionSession::Action &
                 break;
             case DistSessionState::VAL_ESTABLISHED:
             case DistSessionState::VAL_ACTIVE:
-                throw std::runtime_error("Invalid state transition in DistSession");
             case DistSessionState::VAL_DEACTIVATING:
                 break;
             default:

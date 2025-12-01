@@ -83,6 +83,17 @@ void ObjectStreamingController::unsetObjectPackager()
     packager(nullptr);
 }
 
+void ObjectStreamingController::activateObjectPackager() {
+    packager()->activate();
+    startWorker();
+}
+
+void ObjectStreamingController::deactivateObjectPackager() {
+    if (packager()->deactivate()) {
+        distributionSession().haveEmptyQueue();
+    }
+}
+
 std::shared_ptr<ObjectListPackager> ObjectStreamingController::getObjectListPackager() const
 {
     return std::dynamic_pointer_cast<ObjectListPackager>(packager());

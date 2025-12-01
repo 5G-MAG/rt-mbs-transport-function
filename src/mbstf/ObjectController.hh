@@ -36,13 +36,13 @@ public:
     ObjectController(DistributionSession &distributionSession)
         :Controller(distributionSession)
 	,Subscriber()
-        ,m_objectStore(*this)
+        ,m_objectStore(new ObjectStore(*this))
         ,m_pullIngesters()
         ,m_pushIngester()
         ,m_packager()
         ,m_nextId(1)
         ,m_consecutiveIngestFailures(0)
-    { subscribeTo({"ObjectAdded"}, m_objectStore); };
+    { subscribeTo({"ObjectAdded"}, objectStore()); };
     ObjectController(const ObjectController &) = delete;
     ObjectController(ObjectController &&) = delete;
 
@@ -51,8 +51,8 @@ public:
     ObjectController &operator=(const ObjectController &) = delete;
     ObjectController &operator=(ObjectController &&) = delete;
 
-    const ObjectStore &objectStore() const { return m_objectStore; };
-    ObjectStore &objectStore() { return m_objectStore; };
+    const ObjectStore &objectStore() const { return *m_objectStore.get(); };
+    ObjectStore &objectStore() { return *m_objectStore.get(); };
 
     const std::list<std::shared_ptr<PullObjectIngester>> &getPullObjectIngesters() const {return m_pullIngesters;};
 
@@ -93,11 +93,13 @@ protected:
     virtual void initPullObjectIngesters() = 0;
     virtual void setObjectPackager() = 0;
     virtual void unsetObjectPackager() = 0;
+    virtual void activateObjectPackager() = 0;
+    virtual void deactivateObjectPackager() = 0;
 
     std::recursive_mutex m_pullObjectIngestersMutex;
 
 private:
-    ObjectStore m_objectStore;
+    std::shared_ptr<ObjectStore> m_objectStore;
     std::list<std::shared_ptr<PullObjectIngester>> m_pullIngesters;
     std::shared_ptr<PushObjectIngester> m_pushIngester;
     std::shared_ptr<ObjectPackager> m_packager;

@@ -83,6 +83,10 @@ void ObjectController::processEvent(Event &event, SubscriptionService &event_ser
 	} else {
             ogs_debug("Keeping object [%s] in object store after sending...", object_id.c_str());
 	}
+
+        if (objSendEvent.queueEmpty()) {
+            distributionSession().haveEmptyQueue();
+        }
     } else if (event.eventName() == ObjectIngester::IngestFailedEvent::event_name) {
         ObjectIngester::IngestFailedEvent &ingest_failed_event = dynamic_cast<ObjectIngester::IngestFailedEvent&>(event);
         ogs_debug("Object ingest failed for %s: reason = %i", ingest_failed_event.url().c_str(), ingest_failed_event.failureType());
@@ -111,6 +115,7 @@ std::string ObjectController::nextObjectId()
 const std::shared_ptr<ObjectPackager> &ObjectController::packager(ObjectPackager *packager)
 {
     m_packager.reset(packager);
+    subscribeTo({"ObjectSendCompleted"}, *m_packager.get());
     return m_packager;
 }
 
@@ -121,13 +126,12 @@ const std::optional<std::string> &ObjectController::getObjectDistributionBaseUrl
 void ObjectController::reconfigureObjectStore()
 {
     auto &dist_session = distributionSession();
-    m_objectStore.reconfigureMetadatas(dist_session.getObjectIngestBaseUrl(), dist_session.objectDistributionBaseUrl());
+    m_objectStore->reconfigureMetadatas(dist_session.getObjectIngestBaseUrl(), dist_session.objectDistributionBaseUrl());
 }
 
 void ObjectController::establishInactiveInputs()
 {
     m_pullIngesters.clear();
-    m_packager.reset();
     if (distributionSession().getObjectAcquisitionMethod() == "PUSH" && !m_pushIngester) initPushObjectIngester();
 }
 
@@ -138,12 +142,16 @@ void ObjectController::establishActiveInputs()
 
 void ObjectController::activateOutput()
 {
-    if (!m_packager) setObjectPackager();
+    if (!m_packager) {
+        setObjectPackager();
+    } else {
+        activateObjectPackager();
+    }
 }
 
 void ObjectController::deactivateOutput()
 {
-    if (m_packager) unsetObjectPackager();
+    if (m_packager) deactivateObjectPackager();
 }
 
 MBSTF_NAMESPACE_STOP

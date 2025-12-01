@@ -103,18 +103,20 @@ public:
     void removeSubscription(const std::string &subscription_id);
     
     const DistributionSessionEvents &eventTimestamps() const { return m_eventTimestamps; };
-    // TODO: Forwarding Events from the Controller to m_eventSubscriptions
-    // virtual void processEvent(Event &event, SubscriptionService &event_service);
+
+    void haveEmptyQueue();
 
 private:
     class InitStateAction;
     class StateTransitionAction;
+    class EmptyQueueAction;
 
     class Action {
     public:
         typedef enum {
             INIT_STATE,
-            STATE_TRANSITION
+            STATE_TRANSITION,
+            EMPTY_QUEUE
         } ActionType;
 
         Action(ActionType typ): m_type(typ) {};
@@ -124,6 +126,7 @@ private:
 
         static InitStateAction initState();
         static StateTransitionAction stateTransition(reftools::mbstf::DistSessionState::Enum new_state);
+        static EmptyQueueAction emptyQueue();
     protected:
         ActionType m_type;
     };
@@ -144,8 +147,14 @@ private:
         reftools::mbstf::DistSessionState::Enum m_newState;
     };
 
+    class EmptyQueueAction : public Action {
+    public:
+        EmptyQueueAction() :Action(Action::EMPTY_QUEUE) {};
+    };
+
     void _transitionTo(reftools::mbstf::DistSessionState::Enum new_state);
     void _changeState(void (DistributionSession::*f)(const DistributionSession::Action &action));
+    void _haveEmptyQueue();
     void _constructedState(const Action &action);
     void _inactiveState(const Action &action);
     void _establishedState(const Action &action);

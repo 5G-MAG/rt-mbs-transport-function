@@ -21,6 +21,7 @@
 #include <netinet/in.h>
 
 #include "ogs-app.h" // ogs_error(), ogs_info()
+#include "ogs-sbi.h"
 #include "Transmitter.h" // LibFlute
 
 #include "common.hh"
@@ -104,10 +105,15 @@ ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectControll
 
 ObjectListPackager::~ObjectListPackager() {
     abort();
-    if (m_transmitter) delete m_transmitter;
+    if (m_transmitter) {
+        delete m_transmitter;
+        m_transmitter = NULL;
+    }
 }
 
 bool ObjectListPackager::add(const PackageItem &item) {
+    ogs_debug("ObjectListPackager::add(): deactivating=%s", m_deactivating?"true":"false");
+    if (m_deactivating) return false;
     std::lock_guard<std::recursive_mutex> lock(*m_packageItemsMutex);
     m_packageItems.push_back(item);
     sortListByPolicy();
@@ -115,6 +121,8 @@ bool ObjectListPackager::add(const PackageItem &item) {
 }
 
 bool ObjectListPackager::add(PackageItem &&item) {
+    ogs_debug("ObjectListPackager::add(): deactivating=%s", m_deactivating?"true":"false");
+    if (m_deactivating) return false;
     std::lock_guard<std::recursive_mutex> lock(*m_packageItemsMutex);
     m_packageItems.push_back(std::move(item));
     sortListByPolicy();
@@ -154,7 +162,11 @@ bool ObjectListPackager::updateFluteInfo(const std::string &address, in_port_t p
 }
 
 void ObjectListPackager::doObjectPackage() {
+#if 0
     try {
+#else
+    {
+#endif
         std::optional<std::string> destAddr = destIpAddr();
 
         if (destAddr)
@@ -171,12 +183,21 @@ void ObjectListPackager::doObjectPackage() {
                         LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005);
                 m_transmitter->register_completion_callback(
                         [this](uint32_t toi) {
+                            ogs_debug("FLUTE Transmitter has %zu files left", m_transmitter->number_of_files());
+                            bool queue_empty = (m_transmitter->number_of_files() == 0);
                             if (m_queuedToi == toi) {
                                 m_queued = false;
-                                objectSendCompletion(m_queuedObjectId);
+                                objectSendCompletion(m_queuedObjectId, queue_empty);
                                 ogs_info("Transmitted: Object with TOI: %d", toi);
                             } else {
                                 ogs_error("Unscheduled completion of Object with TOI: %d", toi);
+                            }
+                            std::lock_guard<std::recursive_mutex> guard(m_deactivateMutex);
+                            if (m_deactivating && queue_empty) {
+                                ogs_debug("Deactivating FLUTE stream on last file");
+                                m_transmitter->deactivate();
+                                abort();
+                                m_deactivating = false;
                             }
                         });
 
@@ -241,9 +262,11 @@ void ObjectListPackager::doObjectPackage() {
 
             m_io.run_one();
         }
+#if 0
     } catch (std::exception &ex) {
         ogs_error("Exiting on unhandled exception: %s", ex.what());
         // emitFluteSessionFailedEvent();
+#endif
     }
 }
 
@@ -256,9 +279,9 @@ void ObjectListPackager::sortListByPolicy() {
     });
 }
 
-void ObjectListPackager::objectSendCompletion(std::string &object_id)
+void ObjectListPackager::objectSendCompletion(std::string &object_id, bool queue_empty)
 {
-    std::shared_ptr<Event> event(new ObjectListPackager::ObjectSendCompleted(object_id));
+    std::shared_ptr<Event> event(new ObjectListPackager::ObjectSendCompleted(object_id, queue_empty));
     sendEventAsynchronous(event);
 }
 

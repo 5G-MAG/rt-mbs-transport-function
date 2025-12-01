@@ -67,6 +67,8 @@ public:
 protected:
     virtual void setObjectPackager();
     virtual void unsetObjectPackager();
+    virtual void activateObjectPackager();
+    virtual void deactivateObjectPackager();
 
 private:
     void sendToPackager(const std::string &object_id);

@@ -40,31 +40,49 @@ class ObjectPackager: public SubscriptionService {
 public:
    class ObjectSendCompleted : public Event {
     public:
-        ObjectSendCompleted(const std::string& object_id) :Event("ObjectSendCompleted"), m_object_id(object_id) {};
-        ObjectSendCompleted(const ObjectSendCompleted &other) :Event(other), m_object_id(other.m_object_id) {};
-        ObjectSendCompleted(ObjectSendCompleted &&other) :Event(std::move(other)), m_object_id(std::move(other.m_object_id)) {};
+        ObjectSendCompleted(const std::string& object_id, bool queue_empty)
+            :Event("ObjectSendCompleted")
+            ,m_object_id(object_id)
+            ,m_queue_empty(queue_empty)
+        {};
+        ObjectSendCompleted(const ObjectSendCompleted &other)
+            :Event(other)
+            ,m_object_id(other.m_object_id)
+            ,m_queue_empty(other.m_queue_empty)
+        {};
+        ObjectSendCompleted(ObjectSendCompleted &&other)
+            :Event(std::move(other))
+            ,m_object_id(std::move(other.m_object_id))
+            ,m_queue_empty(other.m_queue_empty)
+        {};
 
         virtual ~ObjectSendCompleted() {};
 
         ObjectSendCompleted &operator=(const ObjectSendCompleted &other) {
             Event::operator=(other);
             m_object_id = other.m_object_id;
+            m_queue_empty = other.m_queue_empty;
             return *this;
         };
         ObjectSendCompleted &operator=(ObjectSendCompleted &&other) {
             Event::operator=(std::move(other));
             m_object_id = std::move(other.m_object_id);
+            m_queue_empty = other.m_queue_empty;
             return *this;
         };
 
         std::string objectId() const { return m_object_id; };
+        bool queueEmpty() const { return m_queue_empty; };
 
         virtual Event clone() const { return ObjectSendCompleted(*this); };
         virtual Event *newClone() const { return new ObjectSendCompleted(*this); };
-        virtual std::string reprString() const { return std::format("ObjectSendCompleted(\"{}\")", m_object_id); };
+        virtual std::string reprString() const {
+            return std::format("ObjectSendCompleted(\"{}\", queue_empty={})", m_object_id, m_queue_empty);
+        };
 
     private:
         std::string m_object_id;
+        bool m_queue_empty;
     };
 
 
@@ -73,16 +91,16 @@ public:
     ObjectPackager(const ObjectPackager &) = delete;
 
     ObjectPackager(ObjectStore &objectStore, ObjectController &controller, std::optional<std::string> destIpAddr = std::nullopt, uint32_t rateLimit = 0, unsigned short mtu = 0, in_port_t port = 0, const std::optional<std::string> &tunnel_address = std::nullopt, in_port_t tunnel_port = 0 )
-        :m_transmitter(nullptr), m_io(), m_queuedToi(0), m_queued(false), m_queuedObjectId()
+        :m_transmitter(nullptr), m_io(), m_queuedToi(0), m_queued(false), m_deactivating(false), m_queuedObjectId()
         ,m_objectStore(objectStore), m_controller(controller), m_destIpAddr(destIpAddr), m_rateLimit(rateLimit), m_mtu(mtu)
-        ,m_port(port), m_workerThread(), m_workerCancel(false)
+        ,m_port(port), m_workerThread(), m_workerCancel(false), m_workerRunning(false)
         ,m_tunnelAddress(tunnel_address), m_tunnelPort(tunnel_port)
     {
     };
 
     void abort() {
         m_workerCancel = true;
-        if (m_workerThread.joinable()) {
+        if (m_workerThread.get_id() != std::this_thread::get_id() && m_workerThread.joinable()) {
             m_workerThread.join();
         }
     };
@@ -96,10 +114,14 @@ public:
     ObjectPackager& setMtu(unsigned short mtu);
     ObjectPackager& setRateLimit(uint32_t rateLimit);
     void startWorker() {
-        if (m_workerThread.get_id() != std::thread::id()) return;
+        if (!!m_workerRunning) return;
         if (!!m_workerCancel) return;
+        if (m_workerThread.joinable()) m_workerThread.detach();
         m_workerThread = std::thread(workerLoop, this);
     };
+
+    virtual void activate();
+    virtual bool deactivate(); // returns true if deactivation was immediate
 
 protected:
     const ObjectStore &objectStore() const { return m_objectStore; };
@@ -119,6 +141,9 @@ protected:
     boost::asio::io_service m_io;
     uint32_t m_queuedToi;
     bool m_queued;
+    bool m_deactivating;
+    std::recursive_mutex m_deactivateMutex;
+    std::condition_variable_any m_deactivateCond;
     std::string m_queuedObjectId;
 
 private:
@@ -131,6 +156,7 @@ private:
     in_port_t m_port;
     std::thread m_workerThread;
     std::atomic_bool m_workerCancel;
+    std::atomic_bool m_workerRunning;
     std::optional<std::string> m_tunnelAddress;
     in_port_t m_tunnelPort;
 };

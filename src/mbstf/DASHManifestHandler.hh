@@ -11,6 +11,10 @@
  * program. If this file is missing then the license can be retrieved from
  * https://drive.google.com/file/d/1cinCiA778IErENZ3JN52VFW-1ffHpx7Z/view
  */
+#include <list>
+#include <string>
+#include <thread>
+#include <utility>
 
 #include <libmpd++/libmpd++.hh>
 
@@ -45,6 +49,7 @@ private:
   void addMPDRefreshToExtraPullObjects();
   void removeExtraPullObjectsEntry(const LIBMPDPP_NAMESPACE_CLASS(SegmentAvailability) &segment);
 
+  std::recursive_mutex m_mpdMutex;
   LIBMPDPP_NAMESPACE_CLASS(MPD)  m_mpd;
   const ObjectStore::Object *m_manifest;
   bool m_refreshMpd;

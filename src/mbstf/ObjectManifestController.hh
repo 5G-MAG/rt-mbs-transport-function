@@ -46,7 +46,7 @@ public:
 
     void abort() {
         m_scheduledPullCancel = true;
-        if (m_scheduledPullThread.joinable()) {
+        if (m_scheduledPullThread.get_id() != std::this_thread::get_id() && m_scheduledPullThread.joinable()) {
             m_scheduledPullThread.join();
         }
 
@@ -95,6 +95,7 @@ private:
     mutable std::recursive_mutex m_manifestHandlerMutex;
     std::thread m_scheduledPullThread;
     std::atomic_bool m_scheduledPullCancel;
+    std::atomic_bool m_scheduledPullRunning;
 };
 
 MBSTF_NAMESPACE_STOP

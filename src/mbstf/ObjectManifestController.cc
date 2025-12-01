@@ -115,10 +115,14 @@ std::string ObjectManifestController::generateUUID()
 
 void ObjectManifestController::workerLoop(ObjectManifestController *controller)
 {
+    controller->m_scheduledPullRunning = true;
     /* Don't process if the session is inactive or deactivating */
     {
         const auto &session_state = controller->distributionSession().getState();
-        if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) return;
+        if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
+            controller->m_scheduledPullRunning = false;
+            return;
+        }
     }
 
     /* wait for a ManifestHandler to be created */
@@ -129,22 +133,35 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
                 break;
             }
             const auto &session_state = controller->distributionSession().getState();
-            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) return;
+            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
+                controller->m_scheduledPullRunning = false;
+                return;
+            }
         }
         // Avoid a tight busy-loop: yield or sleep for a short time.
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
-    if (controller->m_scheduledPullCancel) return;
+    if (controller->m_scheduledPullCancel) {
+        controller->m_scheduledPullRunning = false;
+        return;
+    }
+
     {
         const auto &session_state = controller->distributionSession().getState();
-        if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) return;
+        if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
+            controller->m_scheduledPullRunning = false;
+            return;
+        }
     }
 
     while (!controller->m_scheduledPullCancel) {
         {
             const auto &session_state = controller->distributionSession().getState();
-            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) return;
+            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
+                controller->m_scheduledPullRunning = false;
+                return;
+            }
         }
 
         std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> next_ingest_items;
@@ -181,7 +198,10 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
 	std::this_thread::sleep_until(fetch_time);
         {
             const auto &session_state = controller->distributionSession().getState();
-            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) return;
+            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
+                controller->m_scheduledPullRunning = false;
+                return;
+            }
         }
 
         {
@@ -200,11 +220,13 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
             }
 	}
     }
+    controller->m_scheduledPullRunning = false;
 }
 
 void ObjectManifestController::startWorker()
 {
-    if(m_scheduledPullThread.get_id() == std::thread::id()) {
+    if (!m_scheduledPullRunning) {
+        if (m_scheduledPullThread.joinable()) m_scheduledPullThread.detach();
         m_scheduledPullThread = std::thread(&ObjectManifestController::workerLoop, this);
     }
 }

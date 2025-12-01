@@ -93,6 +93,16 @@ void ObjectListController::unsetObjectPackager() {
     packager(nullptr);
 }
 
+void ObjectListController::activateObjectPackager() {
+    packager()->activate();
+}
+
+void ObjectListController::deactivateObjectPackager() {
+    if (packager()->deactivate()) {
+        distributionSession().haveEmptyQueue();
+    }
+}
+
 std::shared_ptr<ObjectListPackager> ObjectListController::getObjectListPackager() const
 {
     return std::dynamic_pointer_cast<ObjectListPackager>(packager());

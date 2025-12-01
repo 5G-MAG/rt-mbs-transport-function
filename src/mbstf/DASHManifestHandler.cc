@@ -9,15 +9,19 @@
  * program. If this file is missing then the license can be retrieved from
  * https://drive.google.com/file/d/1cinCiA778IErENZ3JN52VFW-1ffHpx7Z/view
  */
-#include <chrono>
-#include <string>
-#include <cstring>
-#include <sstream>
-#include <iostream>
-#include <stdexcept>
-#include <exception>
-#include <optional>
 #include <algorithm>
+#include <chrono>
+#include <cstring>
+#include <exception>
+#include <iostream>
+#include <list>
+#include <optional>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <utility>
+
 #include <uuid/uuid.h>
 
 #include <libmpd++/SegmentAvailability.hh>
@@ -45,10 +49,12 @@ static LIBMPDPP_NAMESPACE_CLASS(MPD) ingest_manifest(const ObjectStore::Object &
 
 DASHManifestHandler::DASHManifestHandler(const ObjectStore::Object &object, ObjectController *controller, bool pull_distribution)
     :ManifestHandler(controller, pull_distribution)
+    ,m_mpdMutex()
     ,m_mpd(ingest_manifest(object))
     ,m_manifest(&object)
     ,m_refreshMpd(false)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_mpdMutex);
     m_mpd.selectAllRepresentations();
 
     //Use selectedInitializationSegments() to fetch Initialization Segments
@@ -79,7 +85,11 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
     std::string manifest_url;
     time_type fetch_time;
 
-    std::list<LIBMPDPP_NAMESPACE_CLASS(SegmentAvailability)> media_segments = m_mpd.selectedSegmentAvailability();
+    std::list<LIBMPDPP_NAMESPACE_CLASS(SegmentAvailability)> media_segments;
+    {
+        std::lock_guard<std::recursive_mutex> guard(m_mpdMutex);
+        media_segments = m_mpd.selectedSegmentAvailability();
+    }
     media_segments.insert(media_segments.end(), m_extraPullObjects.begin(), m_extraPullObjects.end());
     for (auto &ms: media_segments) {
         if(ms.availabilityStartTime() < current_time)
@@ -144,13 +154,14 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
 
 void DASHManifestHandler::addMPDRefreshToExtraPullObjects()
 {
-
-      if (m_pullDistribution && m_mpd.hasMinimumUpdatePeriod()) {
+    std::lock_guard<std::recursive_mutex> guard(m_mpdMutex);
+    if (m_pullDistribution && m_mpd.hasMinimumUpdatePeriod()) {
         auto min_update_time = m_manifest->second.receivedTime() + m_mpd.minimumUpdatePeriod().value();
-        auto time_to_update = m_manifest->second.hasExpiryTime() ? std::max(min_update_time, m_manifest->second.ExpiryTime()): min_update_time;
-         m_extraPullObjects.push_back(SegmentAvailability(time_to_update, 0s, m_manifest->second.getFetchedUrl(), m_mpd.availabilityEndTime()));
-
-     }
+        auto time_to_update = m_manifest->second.hasExpiryTime()?std::max(min_update_time, m_manifest->second.ExpiryTime())
+                                                                :min_update_time;
+        m_extraPullObjects.push_back(SegmentAvailability(time_to_update, 0s, m_manifest->second.getFetchedUrl(),
+                                                         m_mpd.availabilityEndTime()));
+    }
 }
 
 
@@ -162,9 +173,7 @@ void DASHManifestHandler::removeExtraPullObjectsEntry(const SegmentAvailability 
           m_extraPullObjects.erase(it);
 	  break;
        }
-
     }
-
 }
 
 
@@ -192,11 +201,14 @@ bool DASHManifestHandler::update(const ObjectStore::Object &new_manifest)
 {
     // Process the new MPD and see what has changed, throw an exception of the Object is not understood or invalid
 
-    m_refreshMpd = false;
-    m_mpd = ingest_manifest(new_manifest);
-    m_mpd.selectAllRepresentations();
-    //SelectedInitialistionSegments(): For everything init segments in the list schedule an ingester.
-    m_extraPullObjects = m_mpd.selectedInitializationSegments();
+    {
+        std::lock_guard<std::recursive_mutex> guard(m_mpdMutex);
+        m_refreshMpd = false;
+        m_mpd = ingest_manifest(new_manifest);
+        m_mpd.selectAllRepresentations();
+        //SelectedInitialistionSegments(): For everything init segments in the list schedule an ingester.
+        m_extraPullObjects = m_mpd.selectedInitializationSegments();
+    }
     addMPDRefreshToExtraPullObjects();
 
     return true; // assume manifest updated, use false for no manifest change
