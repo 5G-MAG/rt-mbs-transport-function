@@ -20,6 +20,7 @@
 #include <netinet/in.h>
 
 #include "ogs-app.h"
+#include "ogs-sbi.h" // include before "common.hh" to ensure correct logging domain
 
 #include "common.hh"
 #include "DistributionSession.hh"
@@ -79,7 +80,14 @@ void ObjectManifestController::initPullObjectIngesters()
 
                 }
 
-                urls.emplace_back(nextObjectId(), obj_ingest_url, url_str, object_ingest_base_url, object_distribution_base_url);
+                const auto *metadata = objectStore().findMetadataByURL(obj_ingest_url);
+                if (metadata) {
+                    /* this is a refetch */
+                    urls.emplace_back(*metadata);
+                } else {
+                    /* this is a new URL */
+                    urls.emplace_back(nextObjectId(), obj_ingest_url, url_str, object_ingest_base_url, object_distribution_base_url);
+                }
             }
         }
 

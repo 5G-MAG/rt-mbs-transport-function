@@ -18,6 +18,7 @@
  */
 
 #include "ogs-core.h"
+#include "ogs-sbi.h" // include before "common.hh" to ensure correct logging domain
 
 #include <stdexcept>
 

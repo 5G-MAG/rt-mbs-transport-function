@@ -24,6 +24,8 @@
 #include <netdb.h>
 #include <uuid/uuid.h>
 
+#include "ogs-sbi.h" // include before "common.hh" to ensure correct logging domain
+
 #include "common.hh"
 #include "App.hh"
 #include "hash.hh"

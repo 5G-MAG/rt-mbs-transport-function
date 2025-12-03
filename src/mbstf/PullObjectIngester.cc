@@ -9,6 +9,7 @@
  * program. If this file is missing then the license can be retrieved from
  * https://drive.google.com/file/d/1cinCiA778IErENZ3JN52VFW-1ffHpx7Z/view
  */
+#include "ogs-sbi.h" // include before "common.hh" to get correct logging domain
 
 #include <memory>
 #include <stdexcept>
@@ -75,7 +76,7 @@ bool PullObjectIngester::fetch(const std::string &object_id, const std::optional
 {
     std::lock_guard<std::recursive_mutex> lock(*m_ingestItemsMutex);
 
-    // If this is a refetch for a pending object, just update the current fetch list item
+    // If this is a fetch for an already pending fetch object, just update the current fetch list item
     decltype(m_fetchList)::iterator it;
     for (it = m_fetchList.begin(); it != m_fetchList.end(); ++it) {
         if (it->objectId() == object_id) {
@@ -88,7 +89,7 @@ bool PullObjectIngester::fetch(const std::string &object_id, const std::optional
 
     // otherwise we need a new fetch based on the ObjectStore entry
     if (it == m_fetchList.end()) {
-        m_fetchList.emplace_back(this->objectStore().getMetadata(object_id), download_deadline);
+        m_fetchList.emplace_back(objectStore().getMetadata(object_id), download_deadline);
     }
 
     sortListByPolicy();
@@ -103,8 +104,22 @@ bool PullObjectIngester::fetch(const IngestItem &item) {
         objectStore().getMetadata(item.objectId());
         return fetch(item.objectId(), item.deadline());
     } catch (const std::out_of_range &ex) {
-        // No previous version, this isn't a refresh
-        m_fetchList.push_back(item);
+        // No previous version, this isn't a refresh, but may still be a re-request for an existing list item
+        decltype(m_fetchList)::iterator it;
+        for (it = m_fetchList.begin(); it != m_fetchList.end(); ++it) {
+            if (it->objectId() == item.objectId()) {
+                if (item.deadline().has_value()) {
+                    it->deadline(item.deadline().value());
+                }
+                break;
+            }
+        }
+
+        // otherwise we need a new fetch based on the ObjectStore entry
+        if (it == m_fetchList.end()) {
+            m_fetchList.push_back(item);
+        }
+
         sortListByPolicy();
         m_ingestItemsCondVar.notify_all();
     }
@@ -117,8 +132,22 @@ bool PullObjectIngester::fetch(IngestItem &&item) {
         objectStore().getMetadata(item.objectId());
         return fetch(item.objectId(), item.deadline());
     } catch (const std::out_of_range &ex) {
-        // No previous version, this isn't a refresh
-        m_fetchList.push_back(std::move(item));
+        // No previous version, this isn't a refresh, but may still be a re-request for an existing list item
+        decltype(m_fetchList)::iterator it;
+        for (it = m_fetchList.begin(); it != m_fetchList.end(); ++it) {
+            if (it->objectId() == item.objectId()) {
+                if (item.deadline().has_value()) {
+                    it->deadline(item.deadline().value());
+                }
+                break;
+            }
+        }
+
+        // otherwise we need a new fetch based on the ObjectStore entry
+        if (it == m_fetchList.end()) {
+            m_fetchList.push_back(std::move(item));
+        }
+
         sortListByPolicy();
         m_ingestItemsCondVar.notify_all();
     }

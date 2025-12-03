@@ -22,6 +22,7 @@
 #include <uuid/uuid.h>
 
 #include "ogs-app.h"
+#include "ogs-sbi.h" // include before "common.hh" to ensure correct logging domain
 
 #include "common.hh"
 #include "ControllerFactory.hh"
@@ -183,8 +184,14 @@ void ObjectListController::initPullObjectIngesters()
 
                 }
 
-                urls.emplace_back(std::move(PullObjectIngester::IngestItem(nextObjectId(), obj_ingest_url, url_str,
-                                                                           object_ingest_base_url, object_distribution_base_url)));
+                const auto *metadata = objectStore().findMetadataByURL(obj_ingest_url);
+                if (metadata) {
+                    /* refetch existing object */
+                    urls.emplace_back(*metadata);
+                } else {
+                    /* fetch new URL */
+                    urls.emplace_back(nextObjectId(), obj_ingest_url, url_str, object_ingest_base_url, object_distribution_base_url);
+                }
             }
         }
 

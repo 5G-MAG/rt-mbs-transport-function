@@ -13,6 +13,8 @@
 #include <memory>
 #include <list>
 
+#include "ogs-sbi.h" // include before "common.hh" to ensure correct logging domain
+
 #include "common.hh"
 #include "App.hh"
 #include "Controller.hh"

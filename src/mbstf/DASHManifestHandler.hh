@@ -45,7 +45,6 @@ public:
 
 private:
   std::string generateUUID();
-  void adjustAvailabilityStartTime();
   void addMPDRefreshToExtraPullObjects();
   void removeExtraPullObjectsEntry(const LIBMPDPP_NAMESPACE_CLASS(SegmentAvailability) &segment);
 

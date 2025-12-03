@@ -115,6 +115,7 @@ bool ObjectListPackager::add(const PackageItem &item) {
     ogs_debug("ObjectListPackager::add(): deactivating=%s", m_deactivating?"true":"false");
     if (m_deactivating) return false;
     std::lock_guard<std::recursive_mutex> lock(*m_packageItemsMutex);
+    m_packageItems.remove_if([&item](const PackageItem &pkg_item) -> bool { return item.objectId() == pkg_item.objectId(); });
     m_packageItems.push_back(item);
     sortListByPolicy();
     return true;
@@ -124,6 +125,7 @@ bool ObjectListPackager::add(PackageItem &&item) {
     ogs_debug("ObjectListPackager::add(): deactivating=%s", m_deactivating?"true":"false");
     if (m_deactivating) return false;
     std::lock_guard<std::recursive_mutex> lock(*m_packageItemsMutex);
+    m_packageItems.remove_if([&item](const PackageItem &pkg_item) -> bool { return item.objectId() == pkg_item.objectId(); });
     m_packageItems.push_back(std::move(item));
     sortListByPolicy();
     return true;
@@ -162,112 +164,101 @@ bool ObjectListPackager::updateFluteInfo(const std::string &address, in_port_t p
 }
 
 void ObjectListPackager::doObjectPackage() {
-#if 0
-    try {
-#else
-    {
-#endif
-        std::optional<std::string> destAddr = destIpAddr();
+    std::optional<std::string> destAddr = destIpAddr();
 
-        if (destAddr)
-        {
-            if (!m_transmitter) {
-                m_transmitter = new LibFlute::Transmitter(
-                        destAddr.value(),
-                        static_cast<short>(port()),
-                        0,
-                        mtu(),
-                        rateLimit(),
-                        m_io,
-                        m_tunnelEndpoint,
-                        LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005);
-                m_transmitter->register_completion_callback(
-                        [this](uint32_t toi) {
-                            ogs_debug("FLUTE Transmitter has %zu files left", m_transmitter->number_of_files());
-                            bool queue_empty = (m_transmitter->number_of_files() == 0);
-                            if (m_queuedToi == toi) {
-                                m_queued = false;
-                                objectSendCompletion(m_queuedObjectId, queue_empty);
-                                ogs_info("Transmitted: Object with TOI: %d", toi);
-                            } else {
-                                ogs_error("Unscheduled completion of Object with TOI: %d", toi);
-                            }
-                            std::lock_guard<std::recursive_mutex> guard(m_deactivateMutex);
-                            if (m_deactivating && queue_empty) {
-                                ogs_debug("Deactivating FLUTE stream on last file");
-                                m_transmitter->deactivate();
-                                abort();
-                                m_deactivating = false;
-                            }
-                        });
+    if (!destAddr) return;
 
-                // emitFluteSessionStartedEvent();
-            }
-            {
-                std::lock_guard<std::recursive_mutex> lock(*m_packageItemsMutex);
-
-                if (!m_packageItems.empty() && !m_queued) {
-                    auto &item = m_packageItems.front();
-	            m_packageItemsMutex->unlock();
-                    std::string location;
-		    m_queuedObjectId = item.objectId();
-                    std::vector<unsigned char> &objData = objectStore().getObjectData(item.objectId());
-                    ObjectStore::Metadata &metadata = objectStore().getMetadata(item.objectId());
-                    std::string obj_ingest_base_url = metadata.objIngestBaseUrl().value_or(std::string());
-                    std::string obj_distribution_base_url = metadata.objDistributionBaseUrl().value_or(std::string());
-
-                    // If we need to substitute objIngestBaseUrl for objDistributionBaseUrl then do so
-                    if (!obj_ingest_base_url.empty() && !obj_distribution_base_url.empty() &&
-                        metadata.getFetchedUrl().starts_with(obj_ingest_base_url)) {
-                        location = obj_distribution_base_url + metadata.getFetchedUrl().substr(obj_ingest_base_url.size());
+    if (!m_transmitter) {
+        m_transmitter = new LibFlute::Transmitter(
+                destAddr.value(),
+                static_cast<short>(port()),
+                0,
+                mtu(),
+                rateLimit(),
+                m_io,
+                m_tunnelEndpoint,
+                LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005);
+        m_transmitter->register_completion_callback(
+                [this](uint32_t toi) {
+                    ogs_debug("FLUTE Transmitter has %zu files left", m_transmitter->number_of_files());
+                    bool queue_empty = (m_transmitter->number_of_files() == 0);
+                    if (m_queuedToi == toi) {
+                        m_queued = false;
+                        objectSendCompletion(m_queuedObjectId, queue_empty);
+                        ogs_info("Transmitted: Object with TOI: %d", toi);
                     } else {
-                        // Just use the fetched URL
-                        location = metadata.getFetchedUrl();
+                        ogs_error("Unscheduled completion of Object with TOI: %d", toi);
                     }
-                    std::shared_ptr<LibFlute::Transmitter::FileDescription> file_desc(metadata.fluteFileDescription());
-                    if (!file_desc) {
-                        ogs_debug("New FileDescription(%s, ...)", location.c_str());
-                        file_desc.reset(new LibFlute::Transmitter::FileDescription(location, objData));
-                        metadata.fluteFileDescription(file_desc);
-                    } else {
-                        ogs_debug("Existing FileDescription(%s, ...)", file_desc->file_entry().content_location.c_str());
-                        file_desc->set_content_location(location);
-                        ogs_debug("Set FileDescription location to %s", location.c_str());
-                        file_desc->set_content(objData);
+                    std::lock_guard<std::recursive_mutex> guard(m_deactivateMutex);
+                    if (m_deactivating && queue_empty) {
+                        ogs_debug("Deactivating FLUTE stream on last file");
+                        m_transmitter->deactivate();
+                        abort();
+                        m_deactivating = false;
                     }
-                        
-                    m_queued = true;
-                    LibFlute::Transmitter::FileDescription::date_time_type expires_at;
-                    const auto &cache_expires = metadata.cacheExpires();
-                    if (cache_expires) {
-                        expires_at = cache_expires.value();
-                    } else {
-                        expires_at = LibFlute::Transmitter::FileDescription::date_time_type::clock::now() + 60s;
-                    }
-                    file_desc->set_expiry_time(expires_at);
+                });
 
-                    file_desc->set_content_type(metadata.mediaType());
-
-                    const auto &entity_tag = metadata.entityTag();
-                    if (entity_tag) {
-                        file_desc->set_etag(entity_tag.value());
-                    }
-
-                    m_queuedToi = m_transmitter->send(file_desc);
-
-                    m_packageItemsMutex->lock();
-                    m_packageItems.pop_front();
-                }
-	    }
-
-            m_io.run_one();
-        }
-#if 0
-    } catch (std::exception &ex) {
-        ogs_error("Exiting on unhandled exception: %s", ex.what());
-        // emitFluteSessionFailedEvent();
-#endif
+        // emitFluteSessionStartedEvent();
     }
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(*m_packageItemsMutex);
+
+        if (!m_packageItems.empty() && !m_queued) {
+            auto &item = m_packageItems.front();
+            m_packageItemsMutex->unlock();
+            std::string location;
+            m_queuedObjectId = item.objectId();
+            std::vector<unsigned char> &objData = objectStore().getObjectData(item.objectId());
+            ObjectStore::Metadata &metadata = objectStore().getMetadata(item.objectId());
+            std::string obj_ingest_base_url = metadata.objIngestBaseUrl().value_or(std::string());
+            std::string obj_distribution_base_url = metadata.objDistributionBaseUrl().value_or(std::string());
+
+            // If we need to substitute objIngestBaseUrl for objDistributionBaseUrl then do so
+            if (!obj_ingest_base_url.empty() && !obj_distribution_base_url.empty() &&
+                metadata.getFetchedUrl().starts_with(obj_ingest_base_url)) {
+                location = obj_distribution_base_url + metadata.getFetchedUrl().substr(obj_ingest_base_url.size());
+            } else {
+                // Just use the fetched URL
+                location = metadata.getFetchedUrl();
+            }
+            std::shared_ptr<LibFlute::Transmitter::FileDescription> file_desc(metadata.fluteFileDescription());
+            if (!file_desc) {
+                ogs_debug("New FileDescription(%s, ...)", location.c_str());
+                file_desc.reset(new LibFlute::Transmitter::FileDescription(location, objData));
+                metadata.fluteFileDescription(file_desc);
+            } else {
+                ogs_debug("Existing FileDescription(%s, ...)", file_desc->file_entry().content_location.c_str());
+                file_desc->set_content_location(location);
+                ogs_debug("Set FileDescription location to %s", location.c_str());
+                file_desc->set_content(objData);
+            }
+
+            m_queued = true;
+            LibFlute::Transmitter::FileDescription::date_time_type expires_at;
+            const auto &cache_expires = metadata.cacheExpires();
+            if (cache_expires) {
+                expires_at = cache_expires.value();
+            } else {
+                expires_at = LibFlute::Transmitter::FileDescription::date_time_type::clock::now() + 60s;
+            }
+            file_desc->set_expiry_time(expires_at);
+
+            file_desc->set_content_type(metadata.mediaType());
+
+            const auto &entity_tag = metadata.entityTag();
+            if (entity_tag) {
+                file_desc->set_etag(entity_tag.value());
+            }
+
+            m_queuedToi = m_transmitter->send(file_desc);
+
+            m_packageItemsMutex->lock();
+            m_packageItems.pop_front();
+        }
+    }
+
+    m_io.run_one();
 }
 
 void ObjectListPackager::sortListByPolicy() {

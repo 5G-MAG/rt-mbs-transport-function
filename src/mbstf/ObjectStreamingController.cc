@@ -22,6 +22,7 @@
 #include <uuid/uuid.h>
 
 #include "ogs-app.h"
+#include "ogs-sbi.h" // include before "common.hh" to ensure correct logging domain
 
 #include "common.hh"
 #include "ControllerFactory.hh"

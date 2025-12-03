@@ -9,6 +9,8 @@
  * program. If this file is missing then the license can be retrieved from
  * https://drive.google.com/file/d/1cinCiA778IErENZ3JN52VFW-1ffHpx7Z/view
  */
+// Open5GS includes
+#include "ogs-sbi.h" // include before "common.hh" to get correct logging domain
 
 // spdlog includes
 #include "spdlog/spdlog.h"

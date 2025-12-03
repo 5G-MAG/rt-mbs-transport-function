@@ -16,12 +16,12 @@
  * See the License for the specific language governing permissions and limitations
  * under the License.
  */
+#include <stdexcept>
+#include <memory>
 
 #include "ogs-app.h"
 #include "ogs-proto.h"
-
-#include <stdexcept>
-#include <memory>
+#include "ogs-sbi.h" // include before "common.hh" to ensure correct logging domain
 
 #include "common.hh"
 #include "Open5GSSBIRequest.hh"

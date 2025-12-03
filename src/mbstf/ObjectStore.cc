@@ -21,6 +21,8 @@
 #include <new>
 
 #include "ogs-app.h"
+#include "ogs-sbi.h" // include before "common.hh" to get correct logging domain
+
 #include "common.hh"
 
 #include "SubscriptionService.hh"

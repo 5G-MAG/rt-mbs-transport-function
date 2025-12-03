@@ -16,6 +16,7 @@
 #include <map>
 
 #include "ogs-app.h"
+#include "ogs-sbi.h" // include before "common.hh" to ensure correct logging domain
 
 #include "common.hh"
 #include "mbstf-version.h"
