@@ -9,14 +9,14 @@
 
 # Meson module fs and its functions like fs.hash_file require atleast meson 0.59.0 
 
-project('rt-mbs-transport-function', 'c', 'cpp', 
-    version : '1.2.1',
-    license : '5G-MAG Public',
-    meson_version : '>= 1.4.0',
-    default_options : [
-        'c_std=gnu99',
-        'cpp_std=gnu++20',
-    ],
+project('rt-mbs-transport-function', 'c', 'cpp',
+        version : '1.2.1',
+        license : '5G-MAG Public',
+        meson_version : '>= 1.4.0',
+        default_options : [
+            'c_std=gnu99',
+            'cpp_std=gnu++20',
+        ],
 )
 
 cplusplus = meson.get_compiler('cpp')
@@ -28,17 +28,23 @@ int main(int argc, char *argv[])
   std::chrono::parse("%Y", tmptime);
   return 0;
 }
-''', name: 'STL contains std::chrono::parse')
-  error('std::chrono::parse function not found in STL, please use gcc 14.1 or later as the compiler')
+''', name : 'STL contains std::chrono::parse')
+    error('std::chrono::parse function not found in STL, please use gcc 14.1 or later as the compiler')
 endif
 
-cmake=import('cmake')
+cmake = import('cmake')
 
-open5gs_project=subproject('open5gs', required: true)
+open5gs_project = subproject('open5gs', required : true)
 
-libflute_project=cmake.subproject('rt-libflute')
+# Configure CMake options for the subproject
+libflute_cmake_opts = cmake.subproject_options()
+libflute_cmake_opts.add_cmake_defines({ 'BUILD_TESTING' : 'OFF'})
+libflute_project = cmake.subproject(
+    'rt-libflute',
+    options : libflute_cmake_opts,
+)
 #message('rt-libflute CMake targets:\n - ' + '\n - '.join(libflute_project.target_list()))
-rt_libflute_dep=libflute_project.dependency('flute')
+rt_libflute_dep = libflute_project.dependency('flute')
 
 #subdir('lib')
 subdir('src')
