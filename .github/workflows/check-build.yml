@@ -42,4 +42,5 @@ jobs:
 
             -   name: Install
                 run: |
-                    meson test -C build --suite rt-mbs-transport-function
+                    cd build
+                    meson install --no-rebuild
