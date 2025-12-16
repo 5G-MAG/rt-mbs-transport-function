@@ -1,0 +1,45 @@
+name: check-build
+
+on:
+    pull_request:
+        branches:
+            - development
+            - main
+
+permissions:
+    contents: read
+
+jobs:
+    build:
+        runs-on: ubuntu-24.04
+
+        steps:
+            -   name: Checkout repository
+                uses: actions/checkout@v4
+                with:
+                    fetch-depth: 0
+                    submodules: recursive
+
+            -   name: Install dependencies
+                run: |
+                    sudo add-apt-repository universe
+                    sudo apt update
+                    sudo apt install -y \
+                      git ninja-build build-essential flex bison libglibmm-2.4-dev libsctp-dev libgnutls28-dev libgcrypt-dev libssl-dev \
+                      libidn11-dev libmongoc-dev libbson-dev libyaml-dev libnghttp2-dev libmicrohttpd-dev libcurl4-gnutls-dev libtins-dev \
+                      libtalloc-dev libpcre2-dev libboost-system-dev libboost-thread-dev libboost-program-options-dev libboost-test-dev libspdlog-dev \
+                      libtinyxml2-dev libconfig++-dev uuid-dev libxml2-dev gcc-14 g++-14 curl wget default-jdk cmake jq util-linux-extra mm-common python3-pip
+                    sudo sh -c 'for i in cpp g++ gcc gcc-ar gcc-nm gcc-ranlib gcov gcov-dump gcov-tool lto-dump; do rm -f /usr/bin/$i; ln -s $i-14 /usr/bin/$i; done'
+                    sudo python3 -m pip install --break-system-packages --upgrade meson
+
+            -   name: Configure build with meson
+                run: |
+                    meson setup build --prefix "$PWD/install"
+
+            -   name: Build with ninja
+                run: |
+                    ninja -C build
+
+            -   name: Install
+                run: |
+                    meson install -C build --no-rebuild
