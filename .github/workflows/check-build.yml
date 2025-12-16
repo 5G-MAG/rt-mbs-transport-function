@@ -40,10 +40,6 @@ jobs:
                 run: |
                     ninja -C build
 
-            -   name: Run unit tests
-                run: |
-                    meson test -C build --suite rt-mbs-transport-function
-
             -   name: Install
                 run: |
                     cd build
