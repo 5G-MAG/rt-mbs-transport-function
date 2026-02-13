@@ -30,6 +30,10 @@ std::string trim_slashes(const std::string &path);
 std::string time_point_to_http_datetime_str(const std::chrono::system_clock::time_point &datetime);
 std::string time_point_to_iso8601_utc_str(const std::chrono::system_clock::time_point &datetime);
 
+int get_route_mtu(const ogs_sockaddr_t &sock_addr);
+int get_tunnelled_route_mtu(const std::optional<std::string> &dest_ip, in_port_t dest_port,
+                            const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port);
+
 MBSTF_NAMESPACE_STOP
 
 /* vim:ts=8:sts=4:sw=4:expandtab:

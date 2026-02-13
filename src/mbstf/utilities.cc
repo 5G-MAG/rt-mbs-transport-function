@@ -16,6 +16,12 @@
  * See the License for the specific language governing permissions and limitations
  * under the License.
  */
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+
+#include "ogs-core.h"
+
 #include <chrono>
 #include <format>
 #include <string>
@@ -46,6 +52,44 @@ std::string time_point_to_iso8601_utc_str(const std::chrono::system_clock::time_
     oss.imbue(std::locale("C"));
     oss << std::format("{0:%F}T{0:%T}Z", datetime_us);
     return oss.str();
+}
+
+int get_route_mtu(const ogs_sockaddr_t &sock_addr)
+{
+    ogs_sock_t *sock = ogs_sock_socket(sock_addr.ogs_sa_family, SOCK_DGRAM, 0);
+    ogs_sock_connect(sock, const_cast<ogs_sockaddr_t*>(&sock_addr));
+    int mtu = 1500;
+    socklen_t mtu_size = sizeof(mtu);
+    if (sock_addr.ogs_sa_family == AF_INET) {
+        getsockopt(sock->fd, IPPROTO_IP, IP_MTU, &mtu, &mtu_size);
+    } else if (sock_addr.ogs_sa_family == AF_INET6) {
+        getsockopt(sock->fd, IPPROTO_IPV6, IPV6_MTU, &mtu, &mtu_size);
+    }
+    ogs_sock_destroy(sock);
+    return mtu;
+}
+
+int get_tunnelled_route_mtu(const std::optional<std::string> &dest_ip, in_port_t dest_port,
+                            const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port)
+{
+    int mtu = 1500; // default to 1500 if no MTU can be found.
+
+    if (tunnel_ip) { // Use MTU of tunnel if provided
+        ogs_sockaddr_t *sa = nullptr;
+        if (ogs_addaddrinfo(&sa, AF_UNSPEC, tunnel_ip.value().c_str(), tunnel_port, AI_NUMERICSERV) == OGS_OK) {
+            mtu = get_route_mtu(*sa);
+            ogs_freeaddrinfo(sa);
+        } // else error already reported
+    } else { // No tunnel provided so try MTU of direct destination
+        if (dest_ip) {
+            ogs_sockaddr_t *sa = nullptr;
+            if (ogs_addaddrinfo(&sa, AF_UNSPEC, dest_ip.value().c_str(), dest_port, AI_NUMERICSERV) == OGS_OK) {
+                mtu = get_route_mtu(*sa);
+                ogs_freeaddrinfo(sa);
+            }
+        }
+    }
+    return mtu;
 }
 
 MBSTF_NAMESPACE_STOP

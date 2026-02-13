@@ -71,8 +71,7 @@ void ObjectListController::setObjectPackager() {
     uint32_t rate_limit = distributionSession().getRateLimit();
     in_port_t port = distributionSession().getPortNumber();
     in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
-    //TODO: get the MTU for the dest_ip_addr or tunnel_addr
-    unsigned short mtu = 1498; // 1500 - GTP overhead; to allow for downstream encapsulation to the gNodeB
+    unsigned short mtu = get_tunnelled_route_mtu(dest_ip_addr, port, tunnel_addr, tunnel_port) - 2; // -2 bytes for GTP overhead
     const auto &obj_list = objectStore().getObjects();
     packager(new ObjectListPackager(objectStore(), *this, dest_ip_addr, rate_limit, mtu, port, tunnel_addr, tunnel_port));
     // Send all objects that are in the ObjectStore

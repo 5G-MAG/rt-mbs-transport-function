@@ -133,7 +133,9 @@ DistributionSession::~DistributionSession()
 {
     if (!m_eventTimestamps.sessionDeactivated) {
         _registerEvent(DistributionSessionEvents::SESSION_DEACTIVATED);
+        _sendSubscriptionNotifications();
     }
+    m_controller.reset(); // Detach controller
 }
 
 CJson DistributionSession::json(bool as_request, bool include_subscription_location) const
@@ -700,9 +702,9 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
     }
     auto old_obj_distribution_data = old_dist_session->getObjDistributionData();
     auto new_obj_distribution_data = new_dist_session->getObjDistributionData();
-    if (old_obj_distribution_data && new_obj_distribution_data &&
+    if ((!old_obj_distribution_data != !new_obj_distribution_data) || (old_obj_distribution_data &&
         new_obj_distribution_data.value()->getObjDistributionOperatingMode() !=
-                old_obj_distribution_data.value()->getObjDistributionOperatingMode()) {
+                old_obj_distribution_data.value()->getObjDistributionOperatingMode())) {
         ex.addInvalidParameter("distSession.objDistributionData.objDistributionOperatingMode",
                                 "Cannot change objDistributionOperatingMode");
     }

@@ -35,6 +35,7 @@
 #include "PushObjectIngester.hh"
 #include "SubscriptionService.hh"
 #include "ObjectListPackager.hh"
+#include "utilities.hh"
 #include "openapi/model/DistSessionState.h"
 
 #include "ObjectStreamingController.hh"
@@ -67,8 +68,7 @@ void ObjectStreamingController::setObjectPackager()
     uint32_t rate_limit = distributionSession().getRateLimit();
     in_port_t port = distributionSession().getPortNumber();
     in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
-    //TODO: get the MTU for the dest_ip_addr
-    unsigned short mtu = 1498; // 1500 - GTP overhead; need to bodge this so that there's enough room in downstream gNodeB packets
+    unsigned short mtu = get_tunnelled_route_mtu(dest_ip_addr, port, tunnel_addr, tunnel_port) - 2; // -2 bytes for GTP overhead
     packager(new ObjectListPackager(objectStore(), *this, dest_ip_addr, rate_limit, mtu, port, tunnel_addr, tunnel_port));
     auto pkgr = getObjectListPackager();
     subscribeToService(*pkgr);
