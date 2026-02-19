@@ -54,7 +54,7 @@ std::string time_point_to_iso8601_utc_str(const std::chrono::system_clock::time_
     return oss.str();
 }
 
-int get_route_mtu(const ogs_sockaddr_t &sock_addr)
+int get_path_mtu(const ogs_sockaddr_t &sock_addr)
 {
     ogs_sock_t *sock = ogs_sock_socket(sock_addr.ogs_sa_family, SOCK_DGRAM, 0);
     ogs_sock_connect(sock, const_cast<ogs_sockaddr_t*>(&sock_addr));
@@ -69,7 +69,7 @@ int get_route_mtu(const ogs_sockaddr_t &sock_addr)
     return mtu;
 }
 
-int get_tunnelled_route_mtu(const std::optional<std::string> &dest_ip, in_port_t dest_port,
+int get_tunnelled_path_mtu(const std::optional<std::string> &dest_ip, in_port_t dest_port,
                             const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port)
 {
     int mtu = 1500; // default to 1500 if no MTU can be found.
@@ -77,14 +77,14 @@ int get_tunnelled_route_mtu(const std::optional<std::string> &dest_ip, in_port_t
     if (tunnel_ip) { // Use MTU of tunnel if provided
         ogs_sockaddr_t *sa = nullptr;
         if (ogs_addaddrinfo(&sa, AF_UNSPEC, tunnel_ip.value().c_str(), tunnel_port, AI_NUMERICSERV) == OGS_OK) {
-            mtu = get_route_mtu(*sa);
+            mtu = get_path_mtu(*sa);
             ogs_freeaddrinfo(sa);
         } // else error already reported
     } else { // No tunnel provided so try MTU of direct destination
         if (dest_ip) {
             ogs_sockaddr_t *sa = nullptr;
             if (ogs_addaddrinfo(&sa, AF_UNSPEC, dest_ip.value().c_str(), dest_port, AI_NUMERICSERV) == OGS_OK) {
-                mtu = get_route_mtu(*sa);
+                mtu = get_path_mtu(*sa);
                 ogs_freeaddrinfo(sa);
             }
         }
