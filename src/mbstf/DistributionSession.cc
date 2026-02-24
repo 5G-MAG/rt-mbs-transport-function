@@ -133,7 +133,6 @@ DistributionSession::~DistributionSession()
 {
     if (!m_eventTimestamps.sessionDeactivated) {
         _registerEvent(DistributionSessionEvents::SESSION_DEACTIVATED);
-        _sendSubscriptionNotifications();
     }
     m_controller.reset(); // Detach controller
 }
