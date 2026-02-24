@@ -68,7 +68,7 @@ void ObjectStreamingController::setObjectPackager()
     uint32_t rate_limit = distributionSession().getRateLimit();
     in_port_t port = distributionSession().getPortNumber();
     in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
-    unsigned short mtu = get_tunnelled_path_mtu(dest_ip_addr, port, tunnel_addr, tunnel_port) - 2; // -2 bytes for GTP overhead
+    unsigned short mtu = get_tunnelled_path_mtu(dest_ip_addr, port, tunnel_addr, tunnel_port) - GTP_HEADER_SIZE;
     packager(new ObjectListPackager(objectStore(), *this, dest_ip_addr, rate_limit, mtu, port, tunnel_addr, tunnel_port));
     auto pkgr = getObjectListPackager();
     subscribeToService(*pkgr);

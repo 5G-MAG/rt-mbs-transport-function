@@ -19,12 +19,17 @@
  * under the License.
  */
 
+/* MBSTF Namespace macros */
 #define MBSTF_NAMESPACE com::fiveg_mag::ref_tools::mbstf
 #define MBSTF_NAMESPACE_START namespace MBSTF_NAMESPACE {
 #define MBSTF_NAMESPACE_STOP  }
 #define MBSTF_NAMESPACE_USING using namespace MBSTF_NAMESPACE
 #define MBSTF_NAMESPACE_NAME(a) MBSTF_NAMESPACE::a
 
+/* Constants */
+#define GTP_HEADER_SIZE 2
+
+/* Open5GS Logging */
 extern int __mbstf_log_domain;
 #undef OGS_LOG_DOMAIN
 #define OGS_LOG_DOMAIN __mbstf_log_domain
