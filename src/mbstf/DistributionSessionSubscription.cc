@@ -352,7 +352,6 @@ static int __notify_client_cb(int status, ogs_sbi_response_t *response, void *da
     int rv;
     RequestData *req_data = reinterpret_cast<RequestData*>(data);
 
-    e = ogs_event_new(OGS_EVENT_SBI_CLIENT);
     ogs_assert(e);
     e->sbi.request = req_data->request->ogsSBIRequest();
     e->sbi.response = response;
