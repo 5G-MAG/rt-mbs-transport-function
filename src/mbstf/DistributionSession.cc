@@ -722,7 +722,12 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
     }
 
     /* Make sure we are in the right state */
-    _transitionTo(new_dist_session->getDistSessionState()->getValue());
+    auto new_state = new_dist_session->getDistSessionState()->getValue();
+    if (new_state == DistSessionState::VAL_INACTIVE || new_state == DistSessionState::VAL_DEACTIVATING) {
+        /* If you request deactivating or inactive, make sure no more files are packaged */
+        m_controller->flushPackagerQueue();
+    }
+    _transitionTo(new_state);
 
     /* Update the last-used and hash values to reflect the new CreateReqData */
     _setLastUsed();

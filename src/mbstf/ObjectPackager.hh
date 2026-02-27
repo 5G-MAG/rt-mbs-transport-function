@@ -122,6 +122,7 @@ public:
 
     virtual void activate();
     virtual bool deactivate(); // returns true if deactivation was immediate
+    virtual void flushQueue() {};
 
 protected:
     const ObjectStore &objectStore() const { return m_objectStore; };

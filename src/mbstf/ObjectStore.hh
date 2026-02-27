@@ -240,7 +240,7 @@ public:
     ObjectStore &operator=(const ObjectStore&) = delete;
     ObjectStore &operator=(ObjectStore&&) = delete;
 
-    void addObject(const std::string& object_id, ObjectData &&object, Metadata &&metadata);
+    void addObject(const std::string& object_id, ObjectData &&object, Metadata &&metadata, bool synchronous_event = false);
     const ObjectData& getObjectData(const std::string& object_id) const;
     ObjectData& getObjectData(const std::string& object_id);
     const Metadata& getMetadata(const std::string& object_id) const;

@@ -77,6 +77,7 @@ public:
     virtual void establishActiveInputs();   /* Established state for DistSession */
     virtual void activateOutput();          /* Active state for DistSession */
     virtual void deactivateOutput();        /* Deactivating state for DistSession */
+    virtual void flushPackagerQueue();      /* Ensure there are no objects queued for packaging */
 
 protected:
     const std::shared_ptr<PullObjectIngester> &addPullObjectIngester(const std::shared_ptr<PullObjectIngester> &pull_obj_ingester);

@@ -40,6 +40,7 @@ public:
     virtual void establishActiveInputs() = 0;   /* Established state for DistSession */
     virtual void activateOutput() = 0;          /* Active state for DistSession */
     virtual void deactivateOutput() = 0;        /* Deactivating state for DistSession */
+    virtual void flushPackagerQueue() = 0;      /* Empty packaging queue */
 
 private:
     DistributionSession &m_distributionSession;

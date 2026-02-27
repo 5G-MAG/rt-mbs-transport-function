@@ -180,8 +180,8 @@ void ObjectListPackager::doObjectPackage() {
                 LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005);
         m_transmitter->register_completion_callback(
                 [this](uint32_t toi) {
-                    ogs_debug("FLUTE Transmitter has %zu files left", m_transmitter->number_of_files());
-                    bool queue_empty = (m_transmitter->number_of_files() == 0);
+                    ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", m_transmitter->number_of_files(), m_packageItems.size());
+                    bool queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
                     if (m_queuedToi == toi) {
                         m_queued = false;
                         objectSendCompletion(m_queuedObjectId, queue_empty);
@@ -274,6 +274,12 @@ void ObjectListPackager::objectSendCompletion(std::string &object_id, bool queue
 {
     std::shared_ptr<Event> event(new ObjectListPackager::ObjectSendCompleted(object_id, queue_empty));
     sendEventAsynchronous(event);
+}
+
+void ObjectListPackager::flushQueue()
+{
+    std::lock_guard<std::recursive_mutex> lock(*m_packageItemsMutex);
+    m_packageItems.clear();
 }
 
 MBSTF_NAMESPACE_STOP

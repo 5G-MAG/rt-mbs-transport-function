@@ -156,6 +156,11 @@ void ObjectController::deactivateOutput()
     if (m_packager) deactivateObjectPackager();
 }
 
+void ObjectController::flushPackagerQueue()
+{
+    if (m_packager) m_packager->flushQueue();
+}
+
 MBSTF_NAMESPACE_STOP
 
 /* vim:ts=8:sts=4:sw=4:expandtab:

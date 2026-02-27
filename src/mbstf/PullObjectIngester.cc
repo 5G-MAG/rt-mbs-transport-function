@@ -224,8 +224,7 @@ void PullObjectIngester::doObjectIngest() {
 	        if (!etag.empty()) {
                     metadata.entityTag(etag);
 	        }
-	        this->objectStore().addObject(item.objectId(), std::move(m_curl->getData()), std::move(metadata));
-
+	        this->objectStore().addObject(item.objectId(), std::move(m_curl->getData()), std::move(metadata), true);
             } else if (bytesReceived == -1) {
                 ogs_error("Request timed out.");
                 emitObjectIngestFailedEvent(item.url(), ObjectIngester::IngestFailedEvent::TIMED_OUT);

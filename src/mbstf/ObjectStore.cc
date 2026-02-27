@@ -178,7 +178,7 @@ ObjectStore::~ObjectStore()
 {
 }
 
-void ObjectStore::addObject(const std::string& object_id, ObjectData &&object, Metadata &&metadata) {
+void ObjectStore::addObject(const std::string& object_id, ObjectData &&object, Metadata &&metadata, bool synchronous_event) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     //std::unique_lock<std::shared_mutex> lock(m_mutex);
 
@@ -190,7 +190,11 @@ void ObjectStore::addObject(const std::string& object_id, ObjectData &&object, M
     }
 
     std::shared_ptr<Event> event(new ObjectStore::ObjectAddedEvent(object_id));
-    sendEventAsynchronous(event);
+    if (synchronous_event) {
+        sendEventSynchronous(*event);
+    } else {
+        sendEventAsynchronous(event);
+    }
 }
 
 const ObjectStore::ObjectData& ObjectStore::getObjectData(const std::string& object_id) const {

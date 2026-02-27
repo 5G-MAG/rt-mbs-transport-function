@@ -78,6 +78,8 @@ public:
                          uint32_t rateLimit,
                          const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
 
+    virtual void flushQueue();
+
 protected:
     virtual void doObjectPackage();
 
