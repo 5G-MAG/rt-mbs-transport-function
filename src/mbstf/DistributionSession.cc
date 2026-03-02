@@ -701,11 +701,14 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
     }
     auto old_obj_distribution_data = old_dist_session->getObjDistributionData();
     auto new_obj_distribution_data = new_dist_session->getObjDistributionData();
-    if ((!old_obj_distribution_data != !new_obj_distribution_data) || (old_obj_distribution_data &&
-        new_obj_distribution_data.value()->getObjDistributionOperatingMode() !=
-                old_obj_distribution_data.value()->getObjDistributionOperatingMode())) {
+    if (!old_obj_distribution_data != !new_obj_distribution_data) {
         ex.addInvalidParameter("distSession.objDistributionData.objDistributionOperatingMode",
-                                "Cannot change objDistributionOperatingMode");
+                                "Cannot remove objDistributionOperatingMode");
+    } else if (old_obj_distribution_data &&
+        *new_obj_distribution_data.value()->getObjDistributionOperatingMode() !=
+                *old_obj_distribution_data.value()->getObjDistributionOperatingMode()) {
+        ex.addInvalidParameter("distSession.objDistributionData.objDistributionOperatingMode",
+                                std::format("Cannot change objDistributionOperatingMode ({} != {})", new_obj_distribution_data.value()->getObjDistributionOperatingMode()->getString(), old_obj_distribution_data.value()->getObjDistributionOperatingMode()->getString()));
     }
 
     /* If errors then report them */
