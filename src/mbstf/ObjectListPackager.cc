@@ -282,6 +282,22 @@ void ObjectListPackager::flushQueue()
     m_packageItems.clear();
 }
 
+bool ObjectListPackager::deactivate()
+{
+    std::lock_guard<std::recursive_mutex> guard(m_deactivateMutex);
+    m_deactivating = true;
+    ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", m_transmitter->number_of_files(), m_packageItems.size());
+    bool queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
+    if (queue_empty) {
+        ogs_debug("Deactivating FLUTE stream, no files to purge");
+        abort();
+        m_transmitter->deactivate();
+        m_deactivating = false;
+        return true;
+    }
+    return false;
+}
+
 MBSTF_NAMESPACE_STOP
 
 /* vim:ts=8:sts=4:sw=4:expandtab:
