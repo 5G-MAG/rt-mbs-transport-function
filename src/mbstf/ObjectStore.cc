@@ -1,8 +1,9 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Object store
+ * 5G-MAG Reference Tools: MBS Transport Function: Object store
  ******************************************************************************
- * Copyright: (C)2025 British Broadcasting Corporation
+ * Copyright: (C)2025-2026 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>
+ *            David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
  * For full license terms please see the LICENSE file distributed with this
@@ -224,6 +225,11 @@ void ObjectStore::deleteObject(const std::string& object_id) {
     m_store.erase(object_id);
     std::shared_ptr<Event> event(new ObjectStore::ObjectDeletedEvent(object_id));
     sendEventAsynchronous(event);
+}
+
+ObjectStore::Object& ObjectStore::operator[](const std::string& object_id) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    return m_store.at(object_id);
 }
 
 const ObjectStore::Object& ObjectStore::operator[](const std::string& object_id) const {

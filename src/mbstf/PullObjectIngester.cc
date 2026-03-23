@@ -1,8 +1,9 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Pull Object Ingester
+ * 5G-MAG Reference Tools: MBS Transport Function: Pull Object Ingester
  ******************************************************************************
- * Copyright: (C)2025 British Broadcasting Corporation
+ * Copyright: (C)2025-2026 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>
+ *            David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
  * For full license terms please see the LICENSE file distributed with this
@@ -18,6 +19,9 @@
 #include <iostream>
 #include <string>
 
+#include <libmpd++/BaseURL.hh>
+#include <libmpd++/URI.hh>
+
 #include "common.hh"
 #include "App.hh"
 #include "PullObjectIngester.hh"
@@ -25,6 +29,8 @@
 #include "Curl.hh"
 #include "ObjectStore.hh"
 
+LIBMPDPP_NAMESPACE_USING(BaseURL);
+LIBMPDPP_NAMESPACE_USING(URI);
 using namespace std::literals::chrono_literals;
 
 MBSTF_NAMESPACE_START
@@ -214,7 +220,7 @@ void PullObjectIngester::doObjectIngest() {
             if (bytesReceived >= 0) {
                 ogs_debug("Received %ld bytes of data", bytesReceived);
 	        auto lastModified = std::chrono::system_clock::now();
-                std::string fetched_url = m_curl->getPermanentRedirectUrl();
+                std::string fetched_url = URI(m_curl->getPermanentRedirectUrl()).resolveUsingBaseURLs(std::list<BaseURL>{BaseURL(item.url())}).str();
                 if (fetched_url.empty()) fetched_url = item.url();
 	        ObjectStore::Metadata metadata(item.objectId(), m_curl->getContentType(), item.url(), fetched_url, item.acquisitionId(), lastModified, item.objIngestBaseUrl(), item.objDistributionBaseUrl());
                 if (old_meta) metadata.fluteFileDescription(old_meta->fluteFileDescription());

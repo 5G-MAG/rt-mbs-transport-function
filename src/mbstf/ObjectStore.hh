@@ -1,9 +1,9 @@
 #ifndef _MBS_TF_OBJECT_STORE_HH_
 #define _MBS_TF_OBJECT_STORE_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Object Store class
+ * 5G-MAG Reference Tools: MBS Transport Function: Object Store class
  ******************************************************************************
- * Copyright: (C)2025 British Broadcasting Corporation
+ * Copyright: (C)2025-2026 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>
  *            David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
@@ -249,6 +249,7 @@ public:
     bool removeObject(const std::string& objectId);
     bool removeObjects(const std::list<std::string>& objectIds);
     std::list<std::pair<const std::string*, const Object*>> getExpired();
+    Object &operator[](const std::string& object_id);
     const Object &operator[](const std::string& object_id) const;
     bool isStale(const std::string& object_id) const;
     std::map<std::string, const Object&> getStale() const;

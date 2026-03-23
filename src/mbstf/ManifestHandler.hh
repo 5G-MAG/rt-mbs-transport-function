@@ -1,9 +1,9 @@
 #ifndef _MBS_TF_MANIFEST_HANDLER_HH_
 #define _MBS_TF_MANIFEST_HANDLER_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Manifest Handler Factory
+ * 5G-MAG Reference Tools: MBS Transport Function: Manifest Handler Factory
  ******************************************************************************
- * Copyright: (C)2025 British Broadcasting Corporation
+ * Copyright: (C)2025-2026 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
@@ -22,7 +22,7 @@ MBSTF_NAMESPACE_START
 
 class ObjectController;
 
-class ManifestHandler {
+class ManifestHandler : public SubscriptionService {
 public:
     using time_type = std::chrono::system_clock::time_point;
     using durn_type = std::chrono::system_clock::duration;
@@ -30,25 +30,30 @@ public:
 
     ManifestHandler() = delete;
     ManifestHandler(ObjectController *controller, bool pull_distribution)
-        :m_controller(controller)
+        :SubscriptionService()
+        ,m_controller(controller)
         ,m_pullDistribution(pull_distribution)
     {};
     ManifestHandler(const ManifestHandler &other)
-        :m_controller(other.m_controller)
+        :SubscriptionService()
+        ,m_controller(other.m_controller)
         ,m_pullDistribution(other.m_pullDistribution)
     {};
     ManifestHandler(ManifestHandler &&other)
-        :m_controller(other.m_controller)
+        :SubscriptionService()
+        ,m_controller(other.m_controller)
         ,m_pullDistribution(other.m_pullDistribution)
     {};
     virtual ~ManifestHandler() {};
     ManifestHandler &operator=(const ManifestHandler &other) {
+        SubscriptionService::operator=(other);
         m_controller = other.m_controller;
         m_pullDistribution = other.m_pullDistribution;
         return *this;
     };
 
     ManifestHandler &operator=(ManifestHandler &&other) {
+        SubscriptionService::operator=(std::move(other));
         m_controller = other.m_controller;
         m_pullDistribution = other.m_pullDistribution;
         return *this;
@@ -57,6 +62,7 @@ public:
     virtual std::pair<time_type, ingest_list> nextIngestItems() = 0;
     virtual durn_type getDefaultDeadline() = 0;
     virtual bool update(const ObjectStore::Object &new_manifest) = 0;
+    virtual void startedFetch(const PullObjectIngester::IngestItem &item) {};
 
 protected:
    ObjectController *m_controller;

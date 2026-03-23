@@ -1,9 +1,9 @@
 #ifndef _MBS_TF_UTILITIES_HH_
 #define _MBS_TF_UTILITIES_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Common utility functions
+ * 5G-MAG Reference Tools: MBS Transport Function: Common utility functions
  ******************************************************************************
- * Copyright: (C)2025 British Broadcasting Corporation
+ * Copyright: (C)2025-2026 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
@@ -29,6 +29,7 @@ std::string trim_slashes(const std::string &path);
 
 std::string time_point_to_http_datetime_str(const std::chrono::system_clock::time_point &datetime);
 std::string time_point_to_iso8601_utc_str(const std::chrono::system_clock::time_point &datetime);
+std::chrono::system_clock::time_point iso8601_utc_str_to_time_point(const std::string &iso8601_str);
 
 int get_path_mtu(const ogs_sockaddr_t &sock_addr);
 int get_tunnelled_path_mtu(const std::optional<std::string> &dest_ip, in_port_t dest_port,

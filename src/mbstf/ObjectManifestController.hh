@@ -1,9 +1,9 @@
 #ifndef _MBS_TF_OBJECT_MANIFEST_CONTROLLER_HH_
 #define _MBS_TF_OBJECT_MANIFEST_CONTROLLER_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Object Manifest Controller base class
+ * 5G-MAG Reference Tools: MBS Transport Function: Object Manifest Controller base class
  ******************************************************************************
- * Copyright: (C)2025 British Broadcasting Corporation
+ * Copyright: (C)2025-2026 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
@@ -32,15 +32,6 @@ class ObjectManifestController : public ObjectController {
 public:
     ObjectManifestController() = delete;
     ObjectManifestController(DistributionSession &dist_session);
-
-    /*
-    ObjectManifestController(DistributionSession &dist_session)
-        :ObjectController(dist_session)
-	,Subscriber()
-        ,m_manifestHandler(nullptr)
-	,m_scheduledPullCancel(false)
-        {};
-	*/
     ObjectManifestController(const ObjectManifestController&) = delete;
     ObjectManifestController(ObjectManifestController&&) = delete;
 
@@ -70,18 +61,8 @@ protected:
     void startWorker();
     virtual void initPullObjectIngesters();
     virtual void initPushObjectIngester();
-
-    ObjectManifestController &manifestHandler(std::unique_ptr<ManifestHandler> manifest_handler) {
-        std::lock_guard guard(m_manifestHandlerMutex);
-        m_manifestHandler = std::move(manifest_handler);
-        m_manifestHandlerChange.notify_all();
-        return *this;
-    };
-    ManifestHandler *manifestHandler() const {
-        std::lock_guard guard(m_manifestHandlerMutex);
-        return m_manifestHandler.get();
-    };
-
+    ObjectManifestController &manifestHandler(std::shared_ptr<ManifestHandler> &&manifest_handler); 
+    const std::shared_ptr<ManifestHandler> &manifestHandler() const;
     virtual std::string nextObjectId();
 
 
@@ -90,7 +71,7 @@ private:
     std::string generateUUID();
 
     std::string m_manifestUrl;
-    std::unique_ptr<ManifestHandler> m_manifestHandler;
+    std::shared_ptr<ManifestHandler> m_manifestHandler;
     std::condition_variable_any m_manifestHandlerChange;
     mutable std::recursive_mutex m_manifestHandlerMutex;
     std::thread m_scheduledPullThread;

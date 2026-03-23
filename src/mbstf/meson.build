@@ -1,7 +1,7 @@
 # License: 5G-MAG Public License (v1.0)
 # Author(s): David Waring <david.waring2@bbc.co.uk>
 #            Dev Audsin <dev.audsin@bbc.co.uk>
-# Copyright: (C) 2024-2025 British Broadcasting Corporation
+# Copyright: (C) 2024-2026 British Broadcasting Corporation
 #
 # Licensed under the License terms and conditions for use, reproduction, and
 # distribution of 5G-MAG software (the “License”).  You may not use this file
@@ -73,6 +73,10 @@ test_source_dash_manifest_handler = test_source_object_store + test_source_pull_
   DASHManifestHandler.hh
   '''.split())
 
+test_source_object_manifest_handler = test_source_object_store + test_source_pull_object_ingester + files('''
+  ObjectManifestHandler.cc
+  ObjectManifestHandler.hh
+  '''.split())
 
 libmbstf_dist_sources = files('''
     BitRate.cc
@@ -111,12 +115,18 @@ libmbstf_dist_sources = files('''
     MBSTFNetworkFunction.hh
     NfServer.cc
     NfServer.hh
+    ObjectCarouselController.cc
+    ObjectCarouselController.hh
+    ObjectCarouselPackager.cc
+    ObjectCarouselPackager.hh
     ObjectController.cc
     ObjectController.cc
     ObjectListController.cc
     ObjectListController.hh
     ObjectManifestController.cc
     ObjectManifestController.hh
+    ObjectManifestHandler.cc
+    ObjectManifestHandler.hh
     ObjectStore.cc
     ObjectStore.hh
     ObjectStreamingController.cc

@@ -1,10 +1,11 @@
 #ifndef _MBS_TF_OBJECT_PACKAGER_HH_
 #define _MBS_TF_OBJECT_PACKAGER_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Object Packager base class
+ * 5G-MAG Reference Tools: MBS Transport Function: Object Packager base class
  ******************************************************************************
- * Copyright: (C)2025 British Broadcasting Corporation
+ * Copyright: (C)2025-2026 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>
+ *            David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
  * For full license terms please see the LICENSE file distributed with this
@@ -38,10 +39,11 @@ class Event;
 
 class ObjectPackager: public SubscriptionService {
 public:
-   class ObjectSendCompleted : public Event {
+    class ObjectSendCompleted : public Event {
     public:
+        static constexpr const char *event_name = "ObjectSendCompleted";
         ObjectSendCompleted(const std::string& object_id, bool queue_empty)
-            :Event("ObjectSendCompleted")
+            :Event(event_name)
             ,m_object_id(object_id)
             ,m_queue_empty(queue_empty)
         {};
@@ -77,7 +79,7 @@ public:
         virtual Event clone() const { return ObjectSendCompleted(*this); };
         virtual Event *newClone() const { return new ObjectSendCompleted(*this); };
         virtual std::string reprString() const {
-            return std::format("ObjectSendCompleted(\"{}\", queue_empty={})", m_object_id, m_queue_empty);
+            return std::format("{}(\"{}\", queue_empty={})", event_name, m_object_id, m_queue_empty);
         };
 
     private:
@@ -85,13 +87,48 @@ public:
         bool m_queue_empty;
     };
 
+    class PackagingFailedEvent : public Event {
+    public:
+        static constexpr const char *event_name = "ObjectPackagingFailed";
+        typedef enum {
+            BIT_RATE_OVERFLOW = 1,
+            BIT_RATE_UNDERFLOW,
+            OBJECT_TOO_BIG,
+            RESOURCE_NOT_AVAILABLE
+        } FailureType;
+
+        PackagingFailedEvent(const std::string &reason, FailureType fail_type)
+            : Event(event_name), m_reason(reason), m_failureType(fail_type) {};
+        PackagingFailedEvent(const PackagingFailedEvent &other)
+            : Event(other), m_reason(other.m_reason), m_failureType(other.m_failureType) {};
+        PackagingFailedEvent(PackagingFailedEvent &&other)
+            : Event(std::move(other)), m_reason(std::move(other.m_reason)), m_failureType(std::move(other.m_failureType)) {};
+
+        virtual ~PackagingFailedEvent() {};
+
+        PackagingFailedEvent &operator=(const PackagingFailedEvent &other) { Event::operator=(other); m_reason = other.m_reason; m_failureType = other.m_failureType; return *this; };
+        PackagingFailedEvent &operator=(PackagingFailedEvent &&other) { Event::operator=(std::move(other)); m_reason = std::move(other.m_reason); m_failureType = std::move(other.m_failureType); return *this; };
+
+        const std::string &reason() const { return m_reason; };
+        FailureType failureType() const { return m_failureType; };
+
+        virtual Event clone() const { return PackagingFailedEvent(*this); };
+        virtual Event *newClone() const { return new PackagingFailedEvent(*this); };
+
+        virtual std::string reprString() const;
+
+    private:
+        std::string m_reason;
+        FailureType m_failureType;
+    };
 
     ObjectPackager() = delete;
     ObjectPackager(ObjectPackager &&) = delete;
     ObjectPackager(const ObjectPackager &) = delete;
 
     ObjectPackager(ObjectStore &objectStore, ObjectController &controller, std::optional<std::string> destIpAddr = std::nullopt, uint32_t rateLimit = 0, unsigned short mtu = 0, in_port_t port = 0, const std::optional<std::string> &tunnel_address = std::nullopt, in_port_t tunnel_port = 0 )
-        :m_transmitter(nullptr), m_io(), m_queuedToi(0), m_queued(false), m_deactivating(false), m_queuedObjectId()
+        :m_transmitterMutex(new decltype(m_transmitterMutex)::element_type)
+        ,m_transmitter(nullptr), m_io(), m_queuedToi(0), m_queued(false), m_deactivating(false), m_queuedObjectId()
         ,m_objectStore(objectStore), m_controller(controller), m_destIpAddr(destIpAddr), m_rateLimit(rateLimit), m_mtu(mtu)
         ,m_port(port), m_workerThread(), m_workerCancel(false), m_workerRunning(false)
         ,m_tunnelAddress(tunnel_address), m_tunnelPort(tunnel_port)
@@ -105,9 +142,7 @@ public:
         }
     };
 
-    virtual ~ObjectPackager() {
-        abort();
-    };
+    virtual ~ObjectPackager();
 
     ObjectPackager& setDestIpAddr(const std::optional<std::string> &destIpAddr);
     ObjectPackager& setPort(in_port_t port);
@@ -138,7 +173,8 @@ protected:
 
     virtual void doObjectPackage() = 0;
 
-    LibFlute::Transmitter *m_transmitter;
+    std::shared_ptr<std::recursive_mutex> m_transmitterMutex;
+    std::shared_ptr<LibFlute::Transmitter> m_transmitter;
     boost::asio::io_service m_io;
     uint32_t m_queuedToi;
     bool m_queued;

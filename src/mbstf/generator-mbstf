@@ -5,7 +5,7 @@
 #
 # Author(s): David Waring <david.warin2@bbc.co.uk>
 #            Dev Audsin <dev.audsin@bbc.co.uk>
-# Copyright: ©2022-2025 British Broadcasting Corporation
+# Copyright: ©2022-2026 British Broadcasting Corporation
 #   License: 5G-MAG Public License v1.0
 #
 # Prerequisites:
@@ -37,7 +37,7 @@ scriptdir=`cd "$scriptdir"; pwd`
 
 # Command line option defaults
 default_branch='REL-18'
-default_apis="TS29581_Nmbstf_DistSession"
+default_apis="TS29581_Nmbstf_DistSession TS26517_MBSObjectManifest"
 default_cache_dir="${MESON_BUILD_ROOT:+$MESON_BUILD_ROOT/$MESON_SUBDIR/openapi-generator-cache}"
 
 # Parse command line arguments

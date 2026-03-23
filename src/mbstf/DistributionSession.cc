@@ -1,8 +1,9 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Distribution Session class
+ * 5G-MAG Reference Tools: MBS Transport Function: Distribution Session class
  ******************************************************************************
- * Copyright: (C)2024 British Broadcasting Corporation
+ * Copyright: (C)2024-2026 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>
+ *            David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
  * Licensed under the License terms and conditions for use, reproduction, and
@@ -43,6 +44,7 @@
 #include "ModelParamsException.hh"
 #include "NfServer.hh"
 #include "ObjectIngester.hh"
+#include "ObjectPackager.hh"
 #include "Open5GSEvent.hh"
 #include "Open5GSSBIMessage.hh"
 #include "Open5GSSBIRequest.hh"
@@ -174,6 +176,9 @@ void DistributionSession::processEvent(Event &event, SubscriptionService &event_
     if (event.eventName() == ObjectIngester::IngestFailedEvent::event_name) {
         //ObjectIngester::IngestFailedEvent &ingest_failed_event = dynamic_cast<ObjectIngester::IngestFailedEvent&>(event);
         _registerEvent(DistributionSessionEvents::DATA_INGEST_FAILURE);
+    } else if (event.eventName() == ObjectPackager::PackagingFailedEvent::event_name) {
+        //ObjectPackager::PackagingFailedEvent &packaging_failed_event = dynamic_cast<ObjectPackager::PackagingFailedEvent&>(event);
+        _registerEvent(DistributionSessionEvents::SERVICE_MANAGEMENT_FAILURE);
     }
 }
 
@@ -1047,7 +1052,7 @@ void DistributionSession::_apiSessionCreate(Open5GSSBIStream &stream, Open5GSSBI
     App::self().context()->addDistributionSession(distributionSession);
 
     // Subscribe to Events from the Controller - to be forwarded to DistributionSessionSubscriptions
-    distributionSession->subscribeTo({ObjectIngester::IngestFailedEvent::event_name}, *distributionSession->m_controller);
+    distributionSession->subscribeTo({ObjectIngester::IngestFailedEvent::event_name, ObjectPackager::PackagingFailedEvent::event_name}, *distributionSession->m_controller);
     distributionSession->_sendSubscriptionNotifications();
 
     CJson create_rsp_data_json(distributionSession->json(false, true));

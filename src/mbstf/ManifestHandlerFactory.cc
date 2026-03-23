@@ -1,7 +1,7 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Manifest Handler Factory
+ * 5G-MAG Reference Tools: MBS Transport Function: Manifest Handler Factory
  ******************************************************************************
- * Copyright: (C)2025 British Broadcasting Corporation
+ * Copyright: (C)2025-2026 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
@@ -52,11 +52,13 @@ bool ManifestHandlerFactory::registerManifestHandler(const std::string &content_
 ManifestHandler *ManifestHandlerFactory::makeManifestHandler(const ObjectStore::Object &object, ObjectController *controller, bool pull_distribution)
 {
     std::string media_type = object.second.mediaType();
+    ogs_debug("Looking for manifest handler for \"%s\" media", media_type.c_str());
     // Try manifest handlers for the media type of the object, fallback to any media type (empty string)
     while (true) {
         auto it = constructorsByContentType().find(media_type);
         if (it != constructorsByContentType().end()) {
             std::list<std::unique_ptr<ManifestHandlerConstructor> > &list = it->second;
+            ogs_debug("Trying %zi manifest handlers", list.size());
             for (const auto &mhc : list) {
                 try {
                     return mhc->makeManifestHandler(object, controller, pull_distribution);

@@ -1,8 +1,9 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: ObjectListPackager class
+ * 5G-MAG Reference Tools: MBS Transport Function: ObjectListPackager class
  ******************************************************************************
- * Copyright: (C)2025 British Broadcasting Corporation
+ * Copyright: (C)2025-2026 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>
+ *            David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
  * For full license terms please see the LICENSE file distributed with this
@@ -105,10 +106,6 @@ ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectControll
 
 ObjectListPackager::~ObjectListPackager() {
     abort();
-    if (m_transmitter) {
-        delete m_transmitter;
-        m_transmitter = NULL;
-    }
 }
 
 bool ObjectListPackager::add(const PackageItem &item) {
@@ -135,6 +132,8 @@ bool ObjectListPackager::updateFluteInfo(const std::string &address, in_port_t p
                                          uint32_t rateLimit,
                                          const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
 {
+    std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+
     /* Do nothing if we don't have a Transmitter */
     if (!m_transmitter) return false;
 
@@ -168,8 +167,10 @@ void ObjectListPackager::doObjectPackage() {
 
     if (!destAddr) return;
 
+    std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+
     if (!m_transmitter) {
-        m_transmitter = new LibFlute::Transmitter(
+        m_transmitter.reset(new LibFlute::Transmitter(
                 destAddr.value(),
                 static_cast<short>(port()),
                 0,
@@ -177,10 +178,11 @@ void ObjectListPackager::doObjectPackage() {
                 rateLimit(),
                 m_io,
                 m_tunnelEndpoint,
-                LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005);
+                LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005));
         m_transmitter->register_completion_callback(
                 [this](uint32_t toi) {
                     ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", m_transmitter->number_of_files(), m_packageItems.size());
+                    std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
                     bool queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
                     if (m_queuedToi == toi) {
                         m_queued = false;
@@ -251,7 +253,10 @@ void ObjectListPackager::doObjectPackage() {
                 file_desc->set_etag(entity_tag.value());
             }
 
-            m_queuedToi = m_transmitter->send(file_desc);
+            {
+                std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+                m_queuedToi = m_transmitter->send(file_desc);
+            }
 
             m_packageItemsMutex->lock();
             m_packageItems.pop_front();
@@ -284,8 +289,9 @@ void ObjectListPackager::flushQueue()
 
 bool ObjectListPackager::deactivate()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_deactivateMutex);
+    std::lock_guard<decltype(m_deactivateMutex)> guard(m_deactivateMutex);
     m_deactivating = true;
+    std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
     ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", m_transmitter->number_of_files(), m_packageItems.size());
     bool queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
     if (queue_empty) {

@@ -1,8 +1,9 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: ObjectManifestController class
+ * 5G-MAG Reference Tools: MBS Transport Function: ObjectManifestController class
  ******************************************************************************
- * Copyright: (C)2025 British Broadcasting Corporation
+ * Copyright: (C)2025-2026 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>
+ *            David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
  * For full license terms please see the LICENSE file distributed with this
@@ -26,6 +27,7 @@
 #include "DistributionSession.hh"
 #include "Event.hh"
 #include "ObjectController.hh"
+#include "ObjectManifestHandler.hh"
 #include "ObjectStore.hh"
 #include "PullObjectIngester.hh"
 #include "PushObjectIngester.hh"
@@ -43,6 +45,8 @@ static bool validate_push_url(DistributionSession &distributionSession, const st
 static void validate_pull_acquisition_method(DistributionSession &distributionSession);
 static bool validate_push_acquisition_method(DistributionSession &distributionSession);
 
+/* ObjectManifestController public methods */
+
 ObjectManifestController::ObjectManifestController(DistributionSession &dist_session)
         :ObjectController(dist_session)
         ,m_manifestHandler(nullptr)
@@ -52,192 +56,6 @@ ObjectManifestController::ObjectManifestController(DistributionSession &dist_ses
     validate_pull_acquisition_method(dist_session);
     validate_push_acquisition_method(dist_session);
 };
-
-
-void ObjectManifestController::initPullObjectIngesters()
-{
-    const std::optional<std::string> &object_ingest_base_url = distributionSession().getObjectIngestBaseUrl();
-    const std::optional<std::string> &object_distribution_base_url = distributionSession().objectDistributionBaseUrl();
-
-    auto &pull_urls = distributionSession().getObjectAcquisitionPullUrls();
-    if (pull_urls.has_value()) {
-        std::list<PullObjectIngester::IngestItem> urls;
-
-        for (auto &url : pull_urls.value()) {
-            std::string obj_ingest_url;
-
-            if (url.has_value()) {
-                const std::string &url_str = url.value();
-                if (object_ingest_base_url.has_value()) {
-                    if (url_str.starts_with("https:") || url_str.starts_with("http:") || url_str.starts_with("//")) {
-                        ogs_error("Invalid objectAcquisitionPullUrl when objectIngestBaseUrl is set: %s", url.value().c_str());
-                        continue;
-                    } else {
-                        obj_ingest_url = object_ingest_base_url.value();
-                        if (!obj_ingest_url.ends_with("/")) obj_ingest_url += "/";
-                        obj_ingest_url += trim_slashes(url_str);
-                    }
-
-                }
-
-                const auto *metadata = objectStore().findMetadataByURL(obj_ingest_url);
-                if (metadata) {
-                    /* this is a refetch */
-                    urls.emplace_back(*metadata);
-                } else {
-                    /* this is a new URL */
-                    urls.emplace_back(nextObjectId(), obj_ingest_url, url_str, object_ingest_base_url, object_distribution_base_url);
-                }
-            }
-        }
-
-        addPullObjectIngester(new PullObjectIngester(objectStore(), *this, urls));
-    }
-}
-
-
-void ObjectManifestController::initPushObjectIngester()
-{
-    const std::string objIngestBaseUrl;
-
-    PushObjectIngester *push_ingester = new PushObjectIngester(objectStore(), *this);
-
-    distributionSession().setObjectIngestBaseUrl(push_ingester->getIngestServerPrefix());
-    subscribeTo({"ObjectPushStart"}, *push_ingester);
-    pushObjectIngester(push_ingester);
-}
-
-std::string ObjectManifestController::nextObjectId()
-{
-    return generateUUID();
-}
-
-std::string ObjectManifestController::generateUUID()
-{
-    uuid_t uuid;
-    uuid_generate_random(uuid);
-    char uuid_str[37];
-    uuid_unparse(uuid, uuid_str);
-    return std::string(uuid_str);
-}
-
-void ObjectManifestController::workerLoop(ObjectManifestController *controller)
-{
-    controller->m_scheduledPullRunning = true;
-    /* Don't process if the session is inactive or deactivating */
-    {
-        const auto &session_state = controller->distributionSession().getState();
-        if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
-            controller->m_scheduledPullRunning = false;
-            return;
-        }
-    }
-
-    /* wait for a ManifestHandler to be created */
-    while (true) {
-        {
-            std::lock_guard<std::recursive_mutex> lock(controller->m_manifestHandlerMutex);
-            if (controller->m_scheduledPullCancel || controller->m_manifestHandler != nullptr) {
-                break;
-            }
-            const auto &session_state = controller->distributionSession().getState();
-            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
-                controller->m_scheduledPullRunning = false;
-                return;
-            }
-        }
-        // Avoid a tight busy-loop: yield or sleep for a short time.
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-
-    if (controller->m_scheduledPullCancel) {
-        controller->m_scheduledPullRunning = false;
-        return;
-    }
-
-    {
-        const auto &session_state = controller->distributionSession().getState();
-        if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
-            controller->m_scheduledPullRunning = false;
-            return;
-        }
-    }
-
-    while (!controller->m_scheduledPullCancel) {
-        {
-            const auto &session_state = controller->distributionSession().getState();
-            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
-                controller->m_scheduledPullRunning = false;
-                return;
-            }
-        }
-
-        std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> next_ingest_items;
-        ManifestHandler::durn_type default_deadline;
-        // Get the next ingest items
-	try {
-            std::lock_guard<std::recursive_mutex> lock(controller->m_manifestHandlerMutex);
-            next_ingest_items = controller->manifestHandler()->nextIngestItems();
-            default_deadline = controller->manifestHandler()->getDefaultDeadline();
-	} catch ( std::domain_error &err) {
-	    ogs_error("Next Ingest Item: %s", err.what());
-	}
-
-	if (next_ingest_items.second.empty()) break;
-
-	auto fetch_time = next_ingest_items.first; // Get fetch_time using .first
-
-	std::list<PullObjectIngester::IngestItem> urls;
-
-        {
-            std::lock_guard<std::recursive_mutex> lock(controller->m_pullObjectIngestersMutex);
-            auto &ingesters = controller->getPullObjectIngesters();
-            while (ingesters.size() < next_ingest_items.second.size()) {
-	        controller->addPullObjectIngester(new PullObjectIngester(controller->objectStore(), *controller, urls));
-            }
-	}
-
-        // Wait until the fetch_time
-	{
-            std::ostringstream oss;
-	    oss << fetch_time ;
-	    ogs_debug("Sleeping until...%s", oss.str().c_str());
-	}
-	std::this_thread::sleep_until(fetch_time);
-        {
-            const auto &session_state = controller->distributionSession().getState();
-            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
-                controller->m_scheduledPullRunning = false;
-                return;
-            }
-        }
-
-        {
-            std::lock_guard<std::recursive_mutex> lock(controller->m_pullObjectIngestersMutex);
-            // Add the URLs to the PullObjectIngester instances
-            auto &ingesters = controller->getPullObjectIngesters();
-            for (auto ingester_it = ingesters.begin(); ingester_it!= ingesters.end(); ++ingester_it) {
-                if (next_ingest_items.second.empty()) break;
-                auto ingest_item = next_ingest_items.second.front();
-                next_ingest_items.second.pop_front();  // remove the item
-	        //ingest_item.deadline(std::nullopt);
-                ingest_item.deadline(std::chrono::system_clock::now() + default_deadline);
-                if (!(*ingester_it)->fetch(ingest_item)) {
-                    ogs_debug("Failed to fetch item: %s", ingest_item.url().c_str());
-                }
-            }
-	}
-    }
-    controller->m_scheduledPullRunning = false;
-}
-
-void ObjectManifestController::startWorker()
-{
-    if (!m_scheduledPullRunning) {
-        if (m_scheduledPullThread.joinable()) m_scheduledPullThread.detach();
-        m_scheduledPullThread = std::thread(&ObjectManifestController::workerLoop, this);
-    }
-}
 
 void ObjectManifestController::processEvent(Event &event, SubscriptionService &event_service)
 {
@@ -252,6 +70,8 @@ void ObjectManifestController::processEvent(Event &event, SubscriptionService &e
             event.preventDefault();
         }
         // event.preventDefault() if checks fail
+    } else if (event.eventName() == ObjectManifestHandler::ObjectManifestChangeEvent::event_name) {
+        m_manifestHandlerChange.notify_all();
     }
     ObjectController::processEvent(event, event_service);
 
@@ -262,7 +82,6 @@ std::string &ObjectManifestController::getManifestUrl()
     manifestUrl();
     return m_manifestUrl;
 }
-
 
 void ObjectManifestController::manifestUrl()
 {
@@ -329,6 +148,229 @@ void ObjectManifestController::reconfigurePullObjectIngesters()
         initPullObjectIngesters();
     }
 }
+
+/* ObjectManifestController protected */
+
+void ObjectManifestController::startWorker()
+{
+    if (!m_scheduledPullRunning) {
+        if (m_scheduledPullThread.joinable()) m_scheduledPullThread.detach();
+        m_scheduledPullThread = std::thread(&ObjectManifestController::workerLoop, this);
+    }
+}
+
+void ObjectManifestController::initPullObjectIngesters()
+{
+    const std::optional<std::string> &object_ingest_base_url = distributionSession().getObjectIngestBaseUrl();
+    const std::optional<std::string> &object_distribution_base_url = distributionSession().objectDistributionBaseUrl();
+
+    auto &pull_urls = distributionSession().getObjectAcquisitionPullUrls();
+    if (pull_urls.has_value()) {
+        std::list<PullObjectIngester::IngestItem> urls;
+
+        for (auto &url : pull_urls.value()) {
+            std::string obj_ingest_url;
+
+            if (url.has_value()) {
+                const std::string &url_str = url.value();
+                if (object_ingest_base_url.has_value()) {
+                    if (url_str.starts_with("https:") || url_str.starts_with("http:") || url_str.starts_with("//")) {
+                        ogs_error("Invalid objectAcquisitionPullUrl when objectIngestBaseUrl is set: %s", url.value().c_str());
+                        continue;
+                    } else {
+                        obj_ingest_url = object_ingest_base_url.value();
+                        if (!obj_ingest_url.ends_with("/")) obj_ingest_url += "/";
+                        obj_ingest_url += trim_slashes(url_str);
+                    }
+
+                }
+
+                const auto *metadata = objectStore().findMetadataByURL(obj_ingest_url);
+                if (metadata) {
+                    /* this is a refetch */
+                    urls.emplace_back(*metadata);
+                } else {
+                    /* this is a new URL */
+                    urls.emplace_back(nextObjectId(), obj_ingest_url, url_str, object_ingest_base_url, object_distribution_base_url);
+                }
+            }
+        }
+
+        addPullObjectIngester(new PullObjectIngester(objectStore(), *this, urls));
+    }
+}
+
+void ObjectManifestController::initPushObjectIngester()
+{
+    const std::string objIngestBaseUrl;
+
+    PushObjectIngester *push_ingester = new PushObjectIngester(objectStore(), *this);
+
+    distributionSession().setObjectIngestBaseUrl(push_ingester->getIngestServerPrefix());
+    subscribeTo({"ObjectPushStart"}, *push_ingester);
+    pushObjectIngester(push_ingester);
+}
+
+ObjectManifestController &ObjectManifestController::manifestHandler(std::shared_ptr<ManifestHandler> &&manifest_handler)
+{
+    std::lock_guard guard(m_manifestHandlerMutex);
+    m_manifestHandler = std::move(manifest_handler);
+    subscribeTo({ObjectManifestHandler::ObjectManifestChangeEvent::event_name}, *m_manifestHandler);
+    m_manifestHandlerChange.notify_all();
+    return *this;
+}
+
+const std::shared_ptr<ManifestHandler> &ObjectManifestController::manifestHandler() const
+{
+    std::lock_guard guard(m_manifestHandlerMutex);
+    return m_manifestHandler;
+}
+
+std::string ObjectManifestController::nextObjectId()
+{
+    return generateUUID();
+}
+
+/* ObjectManifestController private */
+
+void ObjectManifestController::workerLoop(ObjectManifestController *controller)
+{
+    controller->m_scheduledPullRunning = true;
+    /* Don't process if the session is inactive or deactivating */
+    {
+        const auto &session_state = controller->distributionSession().getState();
+        if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
+            controller->m_scheduledPullRunning = false;
+            return;
+        }
+    }
+
+    /* wait for a ManifestHandler to be created */
+    while (true) {
+        {
+            std::lock_guard<std::recursive_mutex> lock(controller->m_manifestHandlerMutex);
+            if (controller->m_scheduledPullCancel || controller->m_manifestHandler) {
+                break;
+            }
+            const auto &session_state = controller->distributionSession().getState();
+            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
+                controller->m_scheduledPullRunning = false;
+                return;
+            }
+        }
+        // Avoid a tight busy-loop: yield or sleep for a short time.
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    if (controller->m_scheduledPullCancel) {
+        controller->m_scheduledPullRunning = false;
+        return;
+    }
+
+    {
+        const auto &session_state = controller->distributionSession().getState();
+        if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
+            controller->m_scheduledPullRunning = false;
+            return;
+        }
+    }
+
+    while (!controller->m_scheduledPullCancel) {
+        {
+            const auto &session_state = controller->distributionSession().getState();
+            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
+                controller->m_scheduledPullRunning = false;
+                return;
+            }
+        }
+
+        std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> next_ingest_items;
+        ManifestHandler::durn_type default_deadline;
+        // Get the next ingest items
+	try {
+            std::lock_guard<std::recursive_mutex> lock(controller->m_manifestHandlerMutex);
+            next_ingest_items = controller->manifestHandler()->nextIngestItems();
+            default_deadline = controller->manifestHandler()->getDefaultDeadline();
+	} catch ( std::domain_error &err) {
+	    ogs_error("While fetching next manifest ingest item: %s", err.what());
+	}
+
+	if (next_ingest_items.second.empty()) break;
+
+	auto fetch_time = next_ingest_items.first; // Get fetch_time using .first
+
+	std::list<PullObjectIngester::IngestItem> urls;
+
+        {
+            std::lock_guard<std::recursive_mutex> lock(controller->m_pullObjectIngestersMutex);
+            auto &ingesters = controller->getPullObjectIngesters();
+            while (ingesters.size() < next_ingest_items.second.size()) {
+	        controller->addPullObjectIngester(new PullObjectIngester(controller->objectStore(), *controller, urls));
+            }
+	}
+
+        // Wait until the fetch_time
+	{
+            std::ostringstream oss;
+	    oss << fetch_time ;
+	    ogs_debug("Sleeping until...%s", oss.str().c_str());
+	}
+
+        {
+            std::unique_lock<std::recursive_mutex> lock(controller->m_manifestHandlerMutex);
+            if (controller->m_manifestHandlerChange.wait_until(lock, fetch_time)
+                    == std::cv_status::no_timeout) {
+                /* ingest items updated before time of the next fetch, so go to next loop */
+                ogs_debug("Ingest list updated, reassessing next ingest items");
+                continue;
+            }
+        }
+
+        {
+            const auto &session_state = controller->distributionSession().getState();
+            if (session_state == DistSessionState::VAL_INACTIVE || session_state == DistSessionState::VAL_DEACTIVATING) {
+                controller->m_scheduledPullRunning = false;
+                return;
+            }
+        }
+
+        {
+            std::lock_guard<std::recursive_mutex> lock(controller->m_pullObjectIngestersMutex);
+            // Add the URLs to the PullObjectIngester instances
+            auto &ingesters = controller->getPullObjectIngesters();
+            for (auto ingester_it = ingesters.begin(); ingester_it!= ingesters.end(); ++ingester_it) {
+                if (next_ingest_items.second.empty()) break;
+                auto ingest_item = next_ingest_items.second.front();
+                next_ingest_items.second.pop_front();  // remove the item
+	        //ingest_item.deadline(std::nullopt);
+                if (!ingest_item.deadline()) {
+                    ingest_item.deadline(std::chrono::system_clock::now() + default_deadline);
+                }
+
+                {
+                    std::lock_guard<std::recursive_mutex> lock(controller->m_manifestHandlerMutex);
+                    controller->manifestHandler()->startedFetch(ingest_item);
+                }
+
+                if (!(*ingester_it)->fetch(ingest_item)) {
+                    ogs_debug("Failed to fetch item: %s", ingest_item.url().c_str());
+                }
+            }
+	}
+    }
+    controller->m_scheduledPullRunning = false;
+}
+
+std::string ObjectManifestController::generateUUID()
+{
+    uuid_t uuid;
+    uuid_generate_random(uuid);
+    char uuid_str[37];
+    uuid_unparse(uuid, uuid_str);
+    return std::string(uuid_str);
+}
+
+/* local functions */
 
 static void validate_pull_acquisition_method(DistributionSession &distributionSession) {
     if (distributionSession.getObjectAcquisitionMethod() == "PULL") {

@@ -1,7 +1,7 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: ObjectController class
+ * 5G-MAG Reference Tools: MBS Transport Function: ObjectController class
  ******************************************************************************
- * Copyright: (C)2025 British Broadcasting Corporation
+ * Copyright: (C)2025-2026 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
@@ -100,6 +100,13 @@ void ObjectController::processEvent(Event &event, SubscriptionService &event_ser
             inactive_state = DistSessionState::VAL_INACTIVE;
             distributionSession().setState(inactive_state);
         }
+    } else if (event.eventName() == ObjectPackager::PackagingFailedEvent::event_name) {
+        ObjectPackager::PackagingFailedEvent &packaging_failed_event = dynamic_cast<ObjectPackager::PackagingFailedEvent&>(event);
+        ogs_debug("Object packaging failed: reason = (%i) %s", packaging_failed_event.failureType(), packaging_failed_event.reason().c_str());
+        sendEventSynchronous(event); /* repeat packaging failure event to subscribers of this ObjectController */
+        DistSessionState inactive_state;
+        inactive_state = DistSessionState::VAL_INACTIVE;
+        distributionSession().setState(inactive_state);
     } else if (event.eventName() == "ObjectAdded") {
         /* object successfully added to the object store */
         m_consecutiveIngestFailures = 0;
@@ -117,7 +124,7 @@ std::string ObjectController::nextObjectId()
 const std::shared_ptr<ObjectPackager> &ObjectController::packager(ObjectPackager *packager)
 {
     m_packager.reset(packager);
-    subscribeTo({"ObjectSendCompleted"}, *m_packager.get());
+    subscribeTo({ObjectPackager::ObjectSendCompleted::event_name, ObjectPackager::PackagingFailedEvent::event_name}, *m_packager.get());
     return m_packager;
 }
 

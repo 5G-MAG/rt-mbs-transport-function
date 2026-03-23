@@ -1,5 +1,5 @@
 # License: 5G-MAG Public License (v1.0)
-# Copyright: (C) 2024-2025 British Broadcasting Corporation
+# Copyright: (C) 2024-2026 British Broadcasting Corporation
 # Author(s): David Waring <david.waring2@bbc.co.uk>
 #            Dev Audsin <dev.audsin@bbc.co.uk>
 #
@@ -10,7 +10,7 @@
 # Meson module fs and its functions like fs.hash_file require atleast meson 0.59.0 
 
 project('rt-mbs-transport-function', 'c', 'cpp',
-        version : '1.2.2',
+        version : '1.3.0',
         license : '5G-MAG Public',
         meson_version : '>= 1.4.0',
         default_options : [

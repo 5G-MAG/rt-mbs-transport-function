@@ -1,7 +1,7 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Common utility functions
+ * 5G-MAG Reference Tools: MBS Transport Function: Common utility functions
  ******************************************************************************
- * Copyright: (C)2025 British Broadcasting Corporation
+ * Copyright: (C)2025-2026 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
@@ -52,6 +52,16 @@ std::string time_point_to_iso8601_utc_str(const std::chrono::system_clock::time_
     oss.imbue(std::locale("C"));
     oss << std::format("{0:%F}T{0:%T}Z", datetime_us);
     return oss.str();
+}
+
+std::chrono::system_clock::time_point iso8601_utc_str_to_time_point(const std::string &iso8601_str)
+{
+    std::chrono::system_clock::time_point retval;
+    std::istringstream iss{iso8601_str};
+    iss.imbue(std::locale("C"));
+    iss >> std::chrono::parse("%FT%TZ", retval);
+    if (iss.fail()) throw std::out_of_range(std::format("Bad ISO8601 UTC time: {}", iso8601_str));
+    return retval;
 }
 
 int get_path_mtu(const ogs_sockaddr_t &sock_addr)
