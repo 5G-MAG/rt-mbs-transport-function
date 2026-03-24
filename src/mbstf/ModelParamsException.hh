@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_MODEL_PARAMS_EXCEPTION_HH_
 #define _MBS_TF_MODEL_PARAMS_EXCEPTION_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Model Exception with Invalid Params
+ * 5G-MAG Reference Tools: MBS Transport Function: Model Exception with Invalid Params
  ******************************************************************************
  * Copyright: (C)2025 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>

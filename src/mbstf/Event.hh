@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_EVENT_HH_
 #define _MBS_TF_EVENT_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Subscription Event base class
+ * 5G-MAG Reference Tools: MBS Transport Function: Subscription Event base class
  ******************************************************************************
  * Copyright: (C)2024 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>

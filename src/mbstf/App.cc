@@ -1,5 +1,5 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Main app entry point
+ * 5G-MAG Reference Tools: MBS Transport Function: Main app entry point
  ******************************************************************************
  * Copyright: (C)2024 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>

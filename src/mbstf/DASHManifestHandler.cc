@@ -1,5 +1,5 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: DASH Manifest Handler class
+ * 5G-MAG Reference Tools: MBS Transport Function: DASH Manifest Handler class
  ******************************************************************************
  * Copyright: (C)2025 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>

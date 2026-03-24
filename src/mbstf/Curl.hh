@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_CURL_HH_
 #define _MBS_TF_CURL_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: cURL client
+ * 5G-MAG Reference Tools: MBS Transport Function: cURL client
  ******************************************************************************
  * Copyright: (C)2025 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>

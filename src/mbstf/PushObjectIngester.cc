@@ -1,5 +1,5 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Push Object Ingester
+ * 5G-MAG Reference Tools: MBS Transport Function: Push Object Ingester
  ******************************************************************************
  * Copyright: (C)2025 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>

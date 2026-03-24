@@ -1,5 +1,5 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Network Function Server
+ * 5G-MAG Reference Tools: MBS Transport Function: Network Function Server
  ******************************************************************************
  * Copyright: (C) 2024 British Broadcasting Corporation
  * Author: David Waring <david.waring2@bbc.co.uk>

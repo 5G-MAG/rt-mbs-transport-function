@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_LOCAL_EVENTS_HH_
 #define _MBS_TF_LOCAL_EVENTS_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Local Events
+ * 5G-MAG Reference Tools: MBS Transport Function: Local Events
  ******************************************************************************
  * Copyright: (C)2025 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>

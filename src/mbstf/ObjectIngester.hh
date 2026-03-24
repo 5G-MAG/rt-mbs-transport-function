@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_OBJECT_INGESTER_HH_
 #define _MBS_TF_OBJECT_INGESTER_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Object Ingester base class
+ * 5G-MAG Reference Tools: MBS Transport Function: Object Ingester base class
  ******************************************************************************
  * Copyright: (C)2024 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>

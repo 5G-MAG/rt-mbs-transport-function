@@ -1,5 +1,5 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Distribution Session Subscription class
+ * 5G-MAG Reference Tools: MBS Transport Function: Distribution Session Subscription class
  ******************************************************************************
  * Copyright: (C)2024-2025 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>

@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_MBSTF_EVENT_HANDLER_HH_
 #define _MBS_TF_MBSTF_EVENT_HANDLER_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: MBSTF Open5GS Event Handler
+ * 5G-MAG Reference Tools: MBS Transport Function: MBSTF Open5GS Event Handler
  ******************************************************************************
  * Copyright: (C)2024 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>

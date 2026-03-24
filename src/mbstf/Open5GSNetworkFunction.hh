@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_OPEN5GS_NETWORK_FUNCTION_HH_
 #define _MBS_TF_OPEN5GS_NETWORK_FUNCTION_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Open5GS Application interface
+ * 5G-MAG Reference Tools: MBS Transport Function: Open5GS Application interface
  ******************************************************************************
  * Copyright: (C)2024 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>

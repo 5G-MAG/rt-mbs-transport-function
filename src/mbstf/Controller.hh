@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_CONTROLLER_HH_
 #define _MBS_TF_CONTROLLER_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Session Controller Base
+ * 5G-MAG Reference Tools: MBS Transport Function: Session Controller Base
  ******************************************************************************
  * Copyright: (C)2024-2025 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>

@@ -1,5 +1,5 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: cURL requests
+ * 5G-MAG Reference Tools: MBS Transport Function: cURL requests
  ******************************************************************************
  * Copyright: (C)2025 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>

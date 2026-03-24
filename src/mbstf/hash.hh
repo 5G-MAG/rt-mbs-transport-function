@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_HASH_HH_
 #define _MBS_TF_HASH_HH_
 /*****************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: SHA256 hashing function
+ * 5G-MAG Reference Tools: MBS Transport Function: SHA256 hashing function
  *****************************************************************************
  * Copyright: (C)2024 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>

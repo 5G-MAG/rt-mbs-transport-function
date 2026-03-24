@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_BIT_RATE_HH_
 #define _MBS_TF_BIT_RATE_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: BitRate string handler
+ * 5G-MAG Reference Tools: MBS Transport Function: BitRate string handler
  ******************************************************************************
  * Copyright: (C)2025 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>

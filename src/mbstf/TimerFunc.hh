@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_TIMER_FUNC_HH_
 #define _MBS_TF_TIMER_FUNC_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Timer function interface
+ * 5G-MAG Reference Tools: MBS Transport Function: Timer function interface
  ******************************************************************************
  * Copyright: (C)2024 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>

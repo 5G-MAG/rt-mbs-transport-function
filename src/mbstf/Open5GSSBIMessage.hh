@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_OPEN5GS_SBI_MESSAGE_HH_
 #define _MBS_TF_OPEN5GS_SBI_MESSAGE_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Open5GS SBI Message interface
+ * 5G-MAG Reference Tools: MBS Transport Function: Open5GS SBI Message interface
  ******************************************************************************
  * Copyright: (C)2024-2025 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>

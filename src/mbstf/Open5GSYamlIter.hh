@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_OPEN5GS_YAML_ITER_HH_
 #define _MBS_TF_OPEN5GS_YAML_ITER_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Open5GS YAML Iterator class
+ * 5G-MAG Reference Tools: MBS Transport Function: Open5GS YAML Iterator class
  ******************************************************************************
  * Copyright: (C)2024 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>

@@ -1,7 +1,7 @@
 #ifndef _MBS_TF_OBJECT_LIST_PACKAGER_HH_
 #define _MBS_TF_OBJECT_LIST_PACKAGER_HH_
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Object List Packager class
+ * 5G-MAG Reference Tools: MBS Transport Function: Object List Packager class
  ******************************************************************************
  * Copyright: (C)2025 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>
