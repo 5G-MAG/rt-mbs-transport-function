@@ -47,13 +47,13 @@ MBSTF_NAMESPACE_START
 
 using time_type = std::chrono::system_clock::time_point;
 
-static LIBMPDPP_NAMESPACE_CLASS(MPD) ingest_manifest(const ObjectStore::Object &new_manifest);
+static LIBMPDPP_NAMESPACE_CLASS(MPD) ingest_manifest(const std::shared_ptr<ObjectStore::Object> &new_manifest);
 
-DASHManifestHandler::DASHManifestHandler(const ObjectStore::Object &object, ObjectController *controller, bool pull_distribution)
+DASHManifestHandler::DASHManifestHandler(const std::shared_ptr<ObjectStore::Object> &object, ObjectController *controller, bool pull_distribution)
     :ManifestHandler(controller, pull_distribution)
     ,m_mpdMutex()
     ,m_mpd(ingest_manifest(object))
-    ,m_manifest(&object)
+    ,m_manifest(object)
     ,m_refreshMpd(false)
 {
     std::lock_guard<std::recursive_mutex> guard(m_mpdMutex);
@@ -192,7 +192,7 @@ ManifestHandler::durn_type DASHManifestHandler::getDefaultDeadline()
     return 4s;
 }
 
-bool DASHManifestHandler::update(const ObjectStore::Object &new_manifest)
+bool DASHManifestHandler::update(const std::shared_ptr<ObjectStore::Object> &new_manifest)
 {
     // Process the new MPD and see what has changed, throw an exception of the Object is not understood or invalid
 
@@ -203,7 +203,7 @@ bool DASHManifestHandler::update(const ObjectStore::Object &new_manifest)
         if (m_mpd != new_mpd) {
             ogs_debug("New MPD update, changing MPD");
             m_mpd = new_mpd;
-            m_manifest = &new_manifest;
+            m_manifest = new_manifest;
             m_mpd.selectAllRepresentations();
             //SelectedInitialistionSegments(): For everything init segments in the list schedule an ingester.
             m_extraPullObjects = m_mpd.selectedInitializationSegments();
@@ -216,12 +216,12 @@ bool DASHManifestHandler::update(const ObjectStore::Object &new_manifest)
 
 static bool g_registered = ManifestHandlerFactory::registerManifestHandler("application/dash+xml", new ManifestHandlerConstructorClass<DASHManifestHandler>());
 
-static LIBMPDPP_NAMESPACE_CLASS(MPD) ingest_manifest(const ObjectStore::Object &new_manifest)
+static LIBMPDPP_NAMESPACE_CLASS(MPD) ingest_manifest(const std::shared_ptr<ObjectStore::Object> &new_manifest)
 {
-    if ( new_manifest.second.mediaType() != "application/dash+xml" ){
+    if ( new_manifest->second.mediaType() != "application/dash+xml" ){
          throw std::invalid_argument("Does not look like a DASH Manifest as the media type is invalid. Expected media type: application/dash+xml");
     }
-    return LIBMPDPP_NAMESPACE_CLASS(MPD) (new_manifest.first, new_manifest.second.getFetchedUrl());
+    return LIBMPDPP_NAMESPACE_CLASS(MPD) (new_manifest->first, new_manifest->second.getFetchedUrl());
 
 
 }

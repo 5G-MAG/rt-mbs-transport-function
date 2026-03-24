@@ -45,16 +45,17 @@ MBSTF_NAMESPACE_START
 
 // ObjectCarouselPackager::PackageItem
 
-ObjectCarouselPackager::PackageItem::PackageItem(ObjectStore::Object &object, const std::shared_ptr<const ObjectManifestHandler> &manifest_handler)
-    :m_object(&object)
-    ,m_repetitionInterval(manifest_handler->getRepetitionIntervalForUrl(object.second.getOriginalUrl()))
+ObjectCarouselPackager::PackageItem::PackageItem(const std::shared_ptr<ObjectStore::Object> &object,
+                                                 const std::shared_ptr<const ObjectManifestHandler> &manifest_handler)
+    :m_object(object)
+    ,m_repetitionInterval(manifest_handler->getRepetitionIntervalForUrl(object->second.getOriginalUrl()))
     ,m_nextTransmissionStart(ObjectCarouselPackager::time_type::clock::now())
 {
 }
 
-ObjectCarouselPackager::PackageItem::PackageItem(ObjectStore::Object &object,
+ObjectCarouselPackager::PackageItem::PackageItem(const std::shared_ptr<ObjectStore::Object> &object,
                                                  const ObjectCarouselPackager::duration_type &repetition_interval)
-    :m_object(&object)
+    :m_object(object)
     ,m_repetitionInterval(repetition_interval)
     ,m_nextTransmissionStart(time_type::clock::now())
 {
@@ -68,7 +69,7 @@ ObjectCarouselPackager::PackageItem::PackageItem(const PackageItem &other)
 }
 
 ObjectCarouselPackager::PackageItem::PackageItem(PackageItem &&other)
-    :m_object(other.m_object)
+    :m_object(std::move(other.m_object))
     ,m_repetitionInterval(std::move(other.m_repetitionInterval))
     ,m_nextTransmissionStart(std::move(other.m_nextTransmissionStart))
 {
@@ -115,8 +116,8 @@ ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, Object
     ,m_packageItems(objects_to_package)
     ,m_packagingUpdateCondVar()
     ,m_tunnelEndpoint()
-    ,m_streamToisMutex(new decltype(m_streamToisMutex)::element_type)
-    ,m_streamTois()
+    ,m_streamsMutex(new decltype(m_streamsMutex)::element_type)
+    ,m_streams()
     ,m_schedulingThread()
     ,m_schedulingRunning(false)
     ,m_schedulingCancel(false)
@@ -137,8 +138,8 @@ ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, Object
     ,m_packageItems(std::move(objects_to_package))
     ,m_packagingUpdateCondVar()
     ,m_tunnelEndpoint()
-    ,m_streamToisMutex(new decltype(m_streamToisMutex)::element_type)
-    ,m_streamTois()
+    ,m_streamsMutex(new decltype(m_streamsMutex)::element_type)
+    ,m_streams()
     ,m_schedulingThread()
     ,m_schedulingRunning(false)
     ,m_schedulingCancel(false)
@@ -159,8 +160,8 @@ ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, Object
     ,m_packageItems()
     ,m_packagingUpdateCondVar()
     ,m_tunnelEndpoint()
-    ,m_streamToisMutex(new decltype(m_streamToisMutex)::element_type)
-    ,m_streamTois()
+    ,m_streamsMutex(new decltype(m_streamsMutex)::element_type)
+    ,m_streams()
     ,m_schedulingThread()
     ,m_schedulingRunning(false)
     ,m_schedulingCancel(false)
@@ -182,7 +183,7 @@ bool ObjectCarouselPackager::add(const PackageItem &item) {
     ogs_debug("ObjectCarouselPackager::add(): deactivating=%s", m_deactivating?"true":"false");
     if (m_deactivating) return false;
     std::lock_guard<decltype(m_packageItemsMutex)::element_type> lock(*m_packageItemsMutex);
-    m_packageItems.remove_if([&item](const PackageItem &pkg_item) -> bool { return item.object().second.objectId() == pkg_item.object().second.objectId(); });
+    m_packageItems.remove_if([&item](const PackageItem &pkg_item) -> bool { return item.object()->second.objectId() == pkg_item.object()->second.objectId(); });
     m_packageItems.push_back(item);
     m_packagingUpdateCondVar.notify_all();
     return true;
@@ -192,7 +193,7 @@ bool ObjectCarouselPackager::add(PackageItem &&item) {
     ogs_debug("ObjectCarouselPackager::add(): deactivating=%s", m_deactivating?"true":"false");
     if (m_deactivating) return false;
     std::lock_guard<decltype(m_packageItemsMutex)::element_type> lock(*m_packageItemsMutex);
-    m_packageItems.remove_if([&item](const PackageItem &pkg_item) -> bool { return item.object().second.objectId() == pkg_item.object().second.objectId(); });
+    m_packageItems.remove_if([&item](const PackageItem &pkg_item) -> bool { return item.object()->second.objectId() == pkg_item.object()->second.objectId(); });
     m_packageItems.push_back(std::move(item));
     m_packagingUpdateCondVar.notify_all();
     return true;
@@ -200,7 +201,7 @@ bool ObjectCarouselPackager::add(PackageItem &&item) {
 
 bool ObjectCarouselPackager::remove(const PackageItem &item) {
     std::lock_guard<decltype(m_packageItemsMutex)::element_type> lock(*m_packageItemsMutex);
-    m_packageItems.remove_if([&item](const PackageItem &pkg_item) -> bool { return item.object().second.objectId() == pkg_item.object().second.objectId(); });
+    m_packageItems.remove_if([&item](const PackageItem &pkg_item) -> bool { return item.object()->second.objectId() == pkg_item.object()->second.objectId(); });
     m_packagingUpdateCondVar.notify_all();
     return true;
 }
@@ -288,37 +289,24 @@ bool ObjectCarouselPackager::deactivate()
     return false;
 }
 
-bool ObjectCarouselPackager::streamsAllocateToi(const std::function<uint32_t()> &get_toi_fn)
+bool ObjectCarouselPackager::streamsAllocateToi(const std::function<std::pair<uint32_t, std::shared_ptr<ObjectStore::Object> >()> &get_toi_fn)
 {
-    std::lock_guard<decltype(m_streamToisMutex)::element_type> lock(*m_streamToisMutex);
-    for (size_t i=0; i<m_maxStreams; i++) {
-        if (i >= m_streamTois.size()) {
-            m_streamTois.push_back(get_toi_fn());
-            return true;
-        }
-        if (m_streamTois[i] == 0) {
-            m_streamTois[i] = get_toi_fn();
-            return true;
-        }
+    std::lock_guard<decltype(m_streamsMutex)::element_type> lock(*m_streamsMutex);
+    if (m_streams.size() < m_maxStreams) {
+        m_streams.insert(get_toi_fn());
+        return true;
     }
     return false;
 }
 
 void ObjectCarouselPackager::streamsRemoveToi(uint32_t toi)
 {
-    std::lock_guard<decltype(m_streamToisMutex)::element_type> lock(*m_streamToisMutex);
-
-    auto tois_size = m_streamTois.size();
-    for (size_t i = 0; i < tois_size; i++) {
-        if (toi == m_streamTois[i]) {
-            if (i < tois_size - 1) {
-                m_streamTois[i] = m_streamTois[tois_size - 1];
-            }
-            m_streamTois.pop_back();
-            break;
-        }
+    std::lock_guard<decltype(m_streamsMutex)::element_type> lock(*m_streamsMutex);
+    auto it = m_streams.find(toi);
+    if (it != m_streams.end()) {
+        m_streams.erase(it);
+        m_packagingUpdateCondVar.notify_all();
     }
-    m_packagingUpdateCondVar.notify_all();
 }
 
 void ObjectCarouselPackager::scheduleCarousel()
@@ -332,14 +320,14 @@ void ObjectCarouselPackager::scheduleCarousel()
     }
 
     /* copy the package items list to filter for items to schedule */
-    auto package_items = m_packageItems;
+    std::list<PackageItem> package_items(m_packageItems);
 
     /* fix repetition rates where unknown by allocating unknown items to the remaining bit rate */
     double known_bit_rate = 0.0;
     size_t unknown_rate_bits = 0;
     for (const auto &pkg_item : package_items) {
         double rep_interval = pkg_item.repetitionInterval().count();
-        size_t obj_bit_size = pkg_item.object().first.size()*sizeof(*pkg_item.object().first.data())*8;
+        size_t obj_bit_size = pkg_item.object()->first.size()*sizeof(*pkg_item.object()->first.data())*8;
         if (!std::isnan(rep_interval)) {
             known_bit_rate += obj_bit_size / rep_interval;
         } else {
@@ -363,7 +351,7 @@ void ObjectCarouselPackager::scheduleCarousel()
     double total_bit_rate = 0.0;
     for (const auto &pkg_item : package_items) {
         const auto &object = pkg_item.object();
-        size_t obj_bit_size = object.first.size()*sizeof(*object.first.data())*8;
+        size_t obj_bit_size = object->first.size()*sizeof(*object->first.data())*8;
         double obj_bit_rate = obj_bit_size / pkg_item.repetitionInterval().count();
         //ogs_debug("%s", std::format("Object {} of {} bits repeats every {}s: bitrate = {}", object.second.getFetchedUrl(), obj_bit_size, pkg_item.repetitionInterval().count(), obj_bit_rate).c_str());
         if (obj_bit_rate > max_obj_bit_rate) max_obj_bit_rate = obj_bit_rate;
@@ -385,10 +373,13 @@ void ObjectCarouselPackager::scheduleCarousel()
     std::optional<time_type> next_start;
     std::erase_if(package_items, [this, &now, &next_start, avail_bitrate](const auto &item) -> bool {
             auto [start_min, start_deadline] = item.nextTransmitStartWindow(avail_bitrate);
-            //ogs_debug("%s", std::format("Item {} to start transmission between {} and {}", item.object().second.getFetchedUrl(), start_min, start_deadline).c_str());
-            if (std::find(m_streamTois.begin(), m_streamTois.end(), item.toi()) != m_streamTois.end()) {
-                //ogs_debug("Item already being sent");
-                return true;
+            //ogs_debug("%s", std::format("Item {} to start transmission between {} and {}", item.object()->second.getFetchedUrl(), start_min, start_deadline).c_str());
+            {
+                std::lock_guard<decltype(m_streamsMutex)::element_type> lock(*m_streamsMutex);
+                if (m_streams.find(item.toi()) != m_streams.end()) {
+                    //ogs_debug("Item already being sent");
+                    return true;
+                }
             }
             if (start_min > now) {
                 //ogs_debug("Item not due for transmission yet");
@@ -421,34 +412,42 @@ void ObjectCarouselPackager::scheduleCarousel()
 
     /* iterate through list allocating package items to streams until no streams left or no package items left */
     for (auto &pkg_item : package_items) {
-        //ogs_debug("%s", std::format("Attempting to schedule {}", pkg_item.object().second.getFetchedUrl()).c_str());
-        if (streamsAllocateToi([this,&pkg_item]() -> uint32_t {
+        //ogs_debug("%s", std::format("Attempting to schedule {}", pkg_item.object()->second.getFetchedUrl()).c_str());
+        if (streamsAllocateToi([this,&pkg_item]() -> std::pair<uint32_t, std::shared_ptr<ObjectStore::Object> > {
                 std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
                 ensureTransmitter();
-                auto &metadata = pkg_item.object().second;
+                auto &metadata = pkg_item.object()->second;
                 auto &file_desc = metadata.fluteFileDescription();
+                std::string location;
+                std::string obj_ingest_base_url = metadata.objIngestBaseUrl().value_or(std::string());
+                std::string obj_distribution_base_url = metadata.objDistributionBaseUrl().value_or(std::string());
+                if (!obj_ingest_base_url.empty() && !obj_distribution_base_url.empty() &&
+                    metadata.getFetchedUrl().starts_with(obj_ingest_base_url)) {
+                    location = obj_distribution_base_url + metadata.getFetchedUrl().substr(obj_ingest_base_url.size());
+                } else {
+                    // Just use the fetched URL
+                    location = metadata.getFetchedUrl();
+                }
                 if (!file_desc) {
-                    std::string location;
-                    std::string obj_ingest_base_url = metadata.objIngestBaseUrl().value_or(std::string());
-                    std::string obj_distribution_base_url = metadata.objDistributionBaseUrl().value_or(std::string());
-                    if (!obj_ingest_base_url.empty() && !obj_distribution_base_url.empty() &&
-                        metadata.getFetchedUrl().starts_with(obj_ingest_base_url)) {
-                        location = obj_distribution_base_url + metadata.getFetchedUrl().substr(obj_ingest_base_url.size());
-                    } else {
-                        // Just use the fetched URL
-                        location = metadata.getFetchedUrl();
+                    pkg_item.object()->second.fluteFileDescription(new LibFlute::Transmitter::FileDescription(location, pkg_item.object()->first));
+                } else {
+                    /* reset file description information if it's changed */
+                    if (file_desc->file_entry().content_location != location) {
+                        file_desc->set_content_location(location);
                     }
-                    pkg_item.object().second.fluteFileDescription(new LibFlute::Transmitter::FileDescription(location, pkg_item.object().first));
+                    if (file_desc->data() != reinterpret_cast<const char*>(pkg_item.object()->first.data())) {
+                        file_desc->set_content(pkg_item.object()->first);
+                    }
                 }
                 /* add PackageItem to the FLUTE Transmitter as a current file */
                 m_transmitter->send(file_desc);
                 /* Return TOI to set in stream */
-                return pkg_item.toi();
+                return std::make_pair(pkg_item.toi(), pkg_item.object());
             })) {
             /* mark as transmission started to shift to next repeat window */
-            ogs_debug("%s", std::format("Item {} scheduled at {} to be repeated after {}s", pkg_item.object().second.getFetchedUrl(), time_type::clock::now(), pkg_item.repetitionInterval().count()).c_str());
+            ogs_debug("%s", std::format("Item {} scheduled at {} to be repeated after {}s", pkg_item.object()->second.getFetchedUrl(), time_type::clock::now(), pkg_item.repetitionInterval().count()).c_str());
             for (auto &item : m_packageItems) {
-                if (item.object().second.objectId() == pkg_item.object().second.objectId()) {
+                if (item.object()->second.objectId() == pkg_item.object()->second.objectId()) {
                     item.startedTransmission(pkg_item.repetitionInterval());
                     break;
                 }

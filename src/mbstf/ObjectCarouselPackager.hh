@@ -44,8 +44,8 @@ public:
     class PackageItem {
     public:
         PackageItem() = delete;
-        PackageItem(ObjectStore::Object &object, const std::shared_ptr<const ObjectManifestHandler> &manifest_handler);
-        PackageItem(ObjectStore::Object &object, const duration_type &repetition_interval);
+        PackageItem(const std::shared_ptr<ObjectStore::Object> &object, const std::shared_ptr<const ObjectManifestHandler> &manifest_handler);
+        PackageItem(const std::shared_ptr<ObjectStore::Object> &object, const duration_type &repetition_interval);
         PackageItem(const PackageItem &other);
         PackageItem(PackageItem &&other);
         virtual ~PackageItem() {};
@@ -55,9 +55,10 @@ public:
 
         bool operator==(const std::shared_ptr<reftools::mbstf::Object> &obj) const;
 
-        ObjectStore::Object &object() { return *m_object; };
-        const ObjectStore::Object &object() const { return *m_object; };
-        PackageItem &object(ObjectStore::Object &object) { m_object = &object; return *this; };
+        const std::shared_ptr<ObjectStore::Object> &object() { return m_object; };
+        std::shared_ptr<const ObjectStore::Object> object() const { return m_object; };
+        PackageItem &object(const std::shared_ptr<ObjectStore::Object> &object) { m_object = object; return *this; };
+        PackageItem &object(std::shared_ptr<ObjectStore::Object> &&object) { m_object = std::move(object); return *this; };
 
         const duration_type &repetitionInterval() const { return m_repetitionInterval; };
         PackageItem &repetitionInterval(const duration_type &repetition_interval) {
@@ -74,7 +75,7 @@ public:
         uint32_t toi() const { const auto &fd = m_object->second.fluteFileDescription(); return fd?fd->toi():0; };
 
     private:
-        ObjectStore::Object *m_object;
+        std::shared_ptr<ObjectStore::Object> m_object;
         duration_type m_repetitionInterval;
         time_type m_nextTransmissionStart;
     };
@@ -108,7 +109,7 @@ protected:
     virtual void doObjectPackage();
 
 private:
-    bool streamsAllocateToi(const std::function<uint32_t()> &get_toi_fn); // returns true if the TOI could be allocated to an empty stream
+    bool streamsAllocateToi(const std::function<std::pair<uint32_t, std::shared_ptr<ObjectStore::Object> >()> &get_toi_fn);
     void streamsRemoveToi(uint32_t toi);
     void scheduleCarousel();
     void ensureTransmitter();
@@ -121,8 +122,8 @@ private:
     std::list<PackageItem> m_packageItems;
     std::condition_variable_any m_packagingUpdateCondVar;
     std::optional<boost::asio::ip::udp::endpoint> m_tunnelEndpoint;
-    std::unique_ptr<std::recursive_mutex> m_streamToisMutex;
-    std::vector<uint32_t> m_streamTois;
+    std::unique_ptr<std::recursive_mutex> m_streamsMutex;
+    std::map<uint32_t, std::shared_ptr<ObjectStore::Object> > m_streams;
     std::thread m_schedulingThread;
     std::atomic_bool m_schedulingRunning;
     std::atomic_bool m_schedulingCancel;

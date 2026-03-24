@@ -30,6 +30,7 @@ std::string trim_slashes(const std::string &path);
 std::string time_point_to_http_datetime_str(const std::chrono::system_clock::time_point &datetime);
 std::string time_point_to_iso8601_utc_str(const std::chrono::system_clock::time_point &datetime);
 std::chrono::system_clock::time_point iso8601_utc_str_to_time_point(const std::string &iso8601_str);
+std::chrono::system_clock::time_point http_datetime_str_to_time_point(const std::string &rfc9110_str);
 
 int get_path_mtu(const ogs_sockaddr_t &sock_addr);
 int get_tunnelled_path_mtu(const std::optional<std::string> &dest_ip, in_port_t dest_port,

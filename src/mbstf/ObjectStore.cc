@@ -181,16 +181,50 @@ ObjectStore::~ObjectStore()
 
 void ObjectStore::addObject(const std::string& object_id, ObjectData &&object, Metadata &&metadata, bool synchronous_event) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    //std::unique_lock<std::shared_mutex> lock(m_mutex);
 
     try {
-        m_store.insert_or_assign(object_id, std::make_pair(std::move(object), std::move(metadata)));
+        std::shared_ptr<Object> obj(new std::pair(std::move(object), std::move(metadata)));
+        m_store.insert_or_assign(object_id, obj);
     } catch (const std::bad_alloc& e) {
         ogs_error("memory allocation failed: %s", e.what());
 
     }
 
+    /* send event */
     std::shared_ptr<Event> event(new ObjectStore::ObjectAddedEvent(object_id));
+    if (synchronous_event) {
+        sendEventSynchronous(*event);
+    } else {
+        sendEventAsynchronous(event);
+    }
+}
+
+void ObjectStore::updateMetadata(const std::string& object_id, Metadata &&metadata, bool synchronous_event)
+{
+    std::lock_guard<decltype(m_mutex)> lock(m_mutex);
+
+    auto it = m_store.find(object_id);
+    if (it == m_store.end()) {
+        throw std::out_of_range(std::format("Attempt to update Object {}, but it is not in the ObjectStore", object_id));
+    }
+
+    it->second->second = std::move(metadata);
+
+    /* send event */
+    std::shared_ptr<Event> event(new ObjectStore::ObjectUpdatedEvent(object_id));
+    if (synchronous_event) {
+        sendEventSynchronous(*event);
+    } else {
+        sendEventAsynchronous(event);
+    }
+}
+
+void ObjectStore::updateError(const std::string& object_id, int response_code, bool synchronous_event)
+{
+    /* TODO: Evict Object? */
+
+    /* send event */
+    std::shared_ptr<Event> event(new ObjectStore::ObjectUpdateErrorEvent(object_id, response_code));
     if (synchronous_event) {
         sendEventSynchronous(*event);
     } else {
@@ -200,53 +234,40 @@ void ObjectStore::addObject(const std::string& object_id, ObjectData &&object, M
 
 const ObjectStore::ObjectData& ObjectStore::getObjectData(const std::string& object_id) const {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    //std::shared_lock<std::shared_mutex> lock(m_mutex);
-    return  m_store.at(object_id).first;
+    return  m_store.at(object_id)->first;
 }
 
 ObjectStore::ObjectData& ObjectStore::getObjectData(const std::string& object_id) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    return m_store.at(object_id).first;
+    return m_store.at(object_id)->first;
 }
 
 const ObjectStore::Metadata& ObjectStore::getMetadata(const std::string& object_id) const {
    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-   return m_store.at(object_id).second;
+   return m_store.at(object_id)->second;
 }
 
 ObjectStore::Metadata& ObjectStore::getMetadata(const std::string& object_id) {
    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-   return m_store.at(object_id).second;
+   return m_store.at(object_id)->second;
 }
 
 void ObjectStore::deleteObject(const std::string& object_id) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    //std::unique_lock<std::shared_mutex> lock(m_mutex);
     m_store.erase(object_id);
     std::shared_ptr<Event> event(new ObjectStore::ObjectDeletedEvent(object_id));
     sendEventAsynchronous(event);
 }
 
-ObjectStore::Object& ObjectStore::operator[](const std::string& object_id) {
+const std::shared_ptr<ObjectStore::Object> &ObjectStore::operator[](const std::string& object_id) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     return m_store.at(object_id);
 }
 
-const ObjectStore::Object& ObjectStore::operator[](const std::string& object_id) const {
+std::shared_ptr<const ObjectStore::Object> ObjectStore::operator[](const std::string& object_id) const {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     return m_store.at(object_id);
 }
-
-/*
-bool ObjectStore::hasExpired(const std::string& object_id) const {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    const auto& metadata = m_store.at(object_id).second;
-    if (metadata.cacheExpires().has_value()) {
-        return std::chrono::system_clock::now() > metadata.cacheExpires().value();
-    }
-    return false;
-}
-*/
 
 bool ObjectStore::isStale(const std::string& object_id) const {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
@@ -255,28 +276,27 @@ bool ObjectStore::isStale(const std::string& object_id) const {
         return false;
     }
 
-    const Metadata& metadata = it->second.second;
+    const Metadata& metadata = it->second->second;
     return metadata.cacheExpires().has_value() && metadata.cacheExpires().value() < std::chrono::system_clock::now();
 }
 
-std::map<std::string, const ObjectStore::Object&> ObjectStore::getStale() const {
+std::map<std::string, std::shared_ptr<ObjectStore::Object> > ObjectStore::getStale() const {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    std::map<std::string, const ObjectStore::Object&> staleObjects;
+    std::map<std::string, std::shared_ptr<ObjectStore::Object>> stale_objects;
 
     for (const auto& pair : m_store) {
         const std::string& object_id = pair.first;
         if (isStale(object_id)) {
-            staleObjects.emplace(object_id, pair.second);
+            stale_objects.emplace(object_id, pair.second);
         }
     }
 
-    return staleObjects;
+    return stale_objects;
 }
 
-bool ObjectStore::removeObject(const std::string& objectId) {
+bool ObjectStore::removeObject(const std::string& object_id) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    //std::unique_lock<std::shared_mutex> lock(m_mutex);
-    auto it = m_store.find(objectId);
+    auto it = m_store.find(object_id);
     if (it != m_store.end()) {
         m_store.erase(it);
 	return true;
@@ -285,17 +305,13 @@ bool ObjectStore::removeObject(const std::string& objectId) {
     }
 }
 
-bool ObjectStore::removeObjects(const std::list<std::string>& objectIds) {
+bool ObjectStore::removeObjects(const std::list<std::string>& object_ids) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    //std::unique_lock<std::shared_mutex> lock(m_mutex);
-    for (const auto& objectId : objectIds) {
-        auto it = m_store.find(objectId);
+    for (const auto& object_id : object_ids) {
+        auto it = m_store.find(object_id);
         if (it != m_store.end()) {
             m_store.erase(it);
-        } /*else {
-            return false;
-            // Optionally handle the case where the objectId is not found
-        } */
+        }
     }
     return true;
 }
@@ -303,10 +319,10 @@ bool ObjectStore::removeObjects(const std::list<std::string>& objectIds) {
 const ObjectStore::Metadata *ObjectStore::findMetadataByURL(const std::string &url) const
 {
     auto it = std::find_if(m_store.begin(), m_store.end(), [&url](const decltype(m_store)::value_type &obj){
-            auto &metadata = obj.second.second;
+            auto &metadata = obj.second->second;
             return metadata.getOriginalUrl() == url || metadata.getFetchedUrl() == url;
         });
-    if (it != m_store.end()) return &it->second.second;
+    if (it != m_store.end()) return &it->second->second;
     return nullptr;
 }
 
@@ -314,8 +330,8 @@ void ObjectStore::reconfigureMetadatas(const std::optional<std::string> &ingest_
                                        const std::optional<std::string> &distribution_base_url)
 {
     for (auto &[obj_id, obj] : m_store) {
-        obj.second.objIngestBaseUrl(ingest_base_url);
-        obj.second.objDistributionBaseUrl(distribution_base_url);
+        obj->second.objIngestBaseUrl(ingest_base_url);
+        obj->second.objDistributionBaseUrl(distribution_base_url);
     }
 }
 

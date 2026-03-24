@@ -23,8 +23,11 @@
 #include "ogs-core.h"
 
 #include <chrono>
+#include <exception>
 #include <format>
+#include <locale>
 #include <string>
+#include <sstream>
 
 #include "common.hh"
 
@@ -61,6 +64,27 @@ std::chrono::system_clock::time_point iso8601_utc_str_to_time_point(const std::s
     iss.imbue(std::locale("C"));
     iss >> std::chrono::parse("%FT%TZ", retval);
     if (iss.fail()) throw std::out_of_range(std::format("Bad ISO8601 UTC time: {}", iso8601_str));
+    return retval;
+}
+
+std::chrono::system_clock::time_point http_datetime_str_to_time_point(const std::string &rfc9110_str)
+{
+    std::chrono::system_clock::time_point retval;
+    std::istringstream iss{rfc9110_str};
+    iss.imbue(std::locale("C"));
+    iss >> std::chrono::parse("%a, %d %b %Y %T", retval);
+    if (iss.fail()) throw std::out_of_range(std::format("Bad RFC9110 HTTP-date: {}", rfc9110_str));
+    if (iss.peek() == '.') {
+        /* extra fractions of a second */
+        double frac;
+        iss >> frac;
+        retval += std::chrono::microseconds(static_cast<int>(frac*1000000.0));
+    }
+    char tz[5];
+    iss.get(tz, sizeof(tz));
+    if (std::string(tz) != " GMT") {
+        throw std::out_of_range(std::format("Bad RFC9110 HTTP-date: {}", rfc9110_str));
+    }
     return retval;
 }
 

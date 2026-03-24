@@ -61,7 +61,7 @@ public:
 
     virtual std::pair<time_type, ingest_list> nextIngestItems() = 0;
     virtual durn_type getDefaultDeadline() = 0;
-    virtual bool update(const ObjectStore::Object &new_manifest) = 0;
+    virtual bool update(const std::shared_ptr<ObjectStore::Object> &new_manifest) = 0;
     virtual void startedFetch(const PullObjectIngester::IngestItem &item) {};
 
 protected:

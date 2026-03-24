@@ -49,9 +49,9 @@ bool ManifestHandlerFactory::registerManifestHandler(const std::string &content_
     return true;
 }
 
-ManifestHandler *ManifestHandlerFactory::makeManifestHandler(const ObjectStore::Object &object, ObjectController *controller, bool pull_distribution)
+ManifestHandler *ManifestHandlerFactory::makeManifestHandler(const std::shared_ptr<ObjectStore::Object> &object, ObjectController *controller, bool pull_distribution)
 {
-    std::string media_type = object.second.mediaType();
+    std::string media_type = object->second.mediaType();
     ogs_debug("Looking for manifest handler for \"%s\" media", media_type.c_str());
     // Try manifest handlers for the media type of the object, fallback to any media type (empty string)
     while (true) {

@@ -45,7 +45,8 @@ using reftools::mbstf::DistSessionState;
 MBSTF_NAMESPACE_START
 
 static void validate_distribution_session(DistributionSession &distributionSession);
-static bool check_if_object_added_is_manifest(std::string &objectId, ObjectStore &objectStore, std::string &manifest_url);
+static bool check_if_object_added_is_manifest(const std::string &object_id, ObjectStore &object_store,
+                                              const std::string &manifest_url);
 
 ObjectStreamingController::ObjectStreamingController(DistributionSession &distributionSession)
     :ObjectManifestController(distributionSession)
@@ -102,12 +103,13 @@ std::shared_ptr<ObjectListPackager> ObjectStreamingController::getObjectListPack
 
 void ObjectStreamingController::processEvent(Event &event, SubscriptionService &event_service)
 {
-    if (event.eventName() == "ObjectAdded") {
-        ObjectStore::ObjectAddedEvent &objAddedEvent = dynamic_cast<ObjectStore::ObjectAddedEvent&>(event);
-        std::string objectId = objAddedEvent.objectId();
-        ogs_info("Object added with ID: %s", objectId.c_str());
-	if(check_if_object_added_is_manifest(objectId, objectStore(), getManifestUrl())) {
-	    const ObjectStore::Object &object = objectStore()[objectId];
+    if (event.eventName() == ObjectStore::ObjectAddedEvent::event_name ||
+        event.eventName() == ObjectStore::ObjectUpdatedEvent::event_name) {
+        ObjectStore::ObjectChangedEvent &obj_changed_event = dynamic_cast<ObjectStore::ObjectChangedEvent&>(event);
+        const std::string &object_id = obj_changed_event.objectId();
+        ogs_info("%s with ID: %s", event.eventName().c_str(), object_id.c_str());
+	if(check_if_object_added_is_manifest(object_id, objectStore(), getManifestUrl())) {
+	    const std::shared_ptr<ObjectStore::Object> &object = objectStore()[object_id];
 	    if(manifestHandler()) {
 	        try {
 	            if(!manifestHandler()->update(object)) {
@@ -117,7 +119,7 @@ void ObjectStreamingController::processEvent(Event &event, SubscriptionService &
 			return;
 		    }
 		    startWorker();
-                    sendToPackager(objectId);
+                    sendToPackager(object_id);
 	        } catch (std::exception &ex) {
                     ogs_error("Invalid Manifest update: %s", ex.what());
 		    unsetObjectListPackager();
@@ -128,20 +130,20 @@ void ObjectStreamingController::processEvent(Event &event, SubscriptionService &
 	    } else {
 		std::unique_ptr<ManifestHandler> manifest_handler(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL"));
                 manifestHandler(std::move(manifest_handler));
-                sendToPackager(objectId);
+                sendToPackager(object_id);
             }
 	} else {
-            sendToPackager(objectId);
+            sendToPackager(object_id);
         }
     }
     ObjectManifestController::processEvent(event, event_service);
 }
 
-void ObjectStreamingController::sendToPackager(const std::string &objectId)
+void ObjectStreamingController::sendToPackager(const std::string &object_id)
 {
     auto packager = getObjectListPackager();
     if (packager) {
-        ObjectListPackager::PackageItem item(objectId);
+        ObjectListPackager::PackageItem item(object_id);
         packager->add(item);
     }
 }
@@ -157,12 +159,12 @@ void ObjectStreamingController::reconfigureObjectPackager()
         if (packager) {
             const std::optional<std::string> &dest_ip_addr = distributionSession().getDestIpAddr();
             const std::optional<std::string> &tunnel_addr = distributionSession().getTunnelAddr();
-            uint32_t mbr = distributionSession().getRateLimit();
+            uint32_t rate_limit = distributionSession().getRateLimit();
             in_port_t port = distributionSession().getPortNumber();
             in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
 
             if (dest_ip_addr) {
-                packager->updateFluteInfo(dest_ip_addr.value(), port, mbr, tunnel_addr, tunnel_port);
+                packager->updateFluteInfo(dest_ip_addr.value(), port, rate_limit, tunnel_addr, tunnel_port);
             }
         }
     }
@@ -183,8 +185,9 @@ static void validate_distribution_session(DistributionSession &distributionSessi
     }
 }
 
-static bool check_if_object_added_is_manifest(std::string &objectId, ObjectStore &objectStore, std::string &manifest_url) {
-    ObjectStore::Metadata &metadata = objectStore.getMetadata(objectId);
+static bool check_if_object_added_is_manifest(const std::string &object_id, ObjectStore &object_store,
+                                              const std::string &manifest_url) {
+    ObjectStore::Metadata &metadata = object_store.getMetadata(object_id);
     if(metadata.getOriginalUrl() == manifest_url || metadata.getFetchedUrl() == manifest_url) {
         metadata.keepAfterSend(true);
         return true;

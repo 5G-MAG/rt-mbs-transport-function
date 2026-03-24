@@ -46,7 +46,13 @@ public:
     ObjectController(const ObjectController &) = delete;
     ObjectController(ObjectController &&) = delete;
 
-    virtual ~ObjectController() {};
+    virtual ~ObjectController() {
+        m_pushIngester.reset();
+        std::lock_guard<decltype(m_pullObjectIngestersMutex)> lock(m_pullObjectIngestersMutex);
+        m_pullIngesters.clear();
+        m_packager.reset();
+        m_objectStore.reset();
+    };
 
     ObjectController &operator=(const ObjectController &) = delete;
     ObjectController &operator=(ObjectController &&) = delete;

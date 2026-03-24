@@ -48,9 +48,9 @@ using reftools::mbstf::Object;
 MBSTF_NAMESPACE_START
 
 static void validate_distribution_session(DistributionSession &distribution_session);
-static bool check_if_object_added_is_manifest(const ObjectStore::Object &object, std::string &manifest_url);
-static bool check_if_object_is_active_in_manifest(const ObjectStore::Object &object, const std::shared_ptr<ManifestHandler> &manifest_handler);
-static void finish_request_in_manifest_handler(const ObjectStore::Object &object, const std::shared_ptr<ManifestHandler> &manifest_handler);
+static bool check_if_object_added_is_manifest(const std::shared_ptr<ObjectStore::Object> &object, std::string &manifest_url);
+static bool check_if_object_is_active_in_manifest(const std::shared_ptr<ObjectStore::Object> &object, const std::shared_ptr<ManifestHandler> &manifest_handler);
+static void finish_request_in_manifest_handler(const std::shared_ptr<ObjectStore::Object> &object, const std::shared_ptr<ManifestHandler> &manifest_handler);
 
 ObjectCarouselController::ObjectCarouselController(DistributionSession &distribution_session)
     :ObjectManifestController(distribution_session)
@@ -105,13 +105,15 @@ std::shared_ptr<ObjectCarouselPackager> ObjectCarouselController::getObjectCarou
 
 void ObjectCarouselController::processEvent(Event &event, SubscriptionService &event_service)
 {
-    if (event.eventName() == "ObjectAdded") {
-        ObjectStore::ObjectAddedEvent &obj_added_event = dynamic_cast<ObjectStore::ObjectAddedEvent&>(event);
+    if (event.eventName() == ObjectStore::ObjectAddedEvent::event_name ||
+        event.eventName() == ObjectStore::ObjectUpdatedEvent::event_name) {
+
+        ObjectStore::ObjectChangedEvent &obj_added_event = dynamic_cast<ObjectStore::ObjectChangedEvent&>(event);
         std::string object_id = obj_added_event.objectId();
-        ogs_info("Object added with ID: %s", object_id.c_str());
-        ObjectStore::Object &object = objectStore()[object_id];
-        ogs_info("Object arrived from: %s", object.second.getFetchedUrl().c_str());
-        object.second.keepAfterSend(true); /* keep all objects, we'll manually remove if the carousel changes */
+        ogs_debug("%s with ID: %s", event.eventName().c_str(), object_id.c_str());
+        const std::shared_ptr<ObjectStore::Object> &object = objectStore()[object_id];
+        ogs_debug("Object location: %s", object->second.getFetchedUrl().c_str());
+        object->second.keepAfterSend(true); /* keep all objects, we'll manually remove if the carousel changes */
 	if(check_if_object_added_is_manifest(object, getManifestUrl())) {
 	    if(manifestHandler()) {
 	        try {
@@ -236,21 +238,22 @@ static void validate_distribution_session(DistributionSession &distribution_sess
     }
 }
 
-static bool check_if_object_added_is_manifest(const ObjectStore::Object &object, std::string &manifest_url)
+static bool check_if_object_added_is_manifest(const std::shared_ptr<ObjectStore::Object> &object, std::string &manifest_url)
 {
-    return (object.second.getOriginalUrl() == manifest_url || object.second.getFetchedUrl() == manifest_url);
+    auto &metadata = object->second;
+    return (metadata.getOriginalUrl() == manifest_url || metadata.getFetchedUrl() == manifest_url);
 }
 
-static bool check_if_object_is_active_in_manifest(const ObjectStore::Object &object, const std::shared_ptr<ManifestHandler> &manifest_handler)
+static bool check_if_object_is_active_in_manifest(const std::shared_ptr<ObjectStore::Object> &object, const std::shared_ptr<ManifestHandler> &manifest_handler)
 {
     const auto object_manifest_hndlr = std::dynamic_pointer_cast<const ObjectManifestHandler>(manifest_handler);
-    return object_manifest_hndlr->isObjectURLActive(object.second.getOriginalUrl());
+    return object_manifest_hndlr->isObjectURLActive(object->second.getOriginalUrl());
 }
 
-static void finish_request_in_manifest_handler(const ObjectStore::Object &object, const std::shared_ptr<ManifestHandler> &manifest_handler)
+static void finish_request_in_manifest_handler(const std::shared_ptr<ObjectStore::Object> &object, const std::shared_ptr<ManifestHandler> &manifest_handler)
 {
     auto object_manifest_hndlr = std::dynamic_pointer_cast<ObjectManifestHandler>(manifest_handler);
-    object_manifest_hndlr->finishRequest(object.second.getOriginalUrl());
+    object_manifest_hndlr->finishRequest(object->second.getOriginalUrl());
 }
 
 MBSTF_NAMESPACE_STOP

@@ -54,14 +54,15 @@ MBSTF_NAMESPACE_START
 
 using time_type = std::chrono::system_clock::time_point;
 
-static ObjectManifest ingest_manifest(const ObjectStore::Object &new_manifest);
+static ObjectManifest ingest_manifest(const std::shared_ptr<ObjectStore::Object> &new_manifest);
 
-ObjectManifestHandler::ObjectManifestHandler(const ObjectStore::Object &object, ObjectController *controller, bool pull_distribution)
+ObjectManifestHandler::ObjectManifestHandler(const std::shared_ptr<ObjectStore::Object> &object, ObjectController *controller,
+                                             bool pull_distribution)
     :ManifestHandler(controller, pull_distribution)
     ,m_objectManifestMutex(new decltype(m_objectManifestMutex)::element_type())
     ,m_objectManifest(ingest_manifest(object))
     ,m_objectMetadataCache()
-    ,m_manifestFile(&object)
+    ,m_manifestFile(object)
     ,m_refreshManifest(false)
 {
     std::lock_guard<decltype(m_objectManifestMutex)::element_type> lock(*m_objectManifestMutex);
@@ -166,14 +167,54 @@ ManifestHandler::durn_type ObjectManifestHandler::getDefaultDeadline()
     return 10s; /* wait up to 10 seconds for objects in the manifest to arrive */
 }
 
-bool ObjectManifestHandler::update(const ObjectStore::Object &new_manifest)
+bool ObjectManifestHandler::update(const std::shared_ptr<ObjectStore::Object> &new_manifest_obj)
 {
     // Process the new ObjectManifest and see what has changed, throw an exception of the Object is not understood or invalid
 
     std::lock_guard<decltype(m_objectManifestMutex)::element_type> lock(*m_objectManifestMutex);
-    m_objectManifest = ingest_manifest(new_manifest);
-    m_manifestFile = &new_manifest;
+    auto new_manifest = ingest_manifest(new_manifest_obj);
+    m_manifestFile = new_manifest_obj;
+
+    m_objectManifest.setUpdateInterval(new_manifest.getUpdateInterval());
+
+    const auto &new_objects = new_manifest.getObjects();
+    const auto &old_objects = m_objectManifest.getObjects();
+    for (auto old_it = old_objects.begin(); old_it != old_objects.end(); old_it++) {
+        if (!*old_it || !old_it->value()) continue;
+        auto new_it = std::find_if(new_objects.begin(), new_objects.end(), [&old_it](const auto &new_obj) -> bool {
+                                    if (!new_obj || !new_obj.value()) return false;
+                                    return (old_it->value()->getLocator() == new_obj.value()->getLocator());
+                                });
+        if (new_it == new_objects.end()) {
+            /* object removed from carousel */
+            auto &object_store = m_controller->objectStore();
+            object_store.removeObject(object_store.findMetadataByURL(old_it->value()->getLocator())->objectId());
+            m_objectMetadataCache.erase(old_it->value().get());
+            m_objectManifest.removeObjects(*old_it);
+        } else {
+            /* object same or update */
+            (*old_it->value()) = std::move(*new_it->value());
+            new_manifest.removeObjects(*new_it);
+        }
+    }
+
+    auto now = datetime_type::clock::now();
+    for (const auto &obj : new_objects) {
+        if (!obj || !obj.value()) continue;
+        auto fetch_time = now;
+        auto &lft = obj.value()->getLatestFetchTime();
+        if (lft && fetch_time >= iso8601_utc_str_to_time_point(lft.value())) continue;
+        auto &eft = obj.value()->getEarliestFetchTime();
+        if (eft) {
+            auto eft_dt = iso8601_utc_str_to_time_point(eft.value());
+            if (fetch_time < eft_dt) fetch_time = eft_dt;
+        }
+        m_objectMetadataCache.insert(std::make_pair(obj.value().get(), ObjectMetadataCache{fetch_time, false}));
+        m_objectManifest.addObjects(obj);
+    }
+
     m_refreshManifest = false;
+
     ObjectManifestChangeEvent evt;
     sendEventSynchronous(evt);
 
@@ -333,17 +374,18 @@ static bool g_registered3 = ManifestHandlerFactory::registerManifestHandler("app
 
 /* local functions */
 
-static ObjectManifest ingest_manifest(const ObjectStore::Object &new_manifest)
+static ObjectManifest ingest_manifest(const std::shared_ptr<ObjectStore::Object> &new_manifest)
 {
-    ogs_debug("%s", std::format("ingest_manifest: mediaType() = {}", new_manifest.second.mediaType()).c_str());
-    if (new_manifest.second.mediaType() != "application/3gpp-mbs-object-manifest+json" &&
-        new_manifest.second.mediaType() != "application/3gpp-mbs-object-manifest+json;version=Rel17" &&
-        new_manifest.second.mediaType() != "application/3gpp-mbs-object-manifest+json;version=\"Rel17\""){
+    auto &new_metadata = new_manifest->second;
+    ogs_debug("%s", std::format("ingest_manifest: mediaType() = {}", new_metadata.mediaType()).c_str());
+    if (new_metadata.mediaType() != "application/3gpp-mbs-object-manifest+json" &&
+        new_metadata.mediaType() != "application/3gpp-mbs-object-manifest+json;version=Rel17" &&
+        new_metadata.mediaType() != "application/3gpp-mbs-object-manifest+json;version=\"Rel17\""){
          throw std::invalid_argument("Does not look like an ObjectManifest as the media type is invalid. Expected media type: application/3gpp-mbs-object-manifest+json;version=\"Rel17\"");
     }
     
     try {
-        auto json = CJson::parse(std::string(reinterpret_cast<const char*>(new_manifest.first.data()), new_manifest.first.size()));
+        auto json = CJson::parse(std::string(reinterpret_cast<const char*>(new_manifest->first.data()), new_manifest->first.size()));
         return ObjectManifest(json, true);
     } catch (ModelException &ex) {
         ogs_debug("%s", std::format("Does not look like an ObjectManifest: {}", ex.what()).c_str());

@@ -49,12 +49,14 @@ Curl::Curl()
     ,m_receivedData()
     ,m_etag()
     ,m_contentType()
+    ,m_lastModified()
     ,m_effectiveUrl()
     ,m_userAgent()
     ,m_protocol()
     ,m_statusCode(0)
     ,m_permanentRedirectUrl()
     ,m_cacheControlMaxAge(0)
+    ,m_age(0)
 {
     // Ensure curl_global_init is called only once
     static std::once_flag init_flag;
@@ -113,12 +115,30 @@ long Curl::__get(const std::string& url, std::chrono::milliseconds timeout, cons
         if (res == CURLE_OK) {
 	    struct curl_header *type;
             CURLHcode h;
+
             h = curl_easy_header(m_curl, "ETag", 0, CURLH_HEADER, -1, &type);
             if (h == CURLHE_OK && type) {
                 m_etag = std::string(type->value);
-		ogs_info("ETag: %s", m_etag.c_str());
+		ogs_debug("ETag: %s", m_etag.c_str());
             } else {
-		ogs_info("ETag header not found.");
+		ogs_debug("ETag header not found.");
+            }
+
+            h = curl_easy_header(m_curl, "Last-Modified", 0, CURLH_HEADER, -1, &type);
+            if (h == CURLHE_OK && type) {
+                m_lastModified = http_datetime_str_to_time_point(std::string(type->value));
+                ogs_debug("%s", std::format("Last-Modified: {}", m_lastModified).c_str());
+            } else {
+                ogs_debug("Last-Modified header not found.");
+            }
+
+            h = curl_easy_header(m_curl, "Age", 0, CURLH_HEADER, -1, &type);
+            if (h == CURLHE_OK && type) {
+                try {
+                    m_age = std::stoul(type->value);
+                    ogs_debug("%s", std::format("Age: %lu", m_age).c_str());
+                } catch (const std::exception&) {
+                }
             }
 
             // Get the Content-Type header
@@ -177,6 +197,11 @@ const std::string& Curl::getContentType() const
     return m_contentType;
 }
 
+const Curl::date_time_type &Curl::getLastModified() const
+{
+    return m_lastModified;
+}
+
 const std::string &Curl::getEffectiveUrl() const
 {
     return m_effectiveUrl;
@@ -187,11 +212,20 @@ const std::string &Curl::getPermanentRedirectUrl() const
     return m_permanentRedirectUrl;
 }
 
-const unsigned long Curl::getCacheControlMaxAge() const
+unsigned long Curl::getCacheControlMaxAge() const
 {
     return m_cacheControlMaxAge;
 }
 
+unsigned long Curl::getAge() const 
+{
+    return m_age;
+}
+
+int Curl::getResponseCode() const
+{
+    return m_statusCode;
+}
 
 bool Curl::extractProtocolAndStatusCode(std::string_view &header_line)
 {

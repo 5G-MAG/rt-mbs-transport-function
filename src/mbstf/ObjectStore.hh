@@ -46,62 +46,110 @@ class ObjectStore: public SubscriptionService {
 public:
     using datetime_type = std::chrono::system_clock::time_point;
 
-    class ObjectAddedEvent : public Event {
+    class ObjectChangedEvent : public Event {
     public:
-        ObjectAddedEvent(const std::string& object_id) :Event("ObjectAdded"), m_object_id(object_id) {};
-        ObjectAddedEvent(const ObjectAddedEvent &other) :Event(other), m_object_id(other.m_object_id) {};
-        ObjectAddedEvent(ObjectAddedEvent &&other) :Event(std::move(other)), m_object_id(std::move(other.m_object_id)) {};
+        ObjectChangedEvent(const char *event_name, const std::string& object_id) :Event(event_name), m_object_id(object_id) {};
+        ObjectChangedEvent(const ObjectChangedEvent &other) :Event(other), m_object_id(other.m_object_id) {};
+        ObjectChangedEvent(ObjectChangedEvent &&other) :Event(std::move(other)), m_object_id(std::move(other.m_object_id)) {};
 
-        virtual ~ObjectAddedEvent() {};
+        virtual ~ObjectChangedEvent() {};
 
-        ObjectAddedEvent &operator=(const ObjectAddedEvent &other) {
+        ObjectChangedEvent &operator=(const ObjectChangedEvent &other) {
             Event::operator=(other);
             m_object_id = other.m_object_id;
             return *this;
         };
-        ObjectAddedEvent &operator=(ObjectAddedEvent &&other) {
+        ObjectChangedEvent &operator=(ObjectChangedEvent &&other) {
             Event::operator=(std::move(other));
             m_object_id = std::move(other.m_object_id);
             return *this;
         };
 
-        std::string objectId() const { return m_object_id; }
-
-        virtual Event clone() const { return ObjectAddedEvent(*this); };
-        virtual Event *newClone() const { return new ObjectAddedEvent(*this); };
-        virtual std::string reprString() const { return std::format("ObjectAddedEvent(\"{}\")", m_object_id); };
+        const std::string &objectId() const { return m_object_id; }
 
     private:
         std::string m_object_id;
     };
 
-    class ObjectDeletedEvent : public Event {
+    class ObjectAddedEvent : public ObjectChangedEvent {
     public:
-        ObjectDeletedEvent(const std::string& object_id) :Event("ObjectDeleted"), m_object_id(object_id) {};
-        ObjectDeletedEvent(const ObjectDeletedEvent &other) :Event(other), m_object_id(other.m_object_id) {};
-        ObjectDeletedEvent(ObjectDeletedEvent &&other) :Event(std::move(other)), m_object_id(std::move(other.m_object_id)) {};
+        constexpr static const char *event_name = "ObjectAdded";
+        ObjectAddedEvent(const std::string& object_id) :ObjectChangedEvent(event_name, object_id) {};
+        ObjectAddedEvent(const ObjectAddedEvent &other) :ObjectChangedEvent(other) {};
+        ObjectAddedEvent(ObjectAddedEvent &&other) :ObjectChangedEvent(std::move(other)) {};
+
+        virtual ~ObjectAddedEvent() {};
+
+        ObjectAddedEvent &operator=(const ObjectAddedEvent &other) { ObjectChangedEvent::operator=(other); return *this; };
+        ObjectAddedEvent &operator=(ObjectAddedEvent &&other) { ObjectChangedEvent::operator=(std::move(other)); return *this; };
+
+        virtual Event clone() const { return ObjectAddedEvent(*this); };
+        virtual Event *newClone() const { return new ObjectAddedEvent(*this); };
+        virtual std::string reprString() const { return std::format("ObjectAddedEvent(\"{}\")", objectId()); };
+    };
+
+    class ObjectUpdatedEvent : public ObjectChangedEvent {
+    public:
+        constexpr static const char *event_name = "ObjectUpdated";
+        ObjectUpdatedEvent(const std::string& object_id) :ObjectChangedEvent(event_name, object_id) {};
+        ObjectUpdatedEvent(const ObjectUpdatedEvent &other) :ObjectChangedEvent(other) {};
+        ObjectUpdatedEvent(ObjectUpdatedEvent &&other) :ObjectChangedEvent(std::move(other)) {};
+
+        virtual ~ObjectUpdatedEvent() {};
+
+        ObjectUpdatedEvent &operator=(const ObjectUpdatedEvent &other) { ObjectChangedEvent::operator=(other); return *this; };
+        ObjectUpdatedEvent &operator=(ObjectUpdatedEvent &&other) { ObjectChangedEvent::operator=(std::move(other)); return *this; };
+
+        virtual Event clone() const { return ObjectUpdatedEvent(*this); };
+        virtual Event *newClone() const { return new ObjectUpdatedEvent(*this); };
+        virtual std::string reprString() const { return std::format("ObjectUpdatedEvent(\"{}\")", objectId()); };
+    };
+
+    class ObjectDeletedEvent : public ObjectChangedEvent {
+    public:
+        constexpr static const char *event_name = "ObjectDeleted";
+        ObjectDeletedEvent(const std::string& object_id) :ObjectChangedEvent(event_name, object_id) {};
+        ObjectDeletedEvent(const ObjectDeletedEvent &other) :ObjectChangedEvent(other) {};
+        ObjectDeletedEvent(ObjectDeletedEvent &&other) :ObjectChangedEvent(std::move(other)) {};
 
         virtual ~ObjectDeletedEvent() {};
 
-        ObjectDeletedEvent &operator=(const ObjectDeletedEvent &other) {
-            Event::operator=(other);
-            m_object_id = other.m_object_id;
-            return *this;
-        };
-        ObjectDeletedEvent &operator=(ObjectDeletedEvent &&other) {
-            Event::operator=(std::move(other));
-            m_object_id = std::move(other.m_object_id);
-            return *this;
-        };
-
-        std::string objectId() const { return m_object_id; }
+        ObjectDeletedEvent &operator=(const ObjectDeletedEvent &other) { ObjectChangedEvent::operator=(other); return *this; };
+        ObjectDeletedEvent &operator=(ObjectDeletedEvent &&other) { ObjectChangedEvent::operator=(std::move(other)); return *this; };
 
         virtual Event clone() const { return ObjectDeletedEvent(*this); };
         virtual Event *newClone() const { return new ObjectDeletedEvent(*this); };
-        virtual std::string reprString() const { return std::format("ObjectDeletedEvent(\"{}\")", m_object_id); };
+        virtual std::string reprString() const { return std::format("ObjectDeletedEvent(\"{}\")", objectId()); };
+    };
+
+    class ObjectUpdateErrorEvent : public ObjectChangedEvent {
+    public:
+        constexpr static const char *event_name = "ObjectUpdateError";
+        ObjectUpdateErrorEvent(const std::string& object_id, int response_code) :ObjectChangedEvent(event_name, object_id), m_responseCode(response_code) {};
+        ObjectUpdateErrorEvent(const ObjectUpdateErrorEvent &other) :ObjectChangedEvent(other), m_responseCode(other.m_responseCode) {};
+        ObjectUpdateErrorEvent(ObjectUpdateErrorEvent &&other) :ObjectChangedEvent(std::move(other)), m_responseCode(other.m_responseCode) {};
+
+        virtual ~ObjectUpdateErrorEvent() {};
+
+        ObjectUpdateErrorEvent &operator=(const ObjectUpdateErrorEvent &other) {
+            ObjectChangedEvent::operator=(other);
+            m_responseCode = other.m_responseCode;
+            return *this;
+        };
+        ObjectUpdateErrorEvent &operator=(ObjectUpdateErrorEvent &&other) {
+            ObjectChangedEvent::operator=(std::move(other));
+            m_responseCode = other.m_responseCode;
+            return *this;
+        };
+
+        int responseCode() const { return m_responseCode; };
+
+        virtual Event clone() const { return ObjectUpdateErrorEvent(*this); };
+        virtual Event *newClone() const { return new ObjectUpdateErrorEvent(*this); };
+        virtual std::string reprString() const { return std::format("ObjectUpdateErrorEvent(\"{}\", {})", objectId(), m_responseCode); };
 
     private:
-        std::string m_object_id;
+        int m_responseCode;
     };
 
     class Metadata {
@@ -241,6 +289,8 @@ public:
     ObjectStore &operator=(ObjectStore&&) = delete;
 
     void addObject(const std::string& object_id, ObjectData &&object, Metadata &&metadata, bool synchronous_event = false);
+    void updateMetadata(const std::string& object_id, Metadata &&metadata, bool synchronous_event = false);
+    void updateError(const std::string& object_id, int response_code, bool synchronous_event = false);
     const ObjectData& getObjectData(const std::string& object_id) const;
     ObjectData& getObjectData(const std::string& object_id);
     const Metadata& getMetadata(const std::string& object_id) const;
@@ -248,12 +298,12 @@ public:
     void deleteObject(const std::string& object_id);
     bool removeObject(const std::string& objectId);
     bool removeObjects(const std::list<std::string>& objectIds);
-    std::list<std::pair<const std::string*, const Object*>> getExpired();
-    Object &operator[](const std::string& object_id);
-    const Object &operator[](const std::string& object_id) const;
+    std::list<std::pair<const std::string*, std::shared_ptr<Object> > > getExpired();
+    const std::shared_ptr<Object> &operator[](const std::string& object_id);
+    std::shared_ptr<const Object> operator[](const std::string& object_id) const;
     bool isStale(const std::string& object_id) const;
-    std::map<std::string, const Object&> getStale() const;
-    const std::map<std::string, Object> &getObjects() const { return m_store; };
+    std::map<std::string, std::shared_ptr<Object>> getStale() const;
+    const std::map<std::string, std::shared_ptr<Object> > &getObjects() const { return m_store; };
 
     const Metadata *findMetadataByURL(const std::string &url) const;
 
@@ -265,7 +315,7 @@ private:
     void checkExpiredObjects();
     mutable std::recursive_mutex m_mutex;
     ObjectController &m_controller;
-    std::map<std::string, Object> m_store;
+    std::map<std::string, std::shared_ptr<Object> > m_store;
 };
 
 MBSTF_NAMESPACE_STOP

@@ -47,7 +47,7 @@ public:
     };
 
     ObjectManifestHandler() = delete;
-    ObjectManifestHandler(const ObjectStore::Object &object, ObjectController *controller, bool pull_distribution);
+    ObjectManifestHandler(const std::shared_ptr<ObjectStore::Object> &object, ObjectController *controller, bool pull_distribution);
     ObjectManifestHandler(const ObjectManifestHandler &) = delete;
     ObjectManifestHandler(ObjectManifestHandler &&) = delete;
 
@@ -58,7 +58,7 @@ public:
 
     virtual std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> nextIngestItems();
     virtual ManifestHandler::durn_type getDefaultDeadline();
-    virtual bool update(const ObjectStore::Object &new_manifest);
+    virtual bool update(const std::shared_ptr<ObjectStore::Object> &new_manifest);
     virtual void startedFetch(const PullObjectIngester::IngestItem &item);
 
     virtual std::string nextObjectId();
@@ -83,7 +83,7 @@ private:
     std::unique_ptr<std::recursive_mutex> m_objectManifestMutex;
     reftools::mbstf::ObjectManifest  m_objectManifest;
     std::map<reftools::mbstf::Object*, ObjectMetadataCache> m_objectMetadataCache;
-    const ObjectStore::Object *m_manifestFile;
+    std::shared_ptr<ObjectStore::Object> m_manifestFile;
     bool m_refreshManifest;
 };
 

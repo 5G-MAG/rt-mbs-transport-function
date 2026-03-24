@@ -38,10 +38,12 @@ public:
     const std::vector<unsigned char> &getData() const;
     const std::string &getEtag() const;
     const std::string &getContentType() const;
+    const date_time_type &getLastModified() const;
     const std::string &getEffectiveUrl() const;
     const std::string &getPermanentRedirectUrl() const;
-    const unsigned long getCacheControlMaxAge() const;
-
+    unsigned long getCacheControlMaxAge() const;
+    unsigned long getAge() const;
+    int getResponseCode() const;
 
     Curl &setUserAgent(const std::string &user_agent);
 
@@ -57,12 +59,14 @@ private:
     std::vector<unsigned char> m_receivedData;
     std::string m_etag;
     std::string m_contentType;
+    date_time_type m_lastModified;
     std::string m_effectiveUrl;
     std::string m_userAgent;
     std::string m_protocol;
     int m_statusCode;
     std::string m_permanentRedirectUrl;
     unsigned long m_cacheControlMaxAge;
+    unsigned long m_age;
 };
 
 MBSTF_NAMESPACE_STOP

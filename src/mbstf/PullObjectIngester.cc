@@ -219,18 +219,28 @@ void PullObjectIngester::doObjectIngest() {
             // Check the result
             if (bytesReceived >= 0) {
                 ogs_debug("Received %ld bytes of data", bytesReceived);
-	        auto lastModified = std::chrono::system_clock::now();
                 std::string fetched_url = URI(m_curl->getPermanentRedirectUrl()).resolveUsingBaseURLs(std::list<BaseURL>{BaseURL(item.url())}).str();
                 if (fetched_url.empty()) fetched_url = item.url();
-	        ObjectStore::Metadata metadata(item.objectId(), m_curl->getContentType(), item.url(), fetched_url, item.acquisitionId(), lastModified, item.objIngestBaseUrl(), item.objDistributionBaseUrl());
+	        ObjectStore::Metadata metadata(item.objectId(), m_curl->getContentType(), item.url(), fetched_url, item.acquisitionId(), m_curl->getLastModified(), item.objIngestBaseUrl(), item.objDistributionBaseUrl());
                 if (old_meta) metadata.fluteFileDescription(old_meta->fluteFileDescription());
                 unsigned long max_age = m_curl->getCacheControlMaxAge();
-	        metadata.cacheExpires(max_age ? std::chrono::system_clock::now() + std::chrono::seconds(max_age) : std::chrono::system_clock::now() + std::chrono::seconds(ObjectStore::Metadata::cacheExpiry()));
+                unsigned long current_age = m_curl->getAge();
+	        metadata.cacheExpires(max_age ? std::chrono::system_clock::now() + std::chrono::seconds(max_age - current_age) : std::chrono::system_clock::now() + std::chrono::seconds(ObjectStore::Metadata::cacheExpiry()));
                 const std::string& etag = m_curl->getEtag();
 	        if (!etag.empty()) {
                     metadata.entityTag(etag);
 	        }
-	        this->objectStore().addObject(item.objectId(), std::move(m_curl->getData()), std::move(metadata), true);
+                auto response_code = m_curl->getResponseCode();
+                if (response_code >= 200 && response_code <= 299) {
+                    /* received object - store it */
+                    this->objectStore().addObject(item.objectId(), std::move(m_curl->getData()), std::move(metadata), true);
+                } else if (response_code == 304) {
+                    /* Not Modified - just update metadata */
+                    this->objectStore().updateMetadata(item.objectId(), std::move(metadata), true);
+                } else {
+                    /* error response - do we throw the object away? */
+                    this->objectStore().updateError(item.objectId(), response_code, true);
+                }
             } else if (bytesReceived == -1) {
                 ogs_error("Request timed out.");
                 emitObjectIngestFailedEvent(item.url(), ObjectIngester::IngestFailedEvent::TIMED_OUT);

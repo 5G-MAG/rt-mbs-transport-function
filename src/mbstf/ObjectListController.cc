@@ -109,12 +109,14 @@ std::shared_ptr<ObjectListPackager> ObjectListController::getObjectListPackager(
 }
 
 void ObjectListController::processEvent(Event &event, SubscriptionService &event_service) {
-    if (event.eventName() == "ObjectAdded") {
-        ObjectStore::ObjectAddedEvent &objAddedEvent = dynamic_cast<ObjectStore::ObjectAddedEvent&>(event);
-        std::string objectId = objAddedEvent.objectId();
-        ogs_info("Object added with ID: %s", objectId.c_str());
+    if (event.eventName() == ObjectStore::ObjectAddedEvent::event_name ||
+        event.eventName() == ObjectStore::ObjectUpdatedEvent::event_name) {
 
-        sendToPackager(objectId);
+        ObjectStore::ObjectChangedEvent &obj_changed_event = dynamic_cast<ObjectStore::ObjectChangedEvent&>(event);
+        std::string object_id = obj_changed_event.objectId();
+        ogs_info("%s with ID: %s", event.eventName().c_str(), object_id.c_str());
+
+        sendToPackager(object_id);
     } else if (event.eventName() == "ObjectPushStart") {
         PushObjectIngester::ObjectPushEvent &obj_push_event = dynamic_cast<PushObjectIngester::ObjectPushEvent&>(event);
         const PushObjectIngester::Request &request(obj_push_event.request());
