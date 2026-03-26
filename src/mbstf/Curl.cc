@@ -170,8 +170,9 @@ long Curl::get(const std::string& url, std::chrono::milliseconds timeout, const 
     std::map<std::string, std::string> req_hdrs;
 
     if (etag) {
-        req_hdrs.insert(std::make_pair(std::string("If-Not-Exist"), std::string(etag.value())));
-    } else if (last_modified) {
+        req_hdrs.insert(std::make_pair(std::string("If-None-Match"), std::string(etag.value())));
+    }
+    if (last_modified) {
         req_hdrs.insert(std::make_pair(std::string("If-Modified-Since"), time_point_to_http_datetime_str(last_modified.value())));
     }
     return __get(url, timeout, req_hdrs);

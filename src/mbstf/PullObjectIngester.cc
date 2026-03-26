@@ -236,6 +236,7 @@ void PullObjectIngester::doObjectIngest() {
                     this->objectStore().addObject(item.objectId(), std::move(m_curl->getData()), std::move(metadata), true);
                 } else if (response_code == 304) {
                     /* Not Modified - just update metadata */
+                    if (old_meta) metadata.mediaType(old_meta->mediaType()); // 304 may not have Content-Type due to no content
                     this->objectStore().updateMetadata(item.objectId(), std::move(metadata), true);
                 } else {
                     /* error response - do we throw the object away? */
