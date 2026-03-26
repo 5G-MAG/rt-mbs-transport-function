@@ -45,7 +45,7 @@ std::string trim_slashes(const std::string &path)
 
 std::string time_point_to_http_datetime_str(const std::chrono::system_clock::time_point &datetime)
 {
-    return std::format("%b, %d %b %Y %T GMT", datetime);
+    return std::format("{0:%b}, {0:%d} {0:%b} {0:%Y} {0:%T} GMT", datetime);
 }
 
 std::string time_point_to_iso8601_utc_str(const std::chrono::system_clock::time_point &datetime)
