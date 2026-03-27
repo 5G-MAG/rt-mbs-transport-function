@@ -35,6 +35,7 @@
 #include "ObjectStore.hh"
 #include "PullObjectIngester.hh"
 #include "PushObjectIngester.hh"
+#include "SsmPort.hh"
 #include "SubscriptionService.hh"
 #include "utilities.hh"
 #include "openapi/model/DistSessionState.h"
@@ -72,13 +73,12 @@ ObjectCarouselController::~ObjectCarouselController()
 
 void ObjectCarouselController::setObjectPackager()
 {
-    const std::optional<std::string> &dest_ip_addr = distributionSession().getDestIpAddr();
+    auto ssm_port = distributionSession().getSsmPort();
     const std::optional<std::string> &tunnel_addr = distributionSession().getTunnelAddr();
     uint32_t rate_limit = distributionSession().getRateLimit();
-    in_port_t port = distributionSession().getPortNumber();
     in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
-    unsigned short mtu = get_tunnelled_path_mtu(dest_ip_addr, port, tunnel_addr, tunnel_port) - GTP_HEADER_SIZE;
-    packager(new ObjectCarouselPackager(objectStore(), *this, dest_ip_addr, rate_limit, mtu, port, tunnel_addr, tunnel_port));
+    unsigned short mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port) - GTP_HEADER_SIZE;
+    packager(new ObjectCarouselPackager(objectStore(), *this, ssm_port, rate_limit, mtu, tunnel_addr, tunnel_port));
     auto pkgr = getObjectCarouselPackager();
     subscribeToService(*pkgr);
     startWorker();
@@ -172,14 +172,13 @@ void ObjectCarouselController::reconfigureObjectPackager()
     if (distributionSession().getState() == DistSessionState::VAL_ACTIVE) {
         auto packager = getObjectCarouselPackager();
         if (packager) {
-            const std::optional<std::string> &dest_ip_addr = distributionSession().getDestIpAddr();
+            auto ssm_port = distributionSession().getSsmPort();
             const std::optional<std::string> &tunnel_addr = distributionSession().getTunnelAddr();
             uint32_t rate_limit = distributionSession().getRateLimit();
-            in_port_t port = distributionSession().getPortNumber();
             in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
 
-            if (dest_ip_addr) {
-                packager->updateFluteInfo(dest_ip_addr.value(), port, rate_limit, tunnel_addr, tunnel_port);
+            if (ssm_port) {
+                packager->updateFluteInfo(ssm_port, rate_limit, tunnel_addr, tunnel_port);
             }
         }
     }

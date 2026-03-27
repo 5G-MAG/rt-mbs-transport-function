@@ -19,11 +19,14 @@
  * under the License.
  */
 #include <chrono>
+#include <optional>
 #include <string>
 
 #include "common.hh"
 
 MBSTF_NAMESPACE_START
+
+class SsmPort;
 
 std::string trim_slashes(const std::string &path);
 
@@ -33,8 +36,7 @@ std::chrono::system_clock::time_point iso8601_utc_str_to_time_point(const std::s
 std::chrono::system_clock::time_point http_datetime_str_to_time_point(const std::string &rfc9110_str);
 
 int get_path_mtu(const ogs_sockaddr_t &sock_addr);
-int get_tunnelled_path_mtu(const std::optional<std::string> &dest_ip, in_port_t dest_port,
-                            const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port);
+int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port);
 
 MBSTF_NAMESPACE_STOP
 

@@ -161,6 +161,8 @@ libmbstf_dist_sources = files('''
     PullObjectIngester.hh
     PushObjectIngester.cc
     PushObjectIngester.hh
+    SsmPort.cc
+    SsmPort.hh
     SubscriptionService.cc
     SubscriptionService.hh
     Subscriber.cc

@@ -30,6 +30,7 @@
 #include "ObjectListController.hh"
 #include "ObjectPackager.hh"
 #include "ObjectStore.hh"
+#include "SsmPort.hh"
 
 #include "ObjectListPackager.hh"
 
@@ -80,10 +81,10 @@ ObjectListPackager::PackageItem &ObjectListPackager::PackageItem::operator=(Pack
 // ObjectListPackager
 
 ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectController &controller,
-                                       const std::list<PackageItem> &object_to_package,
-                                       const std::optional<std::string> &address,
-                                       uint32_t rateLimit, unsigned short mtu, in_port_t port, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
-    :ObjectPackager(object_store, controller, address, rateLimit, mtu, port, tunnel_address, tunnel_port)
+                                       const std::list<PackageItem> &object_to_package, const SsmPort &ssm_port,
+                                       uint32_t rateLimit, unsigned short mtu, const std::optional<std::string> &tunnel_address,
+                                       in_port_t tunnel_port)
+    :ObjectPackager(object_store, controller, ssm_port, rateLimit, mtu, tunnel_address, tunnel_port)
     ,m_packageItemsMutex (new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems(object_to_package)
     ,m_tunnelEndpoint()
@@ -96,9 +97,9 @@ ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectControll
 }
 
 ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectController &controller,
-                                       std::list<PackageItem> &&object_to_package, const std::optional<std::string> &address,
-                                       uint32_t rateLimit, unsigned short mtu, in_port_t port, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
-    :ObjectPackager(object_store, controller, address, rateLimit, mtu, port, tunnel_address, tunnel_port)
+                                       std::list<PackageItem> &&object_to_package, const SsmPort &ssm_port, uint32_t rateLimit,
+                                       unsigned short mtu, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
+    :ObjectPackager(object_store, controller, ssm_port, rateLimit, mtu, tunnel_address, tunnel_port)
     ,m_packageItemsMutex (new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems(std::move(object_to_package))
     ,m_tunnelEndpoint()
@@ -111,9 +112,9 @@ ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectControll
 }
 
 ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectController &controller,
-                                       const std::optional<std::string> &address, uint32_t rateLimit, unsigned short mtu,
-                                       in_port_t port, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
-    :ObjectPackager(object_store, controller, address, rateLimit, mtu, port, tunnel_address, tunnel_port)
+                                       const SsmPort &ssm_port, uint32_t rateLimit, unsigned short mtu,
+                                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
+    :ObjectPackager(object_store, controller, ssm_port, rateLimit, mtu, tunnel_address, tunnel_port)
     ,m_packageItemsMutex (new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems()
     ,m_tunnelEndpoint()
@@ -148,8 +149,7 @@ bool ObjectListPackager::add(PackageItem &&item) {
     return true;
 }
 
-bool ObjectListPackager::updateFluteInfo(const std::string &address, in_port_t port,
-                                         uint32_t rateLimit,
+bool ObjectListPackager::updateFluteInfo(const SsmPort &ssm_port, uint32_t rateLimit,
                                          const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
 {
     std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
@@ -157,10 +157,18 @@ bool ObjectListPackager::updateFluteInfo(const std::string &address, in_port_t p
     /* Do nothing if we don't have a Transmitter */
     if (!m_transmitter) return false;
 
-    /* set destination endpoint address if it has changed */
-    boost::asio::ip::udp::endpoint dest_addr(boost::asio::ip::make_address(address), port);
+    /* set SSM address if it has changed */
+    boost::asio::ip::udp::endpoint dest_addr(boost::asio::ip::make_address(ssm_port.destinationAddress()), ssm_port.port());
     if (dest_addr != m_transmitter->endpoint()) {
         m_transmitter->endpoint(dest_addr);
+    }
+    const auto &source_addr = ssm_port.sourceAddress();
+    std::optional<boost::asio::ip::address> src_addr;
+    if (source_addr) {
+        src_addr = boost::asio::ip::make_address(source_addr.value());
+    }
+    if (src_addr != m_transmitter->source_address()) {
+        m_transmitter->source_address(src_addr);
     }
 
     /* set new MBR if it has changed */
@@ -183,23 +191,25 @@ bool ObjectListPackager::updateFluteInfo(const std::string &address, in_port_t p
 }
 
 void ObjectListPackager::doObjectPackage() {
-    std::optional<std::string> destAddr = destIpAddr();
+    const SsmPort &ssm_port = ssmPort();
 
-    if (!destAddr) return;
+    if (!ssm_port) return;
 
     {
         std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
 
         if (!m_transmitter) {
             m_transmitter.reset(new LibFlute::Transmitter(
-                    destAddr.value(),
-                    static_cast<short>(port()),
-                    0,
+                    ssm_port.destinationAddress(),
+                    static_cast<short>(ssm_port.port()),
+                    tsi(),
                     mtu(),
                     rateLimit(),
                     m_io,
                     m_tunnelEndpoint,
-                    LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005));
+                    LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005,
+                    true,
+                    ssm_port.sourceAddress()));
             m_transmitter->register_completion_callback(
                     [this](uint32_t toi) {
                         ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", m_transmitter->number_of_files(), m_packageItems.size());

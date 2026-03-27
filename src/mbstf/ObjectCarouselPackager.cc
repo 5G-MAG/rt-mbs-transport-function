@@ -109,9 +109,9 @@ void ObjectCarouselPackager::PackageItem::startedTransmission(const ObjectCarous
 
 ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, ObjectController &controller,
                                        const std::list<ObjectCarouselPackager::PackageItem> &objects_to_package,
-                                       const std::optional<std::string> &address,
-                                       uint32_t rate_limit, unsigned short mtu, in_port_t port, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
-    :ObjectPackager(object_store, controller, address, rate_limit, mtu, port, tunnel_address, tunnel_port)
+                                       const SsmPort &ssm_port, uint32_t rate_limit, unsigned short mtu,
+                                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
+    :ObjectPackager(object_store, controller, ssm_port, rate_limit, mtu, tunnel_address, tunnel_port)
     ,m_packageItemsMutex(new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems(objects_to_package)
     ,m_packagingUpdateCondVar()
@@ -131,9 +131,9 @@ ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, Object
 }
 
 ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, ObjectController &controller,
-                                       std::list<PackageItem> &&objects_to_package, const std::optional<std::string> &address,
-                                       uint32_t rate_limit, unsigned short mtu, in_port_t port, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
-    :ObjectPackager(object_store, controller, address, rate_limit, mtu, port, tunnel_address, tunnel_port)
+                                       std::list<PackageItem> &&objects_to_package, const SsmPort &ssm_port,
+                                       uint32_t rate_limit, unsigned short mtu, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
+    :ObjectPackager(object_store, controller, ssm_port, rate_limit, mtu, tunnel_address, tunnel_port)
     ,m_packageItemsMutex(new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems(std::move(objects_to_package))
     ,m_packagingUpdateCondVar()
@@ -153,9 +153,9 @@ ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, Object
 }
 
 ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, ObjectController &controller,
-                                       const std::optional<std::string> &address, uint32_t rate_limit, unsigned short mtu,
-                                       in_port_t port, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
-    :ObjectPackager(object_store, controller, address, rate_limit, mtu, port, tunnel_address, tunnel_port)
+                                       const SsmPort &ssm_port, uint32_t rate_limit, unsigned short mtu,
+                                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
+    :ObjectPackager(object_store, controller, ssm_port, rate_limit, mtu, tunnel_address, tunnel_port)
     ,m_packageItemsMutex(new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems()
     ,m_packagingUpdateCondVar()
@@ -206,8 +206,7 @@ bool ObjectCarouselPackager::remove(const PackageItem &item) {
     return true;
 }
 
-bool ObjectCarouselPackager::updateFluteInfo(const std::string &address, in_port_t port,
-                                             uint32_t rate_limit,
+bool ObjectCarouselPackager::updateFluteInfo(const SsmPort &ssm_port, uint32_t rate_limit,
                                              const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
 {
     std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
@@ -215,10 +214,18 @@ bool ObjectCarouselPackager::updateFluteInfo(const std::string &address, in_port
     /* Do nothing if we don't have a Transmitter */
     if (!m_transmitter) return false;
 
-    /* set destination endpoint address if it has changed */
-    boost::asio::ip::udp::endpoint dest_addr(boost::asio::ip::make_address(address), port);
+    /* set SSM address if it has changed */
+    boost::asio::ip::udp::endpoint dest_addr(boost::asio::ip::make_address(ssm_port.destinationAddress()), ssm_port.port());
     if (dest_addr != m_transmitter->endpoint()) {
         m_transmitter->endpoint(dest_addr);
+    }
+    const auto &source_addr = ssm_port.sourceAddress();
+    std::optional<boost::asio::ip::address> src_addr;
+    if (source_addr) {
+        src_addr = boost::asio::ip::make_address(source_addr.value());
+    }
+    if (src_addr != m_transmitter->source_address()) {
+        m_transmitter->source_address(src_addr);
     }
 
     /* set new MBR if it has changed */
@@ -249,10 +256,12 @@ void ObjectCarouselPackager::ensureTransmitter()
 {
     std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
     if (!m_transmitter) {
-        std::optional<std::string> destAddr = destIpAddr();
-        if (!destAddr) return;
-        m_transmitter.reset(new LibFlute::Transmitter(destAddr.value(), static_cast<short>(port()), 0, mtu(), rateLimit(), m_io,
-                                                  m_tunnelEndpoint, LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005));
+        const auto &ssm_port = ssmPort();
+        if (!ssm_port) return;
+        m_transmitter.reset(new LibFlute::Transmitter(ssm_port.destinationAddress(), static_cast<short>(ssm_port.port()), tsi(), mtu(),
+                                                      rateLimit(), m_io, m_tunnelEndpoint,
+                                                      LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005, true,
+                                                      ssm_port.sourceAddress()));
         m_transmitter->register_completion_callback(
             [this](uint32_t toi) {
                 ogs_debug("Object with TOI %d completed", toi);

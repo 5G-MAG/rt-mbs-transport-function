@@ -33,6 +33,7 @@
 #include "ObjectStore.hh"
 #include "PullObjectIngester.hh"
 #include "PushObjectIngester.hh"
+#include "SsmPort.hh"
 #include "SubscriptionService.hh"
 #include "utilities.hh"
 #include "openapi/model/DistSessionState.h"
@@ -69,14 +70,13 @@ ObjectListController::~ObjectListController()
 }
 
 void ObjectListController::setObjectPackager() {
-    std::optional<std::string> dest_ip_addr = distributionSession().getDestIpAddr();
+    auto ssm_port = distributionSession().getSsmPort();
     std::optional<std::string> tunnel_addr = distributionSession().getTunnelAddr();
     uint32_t rate_limit = distributionSession().getRateLimit();
-    in_port_t port = distributionSession().getPortNumber();
     in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
-    unsigned short mtu = get_tunnelled_path_mtu(dest_ip_addr, port, tunnel_addr, tunnel_port) - GTP_HEADER_SIZE;
+    unsigned short mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port) - GTP_HEADER_SIZE;
     const auto &obj_list = objectStore().getObjects();
-    packager(new ObjectListPackager(objectStore(), *this, dest_ip_addr, rate_limit, mtu, port, tunnel_addr, tunnel_port));
+    packager(new ObjectListPackager(objectStore(), *this, ssm_port, rate_limit, mtu, tunnel_addr, tunnel_port));
     // Send all objects that are in the ObjectStore
     for (const auto &[obj_id, object] : obj_list) {
         sendToPackager(object);

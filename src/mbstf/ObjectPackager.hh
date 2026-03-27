@@ -25,6 +25,7 @@
 
 #include "common.hh"
 #include "Event.hh"
+#include "SsmPort.hh"
 #include "SubscriptionService.hh"
 
 namespace LibFlute{
@@ -35,7 +36,6 @@ MBSTF_NAMESPACE_START
 
 class ObjectStore;
 class ObjectController;
-class Event;
 
 class ObjectPackager: public SubscriptionService {
 public:
@@ -126,11 +126,11 @@ public:
     ObjectPackager(ObjectPackager &&) = delete;
     ObjectPackager(const ObjectPackager &) = delete;
 
-    ObjectPackager(ObjectStore &objectStore, ObjectController &controller, std::optional<std::string> destIpAddr = std::nullopt, uint32_t rateLimit = 0, unsigned short mtu = 0, in_port_t port = 0, const std::optional<std::string> &tunnel_address = std::nullopt, in_port_t tunnel_port = 0 )
+    ObjectPackager(ObjectStore &objectStore, ObjectController &controller, const SsmPort &ssm_port = SsmPort(), uint32_t rateLimit = 0, unsigned short mtu = 0, const std::optional<std::string> &tunnel_address = std::nullopt, in_port_t tunnel_port = 0 )
         :m_transmitterMutex(new decltype(m_transmitterMutex)::element_type)
         ,m_transmitter(nullptr), m_io(), m_queuedToi(0), m_queued(false), m_deactivating(false), m_queuedObjectId()
-        ,m_objectStore(objectStore), m_controller(controller), m_destIpAddr(destIpAddr), m_rateLimit(rateLimit), m_mtu(mtu)
-        ,m_port(port), m_workerThread(), m_workerCancel(false), m_workerRunning(false)
+        ,m_objectStore(objectStore), m_controller(controller), m_ssmPort(ssm_port), m_rateLimit(rateLimit), m_mtu(mtu)
+        ,m_workerThread(), m_workerCancel(false), m_workerRunning(false)
         ,m_tunnelAddress(tunnel_address), m_tunnelPort(tunnel_port)
     {
     };
@@ -144,8 +144,7 @@ public:
 
     virtual ~ObjectPackager();
 
-    ObjectPackager& setDestIpAddr(const std::optional<std::string> &destIpAddr);
-    ObjectPackager& setPort(in_port_t port);
+    ObjectPackager& setSsmPort(const SsmPort &ssm_port);
     ObjectPackager& setMtu(unsigned short mtu);
     ObjectPackager& setRateLimit(uint32_t rateLimit);
     void startWorker() {
@@ -164,11 +163,11 @@ protected:
     ObjectStore &objectStore() { return m_objectStore; };
     const ObjectController &controller() const { return m_controller; };
     ObjectController &controller() { return m_controller; };
-    const std::optional<std::string> &destIpAddr() const { return m_destIpAddr; };
+    const SsmPort &ssmPort() const { return m_ssmPort; };
     const std::optional<std::string> &tunnelAddr() const { return m_tunnelAddress; };
     uint32_t rateLimit() const { return m_rateLimit; };
     unsigned short mtu() const { return m_mtu; };
-    in_port_t port() const { return m_port; };
+    uint64_t tsi() const;
     in_port_t tunnelPort() const { return m_tunnelPort; };
 
     virtual void doObjectPackage() = 0;
@@ -185,10 +184,9 @@ private:
     static void workerLoop(ObjectPackager*);
     ObjectStore &m_objectStore;
     ObjectController &m_controller;
-    std::optional<std::string> m_destIpAddr;
+    SsmPort m_ssmPort;
     uint32_t m_rateLimit;
     unsigned short m_mtu;
-    in_port_t m_port;
     std::thread m_workerThread;
     std::atomic_bool m_workerCancel;
     std::atomic_bool m_workerRunning;

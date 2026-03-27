@@ -30,6 +30,7 @@
 #include <sstream>
 
 #include "common.hh"
+#include "SsmPort.hh"
 
 #include "utilities.hh"
 
@@ -103,8 +104,7 @@ int get_path_mtu(const ogs_sockaddr_t &sock_addr)
     return mtu;
 }
 
-int get_tunnelled_path_mtu(const std::optional<std::string> &dest_ip, in_port_t dest_port,
-                            const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port)
+int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port)
 {
     int mtu = 1500; // default to 1500 if no MTU can be found.
 
@@ -115,9 +115,9 @@ int get_tunnelled_path_mtu(const std::optional<std::string> &dest_ip, in_port_t 
             ogs_freeaddrinfo(sa);
         } // else error already reported
     } else { // No tunnel provided so try MTU of direct destination
-        if (dest_ip) {
+        if (ssm_port) {
             ogs_sockaddr_t *sa = nullptr;
-            if (ogs_addaddrinfo(&sa, AF_UNSPEC, dest_ip.value().c_str(), dest_port, AI_NUMERICSERV) == OGS_OK) {
+            if (ogs_addaddrinfo(&sa, AF_UNSPEC, ssm_port.destinationAddress().c_str(), ssm_port.port(), AI_NUMERICSERV) == OGS_OK) {
                 mtu = get_path_mtu(*sa);
                 ogs_freeaddrinfo(sa);
             }

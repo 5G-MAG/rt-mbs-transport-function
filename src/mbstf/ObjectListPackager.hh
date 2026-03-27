@@ -66,23 +66,20 @@ public:
 
     ObjectListPackager() = delete;
     ObjectListPackager(ObjectStore &object_store, ObjectController &controller,
-                       const std::list<PackageItem> &object_to_package, const std::optional<std::string> &address,
-                       uint32_t rateLimit, unsigned short mtu, in_port_t port,
-                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
+                       const std::list<PackageItem> &object_to_package, const SsmPort &ssm_port, uint32_t rateLimit,
+                       unsigned short mtu, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
     ObjectListPackager(ObjectStore &object_store, ObjectController &controller, std::list<PackageItem> &&object_to_package,
-                       const std::optional<std::string> &address, uint32_t rateLimit, unsigned short mtu, in_port_t port,
+                       const SsmPort &ssm_port, uint32_t rateLimit, unsigned short mtu,
                        const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
-    ObjectListPackager(ObjectStore &object_store, ObjectController &controller, const std::optional<std::string> &address,
-                       uint32_t rateLimit, unsigned short mtu, in_port_t port,
-                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
+    ObjectListPackager(ObjectStore &object_store, ObjectController &controller, const SsmPort &ssm_port, uint32_t rateLimit,
+                       unsigned short mtu, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
     virtual ~ObjectListPackager();
 
     bool add(const PackageItem &item);
     bool add(PackageItem &&item);
 
-    bool updateFluteInfo(const std::string &address, in_port_t port,
-                         uint32_t rateLimit,
-                         const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
+    bool updateFluteInfo(const SsmPort &ssm_port, uint32_t rateLimit, const std::optional<std::string> &tunnel_address,
+                         in_port_t tunnel_port);
 
     virtual bool deactivate();
     virtual void flushQueue();

@@ -51,6 +51,7 @@ class Open5GSSBIStream;
 class Open5GSSBIMessage;
 class Open5GSSBIRequest;
 class Controller;
+class SsmPort;
 
 class DistributionSession : public std::enable_shared_from_this<DistributionSession>, public Subscriber {
 public:
@@ -83,9 +84,9 @@ public:
     DistributionSession &setState(const reftools::mbstf::DistSessionState &state);
     const reftools::mbstf::ObjDistributionData::ObjAcquisitionIdsPullType &getObjectAcquisitionPullUrls() const;
     const std::string &getObjectDistributionOperatingMode() const;
-    const std::optional<std::string> &getDestIpAddr() const;
+    const SsmPort getSsmPort() const;
+    uint64_t getTSI() const;
     const std::optional<std::string> &getTunnelAddr() const;
-    in_port_t getPortNumber() const;
     in_port_t getTunnelPortNumber() const;
     uint32_t getRateLimit() const;
     std::optional<BitRate> getMbr() const;

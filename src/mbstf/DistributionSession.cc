@@ -54,6 +54,7 @@
 #include "Open5GSTimer.hh"
 #include "Open5GSYamlDocument.hh"
 #include "Open5GSNetworkFunction.hh"
+#include "SsmPort.hh"
 #include "openapi/model/CreateReqData.h"
 #include "openapi/model/CreateRspData.h"
 #include "openapi/model/DistSession.h"
@@ -82,12 +83,13 @@ using reftools::mbstf::DistSessionEventReportList;
 using reftools::mbstf::DistSessionSubscription;
 using reftools::mbstf::IpAddr;
 using reftools::mbstf::ObjDistributionData;
-using reftools::mbstf::UpTrafficFlowInfo;
 using reftools::mbstf::ObjAcquisitionMethod;
 using reftools::mbstf::ObjDistributionOperatingMode;
+using reftools::mbstf::PktDistributionOperatingMode;
 using reftools::mbstf::StatusSubscribeReqData;
 using reftools::mbstf::StatusSubscribeRspData;
 using reftools::mbstf::TunnelAddress;
+using reftools::mbstf::UpTrafficFlowInfo;
 
 MBSTF_NAMESPACE_START
 
@@ -104,6 +106,7 @@ static void send_model_params_error(const ModelParamsException &err, Open5GSSBIS
                                     Open5GSSBIMessage &message, const NfServer::AppMetadata &app_meta,
                                     const std::optional<NfServer::InterfaceMetadata> &api, const std::string &no_cause_reason,
                                     const std::string &log_prefix);
+static void _validate(const std::shared_ptr<DistSession> &dist_session);
 
 /**** public: ****/
 
@@ -122,12 +125,13 @@ DistributionSession::DistributionSession(CJson &json, bool as_request)
     ,m_subscriptionLocation()
 {
 
-    std::shared_ptr<DistSession> distSession = m_createReqData->getDistSession();
+    std::shared_ptr<DistSession> dist_session = m_createReqData->getDistSession();
 
+    _validate(dist_session);
     _setLastUsed();
     m_generated = m_lastUsed;
     _setHash();
-    m_distributionSessionId = distSession->getDistSessionId();
+    m_distributionSessionId = dist_session->getDistSessionId();
     _changeState(&DistributionSession::_constructedState);
 }
 
@@ -471,21 +475,28 @@ const ObjDistributionData::ObjAcquisitionIdsPullType &DistributionSession::getOb
     }
 }
 
-const std::optional<std::string> &DistributionSession::getDestIpAddr() const
+const SsmPort DistributionSession::getSsmPort() const
 {
-    std::shared_ptr<CreateReqData> create_req_data = distributionSessionReqData();
-    std::shared_ptr<DistSession> dist_session = create_req_data->getDistSession();
-    const std::optional<std::shared_ptr< UpTrafficFlowInfo > > &up_traffic_flow_info = dist_session->getUpTrafficFlowInfo();
-    if (up_traffic_flow_info.has_value()) {
-        std::shared_ptr<UpTrafficFlowInfo> up_traffic_flow = up_traffic_flow_info.value();
-        const std::shared_ptr<IpAddr> ipAddr = up_traffic_flow->getDestIpAddr();
-        if (ipAddr) {
-            return ipAddr->getIpv4Addr();
-        }
-    }
+    const auto &create_req_data = distributionSessionReqData();
+    if (!create_req_data) return SsmPort();
+    const auto &dist_session = create_req_data->getDistSession();
+    if (!dist_session) return SsmPort();
+    const auto &up_traffic_flow_info = dist_session->getUpTrafficFlowInfo();
+    if (!up_traffic_flow_info || !up_traffic_flow_info.value()) return SsmPort();
+    return SsmPort(up_traffic_flow_info.value());
+}
 
-    static const std::optional<std::string> empty = std::nullopt;
-    return empty;
+uint64_t DistributionSession::getTSI() const
+{
+    const auto &create_req_data = distributionSessionReqData();
+    if (!create_req_data) return 0;
+    const auto &dist_session = create_req_data->getDistSession();
+    if (!dist_session) return 0;
+    const auto &up_traffic_flow_info = dist_session->getUpTrafficFlowInfo();
+    if (!up_traffic_flow_info || !up_traffic_flow_info.value()) return 0;
+    const auto &tsi = up_traffic_flow_info.value()->getTransportSessionId();
+    if (!tsi) return 0;
+    return static_cast<uint32_t>(tsi.value());
 }
 
 const std::optional<std::string> &DistributionSession::getTunnelAddr() const
@@ -499,19 +510,6 @@ const std::optional<std::string> &DistributionSession::getTunnelAddr() const
 
     static const std::optional<std::string> empty = std::nullopt;
     return empty;
-}
-
-in_port_t DistributionSession::getPortNumber() const
-{
-    in_port_t port_number = 0;
-    std::shared_ptr<CreateReqData> create_req_data = distributionSessionReqData();
-    std::shared_ptr<DistSession> dist_session = create_req_data->getDistSession();
-    std::optional<std::shared_ptr<UpTrafficFlowInfo> > up_traffic_flow_info = dist_session->getUpTrafficFlowInfo();
-    if (up_traffic_flow_info.has_value()) {
-        std::shared_ptr<UpTrafficFlowInfo> up_traffic_flow = up_traffic_flow_info.value();
-        port_number = static_cast<in_port_t>(up_traffic_flow->getPortNumber());
-    }
-    return port_number;
 }
 
 in_port_t DistributionSession::getTunnelPortNumber() const
@@ -1365,6 +1363,70 @@ static void send_model_params_error(const ModelParamsException &err, Open5GSSBIS
                                                error));
     }
     ogs_error("%s: %s", log_prefix.c_str(), oss.str().c_str());
+}
+
+static void _validate(const std::shared_ptr<DistSession> &dist_session)
+{
+    /* check for DistSession irregularities that are not caught by the OpenAPI model classes */
+
+    if (!dist_session) {
+        throw ModelException("No distSession in CreateReqData", "DistributionSession", "distSession",
+                             ProblemCause::MANDATORY_IE_MISSING);
+    }
+
+    const auto &obj_distr_data = dist_session->getObjDistributionData();
+    const auto &pkt_distr_data = dist_session->getPktDistributionData();
+    if ((!obj_distr_data && !pkt_distr_data) || (obj_distr_data && pkt_distr_data)) {
+        throw ModelException("DistSession must have one of pktDistributionData or objDistributionData", "DistributionSession",
+                             "distSession", ProblemCause::MANDATORY_IE_MISSING);
+    }
+
+    const auto &up_traffic_flow_info = dist_session->getUpTrafficFlowInfo();
+    if (obj_distr_data) {
+        if (!up_traffic_flow_info) {
+            throw ModelException("upTrafficFlowInfo must be present if objDistributionData is present", "DistributionSession",
+                                 "distSession.upTrafficFlowInfo", ProblemCause::MANDATORY_IE_MISSING);
+        } else {
+            const auto &src_ip = up_traffic_flow_info.value()->getSrcIpAddr();
+            if (!src_ip) {
+                throw ModelException("upTrafficFlowInfo.srcIpAddr must be present if objDistributionData is present",
+                                     "DistributionSession", "distSession.upTrafficFlowInfo.srcIpAddr",
+                                     ProblemCause::MANDATORY_IE_MISSING);
+            }
+            const auto &tsi = up_traffic_flow_info.value()->getTransportSessionId();
+            if (!tsi) {
+                throw ModelException("upTrafficFlowInfo.transportSessionId must be present if objDistributionData is present",
+                                     "DistributionSession", "distSession.upTrafficFlowInfo.srcIpAddr",
+                                     ProblemCause::MANDATORY_IE_MISSING);
+            }
+        }
+    } else {
+        const auto &pkt_distr_mode = pkt_distr_data.value()->getPktDistributionOperatingMode();
+        if (up_traffic_flow_info) {
+            const auto &src_ip = up_traffic_flow_info.value()->getSrcIpAddr();
+            if (*pkt_distr_mode == PktDistributionOperatingMode::VAL_PACKET_FORWARD_ONLY) {
+                if (src_ip) {
+                    throw ModelException("upTrafficFlowInfo cannot contain srcIpAddr if pktDistributionData is present and "
+                                         "pktDistributionData.pktDistributionOperatingMode is PACKET_FORWARD_ONLY",
+                                         "DistributionSession", "distSession.upTrafficFlowInfo.srcIpAddr",
+                                         ProblemCause::OPTIONAL_IE_INCORRECT);
+                }
+            } else {
+                if (!src_ip) {
+                      throw ModelException("upTrafficFlowInfo.srcIpAddr must be present if "
+                                           "pktDistributionData.pktDistributionOperatingMode is not PACKET_FORWARD_ONLY",
+                                           "DistributionSession", "distSession.upTrafficFlowInfo.srcIpAddr",
+                                           ProblemCause::MANDATORY_IE_MISSING);
+                }
+            }
+        } else {
+            if (*pkt_distr_mode == PktDistributionOperatingMode::VAL_PACKET_PROXY) {
+                throw ModelException("upTrafficFlowInfo must be present if pktDistributionData is present and "
+                                     "pktDistributionData.pktDistributionOperatingMode is PACKET_PROXY", "DistributionSession",
+                                     "distSession.upTrafficFlowInfo", ProblemCause::MANDATORY_IE_MISSING);
+            }
+        }
+    }
 }
 
 MBSTF_NAMESPACE_STOP

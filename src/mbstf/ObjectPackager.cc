@@ -25,6 +25,8 @@
 
 // local includes
 #include "common.hh"
+#include "ObjectController.hh"
+#include "DistributionSession.hh"
 
 // this class include
 #include "ObjectPackager.hh"
@@ -57,13 +59,8 @@ void ObjectPackager::workerLoop(ObjectPackager *packager)
     packager->m_workerRunning = false;
 }
 
-ObjectPackager& ObjectPackager::setDestIpAddr(const std::optional<std::string> &dest_ip_addr) {
-    m_destIpAddr = dest_ip_addr;
-    return *this;
-}
-
-ObjectPackager& ObjectPackager::setPort(in_port_t port) {
-    m_port = port;
+ObjectPackager& ObjectPackager::setSsmPort(const SsmPort &ssm_port) {
+    m_ssmPort = ssm_port;
     return *this;
 }
 
@@ -100,6 +97,11 @@ bool ObjectPackager::deactivate()
         return true;
     }
     return false;
+}
+
+uint64_t ObjectPackager::tsi() const
+{
+    return m_controller.distributionSession().getTSI();
 }
 
 MBSTF_NAMESPACE_STOP

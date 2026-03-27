@@ -82,14 +82,14 @@ public:
 
     ObjectCarouselPackager() = delete;
     ObjectCarouselPackager(ObjectStore &object_store, ObjectController &controller,
-                       const std::list<PackageItem> &objects_to_package, const std::optional<std::string> &address,
-                       uint32_t rateLimit, unsigned short mtu, in_port_t port,
+                       const std::list<PackageItem> &objects_to_package, const SsmPort &ssm_port,
+                       uint32_t rateLimit, unsigned short mtu,
                        const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
     ObjectCarouselPackager(ObjectStore &object_store, ObjectController &controller, std::list<PackageItem> &&objects_to_package,
-                       const std::optional<std::string> &address, uint32_t rateLimit, unsigned short mtu, in_port_t port,
+                       const SsmPort &ssm_port, uint32_t rateLimit, unsigned short mtu,
                        const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
-    ObjectCarouselPackager(ObjectStore &object_store, ObjectController &controller, const std::optional<std::string> &address,
-                       uint32_t rateLimit, unsigned short mtu, in_port_t port,
+    ObjectCarouselPackager(ObjectStore &object_store, ObjectController &controller, const SsmPort &ssm_port,
+                       uint32_t rateLimit, unsigned short mtu,
                        const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
     virtual ~ObjectCarouselPackager();
 
@@ -98,9 +98,8 @@ public:
     bool remove(const PackageItem &item);
     const std::list<PackageItem> &getPackageItems() const { return m_packageItems; };
 
-    bool updateFluteInfo(const std::string &address, in_port_t port,
-                         uint32_t rateLimit,
-                         const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
+    bool updateFluteInfo(const SsmPort &ssm_port, uint32_t rateLimit, const std::optional<std::string> &tunnel_address,
+                         in_port_t tunnel_port);
 
     virtual bool deactivate();
     virtual void flushQueue();
