@@ -109,8 +109,6 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> ObjectManife
         }
     }
 
-    std::list<BaseURL> base_urls{BaseURL(m_manifestFile->second.getFetchedUrl())};
-
     for (auto &obj : m_objectManifest.getObjects()) {
         /* No object, then skip this entry */
         if (!obj || !obj.value()) continue;
@@ -125,9 +123,8 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> ObjectManife
 
         /* find the metadata entry for this object in the ObjectStore */
         auto &object_store = m_controller->objectStore();
-        auto obj_locator = URI(obj.value()->getLocator()).resolveUsingBaseURLs(base_urls);
-
-        auto obj_metadata_ptr = object_store.findMetadataByURL(obj_locator.str());
+        auto obj_locator = obj.value()->getLocator();
+        auto obj_metadata_ptr = object_store.findMetadataByURL(obj_locator);
 
         auto it = m_objectMetadataCache.find(obj.value().get());
         if (it != m_objectMetadataCache.end() && !it->second.beenRequested) {
@@ -136,10 +133,10 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> ObjectManife
 
             if (obj_metadata_ptr) {
                 fetch_object_metadata = *obj_metadata_ptr;
-                ogs_debug("%s", std::format("Object {} at {} to be refetched at {}", fetch_object_metadata.objectId(), obj_locator.str(), obj_fetch_time).c_str());
+                ogs_debug("%s", std::format("Object {} at {} to be refetched at {}", fetch_object_metadata.objectId(), obj_locator, obj_fetch_time).c_str());
             } else {
-                fetch_object_metadata = ObjectStore::Metadata(nextObjectId(), std::string(), obj_locator.str(), obj_locator.str(), obj.value()->getLocator(), ObjectStore::Metadata::datetime_type());
-                ogs_debug("%s", std::format("Object at {} to be fetched at {}", obj_locator.str(), obj_fetch_time).c_str());
+                fetch_object_metadata = ObjectStore::Metadata(nextObjectId(), std::string(), obj_locator, obj_locator, obj_locator, ObjectStore::Metadata::datetime_type());
+                ogs_debug("%s", std::format("Object at {} to be fetched at {}", obj_locator, obj_fetch_time).c_str());
             }
 
             if (obj_fetch_time < current_time) obj_fetch_time = current_time;
@@ -278,7 +275,7 @@ double ObjectManifestHandler::getRepetitionIntervalForUrl(const std::string &url
     for (const auto &obj : m_objectManifest.getObjects()) {
         if (!obj || !obj.value()) continue;
         const auto &rep_interval = obj.value()->getRepetitionInterval();
-        auto locator = resolveLocator(obj.value()->getLocator());
+        auto locator = obj.value()->getLocator();
         if (locator == url) {
             if (rep_interval) {
                 ogs_debug("Object %s has %lfs repetition interval", url.c_str(), static_cast<double>(rep_interval.value())/1000.0);
@@ -314,7 +311,7 @@ void ObjectManifestHandler::finishRequest(const std::string &url)
     auto &object_store = m_controller->objectStore();
     for (const auto &obj : m_objectManifest.getObjects()) {
         if (!obj || !obj.value()) continue;
-        std::string obj_locator = resolveLocator(obj.value()->getLocator());
+        std::string obj_locator = obj.value()->getLocator();
         if (obj_locator == url) {
             auto obj_meta_it = m_objectMetadataCache.find(obj.value().get());
             if (obj_meta_it != m_objectMetadataCache.end()) {
@@ -350,13 +347,6 @@ void ObjectManifestHandler::finishRequest(const std::string &url)
 }
 
 /* private: */
-
-std::string ObjectManifestHandler::resolveLocator(const std::string &relative_url) const
-{
-    if (!m_manifestFile) return relative_url;
-    std::list<BaseURL> base_urls{BaseURL(m_manifestFile->second.getFetchedUrl())};
-    return URI(relative_url).resolveUsingBaseURLs(base_urls).str();
-}
 
 std::string ObjectManifestHandler::generateUUID() {
     uuid_t uuid;

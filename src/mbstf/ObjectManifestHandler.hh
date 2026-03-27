@@ -77,7 +77,6 @@ private:
         bool beenRequested;
     };
 
-    std::string resolveLocator(const std::string &relative_url) const;
     std::string generateUUID();
 
     std::unique_ptr<std::recursive_mutex> m_objectManifestMutex;

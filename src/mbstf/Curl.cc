@@ -76,8 +76,10 @@ Curl::~Curl() {
 
 long Curl::__get(const std::string& url, std::chrono::milliseconds timeout, const std::map<std::string, std::string> &request_headers)
 {
-    m_etag.clear(); // Clear the ETag before making a new request
-    m_receivedData.clear(); // Clear the received data before making a new request
+    m_etag.clear();                              // Clear the ETag before making a new request
+    m_receivedData.clear();                      // Clear the received data before making a new request
+    m_lastModified = decltype(m_lastModified){}; // Reset the last modified date-time to the epoch before making a new request
+    m_age = 0;                                   // Zero the current object age before making a new request
 
     if (m_curl) {
         curl_easy_setopt(m_curl, CURLOPT_URL, url.c_str());

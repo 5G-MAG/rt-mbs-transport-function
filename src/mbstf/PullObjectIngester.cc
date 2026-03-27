@@ -225,7 +225,7 @@ void PullObjectIngester::doObjectIngest() {
                 if (old_meta) metadata.fluteFileDescription(old_meta->fluteFileDescription());
                 unsigned long max_age = m_curl->getCacheControlMaxAge();
                 unsigned long current_age = m_curl->getAge();
-	        metadata.cacheExpires(max_age ? std::chrono::system_clock::now() + std::chrono::seconds(max_age - current_age) : std::chrono::system_clock::now() + std::chrono::seconds(ObjectStore::Metadata::cacheExpiry()));
+	        metadata.cacheExpires(max_age ? std::chrono::system_clock::now() + std::chrono::seconds(max_age) - std::chrono::seconds(current_age) : std::chrono::system_clock::now() + std::chrono::seconds(ObjectStore::Metadata::cacheExpiry()));
                 const std::string& etag = m_curl->getEtag();
 	        if (!etag.empty()) {
                     metadata.entityTag(etag);
