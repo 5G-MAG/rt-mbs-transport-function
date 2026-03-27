@@ -492,6 +492,7 @@ void ObjectCarouselPackager::startScheduler()
 void ObjectCarouselPackager::abortScheduler()
 {
     m_schedulingCancel = true;
+    m_packagingUpdateCondVar.notify_all();
     if (m_schedulingThread.get_id() != std::this_thread::get_id() && m_schedulingThread.joinable()) {
         m_schedulingThread.join();
     }

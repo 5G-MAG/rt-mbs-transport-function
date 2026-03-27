@@ -69,6 +69,7 @@ public:
 
     void abort() {
 	m_workerCancel = true;
+        cancelWorker();
         if (m_workerThread.get_id() != std::this_thread::get_id() && m_workerThread.joinable()) {
 	    m_workerThread.join();
         }
@@ -88,6 +89,7 @@ protected:
     void startWorker(){m_workerThread = std::thread(workerLoop, this);};
 
     virtual void doObjectIngest() = 0;
+    virtual void cancelWorker() {};
 
     /* subscription events */
     void emitObjectIngestFailedEvent(const std::string &url, IngestFailedEvent::FailureType fail_type);

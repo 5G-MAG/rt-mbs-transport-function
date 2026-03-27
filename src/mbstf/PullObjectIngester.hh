@@ -112,6 +112,7 @@ public:
 
 protected:
     virtual void doObjectIngest();
+    virtual void cancelWorker() { m_ingestItemsCondVar.notify_all(); };
 
 private:
     void sortListByPolicy();
