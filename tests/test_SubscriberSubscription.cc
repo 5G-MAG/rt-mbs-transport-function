@@ -199,15 +199,15 @@ enum Result {
 };
 
 struct TestContext {
-    TestSubscriptionService *services[3];
+    std::shared_ptr<TestSubscriptionService> services[3];
     TestSubscriber *subscribers[3];
     TestAsyncSubscriber *async_subscribers[1];
 };
 
 void test_setup(TestContext &context)
 {
-    context.services[0] = new TestSubscriptionService;
-    context.services[1] = new TestSubscriptionService;
+    context.services[0].reset(new TestSubscriptionService);
+    context.services[1].reset(new TestSubscriptionService);
 }
 
 Result test_synchronous_filtered(TestContext &ctx)
@@ -300,9 +300,8 @@ Result test_synchronous_filtered(TestContext &ctx)
         ctx.subscribers[1]->resetResult();
     }
 
-    auto tmp_svc = ctx.services[0];
-    delete ctx.services[0];
-    ctx.services[0] = nullptr;
+    auto tmp_svc = ctx.services[0].get();
+    ctx.services[0].reset();
 
     if (ctx.subscribers[0]->subscribedTo(*tmp_svc) || ctx.subscribers[1]->subscribedTo(*tmp_svc)) {
         std::cerr << "Unsubscribe upon service deletion failed to propagate" << std::endl;
@@ -342,7 +341,7 @@ Result test_synchronous_filtered(TestContext &ctx)
 
     // Restore subscribers and services
 
-    ctx.services[0] = new TestSubscriptionService;
+    ctx.services[0].reset(new TestSubscriptionService);
     ctx.subscribers[0] = new TestSubscriber;
 
     ctx.subscribers[0]->addSubscribeToT1(*ctx.services[0]);
@@ -471,7 +470,7 @@ Result test_asynchronous_filtered(TestContext &ctx)
     // async test
 
     ctx.async_subscribers[0] = new TestAsyncSubscriber();
-    ctx.services[2] = new TestSubscriptionService;
+    ctx.services[2].reset(new TestSubscriptionService);
     std::shared_ptr<Event> t5(new EventType1(1));
     
     ctx.async_subscribers[0]->addSubscribeToT1(*ctx.services[2]);
@@ -505,10 +504,10 @@ Result test_asynchronous_unfiltered(TestContext &ctx)
 
 void test_cleanup(TestContext &ctx)
 {
-    for (auto *svc : ctx.services) {
+    for (auto &svc : ctx.services) {
         if (svc) {
             //std::cout << "delete TestSubscriptionService " << svc << std::endl;
-            delete svc;
+            svc.reset();
         }
     }
     for (auto *sub : ctx.subscribers) {

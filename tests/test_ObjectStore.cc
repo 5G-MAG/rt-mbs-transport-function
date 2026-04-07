@@ -148,19 +148,19 @@ MBSTF_NAMESPACE_USING;
 int main() {
     
     ObjectController objectController;
-    ObjectStore store(objectController);
+    std::shared_ptr<ObjectStore> store(new ObjectStore(objectController));
 
     std::cout<<"### ObjectStore: Test start #### "<<std::endl;
     
-    testAddObject(store);
-    testGetMetadata(store);
-    testDeleteFirstObject(store);
-    testDeleteSecondObject(store);
-    testAddObject(store);
-    testRemoveObjects(store);
-    testAddObject(store);
+    testAddObject(*store);
+    testGetMetadata(*store);
+    testDeleteFirstObject(*store);
+    testDeleteSecondObject(*store);
+    testAddObject(*store);
+    testRemoveObjects(*store);
+    testAddObject(*store);
     std::this_thread::sleep_for(10s);
-    testGetStaleObjects(store);
+    testGetStaleObjects(*store);
     std::cout<<"Test: ObjectStore "<<"Pass: "<<pass<<" Fail: "<<fail<<std::endl;
     std::cout<<"### ObjectStore: Test finish #### "<<std::endl;
     return 0;
