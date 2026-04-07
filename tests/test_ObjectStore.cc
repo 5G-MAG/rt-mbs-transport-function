@@ -163,6 +163,7 @@ int main() {
     testGetStaleObjects(*store);
     std::cout<<"Test: ObjectStore "<<"Pass: "<<pass<<" Fail: "<<fail<<std::endl;
     std::cout<<"### ObjectStore: Test finish #### "<<std::endl;
+    store.reset();
     return 0;
 }
 
