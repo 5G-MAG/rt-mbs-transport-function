@@ -329,10 +329,10 @@ void SubscriptionService::asyncEventsLoop()
     auto self = shared_from_this(); /* make sure we don't get deleted while sending events, but exit if we are the last holder */
     while (!m_asyncCancel && self.use_count() > 1) {
         std::lock_guard guard(*m_asyncMutex);
-        while (!m_asyncCancel && m_asyncEventQueue.empty()) {
+        while (!m_asyncCancel && m_asyncEventQueue.empty() && self.use_count() > 1) {
             m_asyncCondVar.wait_for(*m_asyncMutex, 500ms);
         }
-        while (!m_asyncCancel && !m_asyncEventQueue.empty()) {
+        while (!m_asyncCancel && !m_asyncEventQueue.empty() && self.use_count() > 1) {
             auto event = m_asyncEventQueue.front();
             m_asyncEventQueue.pop_front();
             m_asyncMutex->unlock();
@@ -348,7 +348,11 @@ void SubscriptionService::asyncEventsLoop()
         std::shared_ptr<Open5GSEvent> evt(new Open5GSEvent(new ogs_event_t));
         evt->ogsEvent()->id = LocalEvents::RELEASE_SUBSCRIPTION_SVC;
         evt->setSbiData(new std::shared_ptr<SubscriptionService>(self));
-        App::self().queuePush(evt);
+        try {
+            App::self().queuePush(evt);
+        } catch (std::runtime_error &ex) {
+            /* App not running (happens in unit tests), so just ignore */
+        }
     }
 }
 
