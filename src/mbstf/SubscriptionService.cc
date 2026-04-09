@@ -270,9 +270,9 @@ bool SubscriptionService::sendEventSynchronous(Event &event)
     if (event.stopProcessingFlag()) return false;
     for (auto &subsc : m_allEventSubscriptions) {
         m_asyncMutex->unlock();
-	subsc->processEvent(event, *this);
+        subsc->processEvent(event, *this);
         m_asyncMutex->lock();
-	if (event.stopProcessingFlag()) break;
+        if (event.stopProcessingFlag()) break;
     }
     return !event.preventDefaultFlag();
 }

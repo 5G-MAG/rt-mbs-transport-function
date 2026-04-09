@@ -48,13 +48,13 @@ Controller *ControllerFactory::makeController(DistributionSession &distributionS
     for (const auto &cc : constructors()) {
         try {
             return cc->makeController(distributionSession);
-	} catch (const std::runtime_error& e) {
+        } catch (const std::runtime_error& e) {
             // Handle runtime_error specifically
             throw;
         } catch (const std::logic_error &e) {
             // That controller couldn't handle that DistributionSession, let's try the next
         }
-	catch (std::exception &ex) {
+        catch (std::exception &ex) {
             // That controller couldn't handle that DistributionSession, let's try the next
         }
     }

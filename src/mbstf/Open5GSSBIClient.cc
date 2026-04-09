@@ -70,12 +70,12 @@ Open5GSSBIClient::Open5GSSBIClient(const char *hostname, int port)
     rv = ogs_getaddrinfo(&addr, AF_UNSPEC, hostname, port, 0);
     if (rv != OGS_OK) {
         ogs_error("getaddrinfo failed");
-	throw std::runtime_error("getaddrinfo failed!");
+        throw std::runtime_error("getaddrinfo failed!");
     }
 
     if (addr == nullptr) {
         ogs_error("Could not get the address of the Application Server");
-	throw std::runtime_error("Unable to get client address!");
+        throw std::runtime_error("Unable to get client address!");
     }
 
     m_ogsClient = ogs_sbi_client_add(scheme, addr);

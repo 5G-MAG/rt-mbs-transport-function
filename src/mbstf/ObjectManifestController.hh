@@ -44,7 +44,7 @@ public:
     }
 
     virtual ~ObjectManifestController() {
-	abort();
+        abort();
     };
 
     ObjectManifestController &operator=(const ObjectManifestController&) = delete;
@@ -61,7 +61,7 @@ protected:
     void startWorker();
     virtual void initPullObjectIngesters();
     virtual void initPushObjectIngester();
-    ObjectManifestController &manifestHandler(std::shared_ptr<ManifestHandler> &&manifest_handler); 
+    ObjectManifestController &manifestHandler(std::shared_ptr<ManifestHandler> &&manifest_handler);
     const std::shared_ptr<ManifestHandler> &manifestHandler() const;
     virtual std::string nextObjectId();
 

@@ -236,7 +236,7 @@ int Open5GSNetworkFunction::setServerName(void) {
         if (!advertise)
             advertise = server->node.addr;
         ogs_assert(advertise);
-	res = getnameinfo((struct sockaddr *) &advertise->sa,
+        res = getnameinfo((struct sockaddr *) &advertise->sa,
                       ogs_sockaddr_len(advertise),
                       server_name, NI_MAXHOST,
                       NULL, 0, NI_NAMEREQD);
@@ -247,7 +247,7 @@ int Open5GSNetworkFunction::setServerName(void) {
         } else {
             ogs_debug("node=%s", server_name);
             ogs_info("SERVER NAME NODE=%s", server_name);
-	    m_serverName = server_name;
+            m_serverName = server_name;
             return 1;
         }
     }
@@ -335,8 +335,8 @@ void Open5GSNetworkFunction::addAddressesToNFService(ogs_sbi_nf_service_t *nf_se
     for (const auto &addrs: addresses) {
 
         for (ogs_copyaddrinfo(&addr, addrs->ogsSockAddr()); addr && nf_service->num_of_addr < OGS_SBI_MAX_NUM_OF_IP_ADDRESS;
-			addr = addr->next)
-	{
+                        addr = addr->next)
+        {
             bool is_port = true;
             int port = 0;
 

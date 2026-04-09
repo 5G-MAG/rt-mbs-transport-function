@@ -92,7 +92,7 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
     media_segments.insert(media_segments.end(), m_extraPullObjects.begin(), m_extraPullObjects.end());
     for (auto &ms: media_segments) {
         if(ms.availabilityStartTime() < current_time)
-	    ms.availabilityStartTime(current_time);
+            ms.availabilityStartTime(current_time);
     }
     ogs_debug("MEDIA SEGS: %zu", media_segments.size());
     for (auto &sa : media_segments) {
@@ -106,7 +106,7 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
         media_segments.sort();
 
         ogs_debug("AVAILABLE SEGS: SORTED  %zu", media_segments.size());
-	for (auto &seg : media_segments) {
+        for (auto &seg : media_segments) {
             std::ostringstream oss;
             oss << seg;
             ogs_debug("    %s", oss.str().c_str());
@@ -130,11 +130,11 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
         }
         removeExtraPullObjectsEntry(first_media_segment);
 
-	try {
+        try {
             if (first_media_segment.segmentURL() == manifest_url) m_refreshMpd = true;
         } catch (std::domain_error &err) {
             ogs_error("Invalid Segment URL: %s", err.what());
-	    throw;
+            throw;
         }
         auto it = media_segments.begin();
         // Iterate from second element to find ones with the same availabilityStartTime() as the first and add them to result.
@@ -142,7 +142,7 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
             if (it->availabilityStartTime() != fetch_time) break;
             segment_url = it->segmentURL();
             existing_obj = object_store.findMetadataByURL(segment_url);
-	    removeExtraPullObjectsEntry(*it);
+            removeExtraPullObjectsEntry(*it);
             if (existing_obj) {
                 ingest_items.emplace_back(*existing_obj, it->availabilityEndTime());
             } else {

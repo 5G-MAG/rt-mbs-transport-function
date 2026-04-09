@@ -40,16 +40,16 @@ public:
         Request() = delete;
         Request(const Request&) = delete;
         Request(Request&&) = delete;
-	Request(struct MHD_Connection *mhd_connection, PushObjectIngester &poi);
+        Request(struct MHD_Connection *mhd_connection, PushObjectIngester &poi);
 
-	virtual ~Request() {};
+        virtual ~Request() {};
 
         Request &operator=(const Request&) = delete;
         Request &operator=(Request&&) = delete;
 
-	const std::string &method() const { return m_method; };
+        const std::string &method() const { return m_method; };
 
-	Request &method(const std::string &method) { m_method = method; return *this; };
+        Request &method(const std::string &method) { m_method = method; return *this; };
         Request &method(std::string &&method) { m_method = std::move(method); return *this; };
 
         const std::string &urlPath() const { return m_urlPath; };
@@ -59,7 +59,7 @@ public:
         const std::string &protocolVersion() const { return m_protocolVersion; };
         Request &protocolVersion(const std::string &proto_ver) { m_protocolVersion = proto_ver; return *this; };
 
-	Request &protocolVersion(std::string &&proto_ver) { m_protocolVersion = std::move(proto_ver); return *this;};
+        Request &protocolVersion(std::string &&proto_ver) { m_protocolVersion = std::move(proto_ver); return *this;};
 
         const std::optional<std::string> &etag() const { return m_etag; };
         Request &etag(std::nullopt_t) { m_etag.reset(); return *this; };
@@ -81,24 +81,24 @@ public:
         Request &lastModified(const time_type &last_modified) { m_lastModified = last_modified; return *this; };
         Request &lastModified(const std::optional<time_type> &last_modified) { m_lastModified = last_modified; return *this; };
 
-	std::optional<std::string> getHeader(const std::string &field) const;
+        std::optional<std::string> getHeader(const std::string &field) const;
         data_size_type bodySize() const { return m_totalBodySize; };
 
-	bool addBodyBlock(const data_type &body_block);
-	bool setError(unsigned int status_code = 0, const std::string &reason = std::string());
+        bool addBodyBlock(const data_type &body_block);
+        bool setError(unsigned int status_code = 0, const std::string &reason = std::string());
         void completed(struct MHD_Connection *connection, enum MHD_RequestTerminationCode term_code);
-	virtual void waitClose() {};
-	void requestHandler(struct MHD_Connection *connection);
-	typedef bool (*HeaderProcessingCallback)(const std::string &key, const std::string &value, void *data);
-	void processRequestHeader(HeaderProcessingCallback callback, void *data) const;
+        virtual void waitClose() {};
+        void requestHandler(struct MHD_Connection *connection);
+        typedef bool (*HeaderProcessingCallback)(const std::string &key, const std::string &value, void *data);
+        void processRequestHeader(HeaderProcessingCallback callback, void *data) const;
 
         virtual std::string reprString() const;
 
     protected:
-	//Request(const std::string &url, const std::string &method, const std::string &version);
-	virtual void processRequest();
+        //Request(const std::string &url, const std::string &method, const std::string &version);
+        virtual void processRequest();
 
-	struct MHD_Connection *m_mhdConnection;
+        struct MHD_Connection *m_mhdConnection;
         struct MHD_Response *m_mhdResponse;
 
     private:
@@ -120,7 +120,7 @@ public:
         std::string m_errorReason;
         bool m_noMoreBodyData;
 
-	std::unique_ptr<std::recursive_mutex> m_mutex;
+        std::unique_ptr<std::recursive_mutex> m_mutex;
         std::condition_variable_any m_condVar; /**< CondVar for new response content/eof */
     };
 

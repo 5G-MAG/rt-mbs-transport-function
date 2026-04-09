@@ -52,7 +52,7 @@ public:
     DistributionSessionEvents();
     DistributionSessionEvents(const DistributionSessionEvents &other);
     DistributionSessionEvents(DistributionSessionEvents &&other);
-    
+
     virtual ~DistributionSessionEvents();
 
     /* operators */

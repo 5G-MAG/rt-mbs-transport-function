@@ -58,7 +58,7 @@ DistributionSessionEvents::DistributionSessionEvents(DistributionSessionEvents &
     ,dataIngestSessionTerminated(std::move(other.dataIngestSessionTerminated))
 {
 }
-    
+
 DistributionSessionEvents::~DistributionSessionEvents()
 {
 }

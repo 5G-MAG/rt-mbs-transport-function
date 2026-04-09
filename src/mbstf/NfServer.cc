@@ -145,8 +145,8 @@ bool NfServer::__sendError(Open5GSSBIStream &stream, int status, const std::opti
         cJSON *copy_impl(copy.exportCJSON());
         problem_details = OpenAPI_problem_details_parseFromJSON(copy_impl);
         problem->invalid_params = problem_details->invalid_params;
-	problem_details->invalid_params = NULL;
-	OpenAPI_problem_details_free(problem_details);
+        problem_details->invalid_params = NULL;
+        OpenAPI_problem_details_free(problem_details);
         cJSON_Delete(copy_impl);
     }
 
@@ -155,7 +155,7 @@ bool NfServer::__sendError(Open5GSSBIStream &stream, int status, const std::opti
     }
 
     if (message) {
-	if (problem_type) {
+        if (problem_type) {
             problem->type = ogs_strdup(problem_type.value().c_str());
             ogs_expect(problem->type);
         }

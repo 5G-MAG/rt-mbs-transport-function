@@ -98,7 +98,7 @@ private:
     void _setSubscriptionId();
 
     std::weak_ptr<DistributionSession> m_distributionSession; /* Parent distribution session */
-    
+
     std::string m_subscriptionId;
     int m_eventTypes; /* ORed EventTypeBitMask */
     reftools::mbstf::DistSessionSubscription m_distSessionSubscription;

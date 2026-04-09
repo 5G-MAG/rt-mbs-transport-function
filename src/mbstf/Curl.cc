@@ -84,10 +84,10 @@ long Curl::__get(const std::string& url, std::chrono::milliseconds timeout, cons
     if (m_curl) {
         curl_easy_setopt(m_curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(m_curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2);
-	curl_easy_setopt(m_curl, CURLOPT_CONNECTTIMEOUT_MS, 500l);
+        curl_easy_setopt(m_curl, CURLOPT_CONNECTTIMEOUT_MS, 500l);
         curl_easy_setopt(m_curl, CURLOPT_TIMEOUT_MS, timeout.count());
         curl_easy_setopt(m_curl, CURLOPT_FOLLOWLOCATION, 1L);
-	curl_easy_setopt(m_curl, CURLOPT_HEADERDATA, this);
+        curl_easy_setopt(m_curl, CURLOPT_HEADERDATA, this);
         curl_easy_setopt(m_curl, CURLOPT_HEADERFUNCTION, headerCallback);
         curl_easy_setopt(m_curl, CURLOPT_WRITEDATA, &m_receivedData);
         curl_easy_setopt(m_curl, CURLOPT_WRITEFUNCTION, writeCallback);
@@ -115,15 +115,15 @@ long Curl::__get(const std::string& url, std::chrono::milliseconds timeout, cons
             hdrs_list = nullptr;
         }
         if (res == CURLE_OK) {
-	    struct curl_header *type;
+            struct curl_header *type;
             CURLHcode h;
 
             h = curl_easy_header(m_curl, "ETag", 0, CURLH_HEADER, -1, &type);
             if (h == CURLHE_OK && type) {
                 m_etag = std::string(type->value);
-		ogs_debug("ETag: %s", m_etag.c_str());
+                ogs_debug("ETag: %s", m_etag.c_str());
             } else {
-		ogs_debug("ETag header not found.");
+                ogs_debug("ETag header not found.");
             }
 
             h = curl_easy_header(m_curl, "Last-Modified", 0, CURLH_HEADER, -1, &type);
@@ -144,11 +144,11 @@ long Curl::__get(const std::string& url, std::chrono::milliseconds timeout, cons
             }
 
             // Get the Content-Type header
-	    char *ct = NULL;
-	    res = curl_easy_getinfo(m_curl, CURLINFO_CONTENT_TYPE, &ct);
-	    if (!res && ct) {
-	        m_contentType = std::string(ct);
-	    }
+            char *ct = NULL;
+            res = curl_easy_getinfo(m_curl, CURLINFO_CONTENT_TYPE, &ct);
+            if (!res && ct) {
+                m_contentType = std::string(ct);
+            }
 
             char *redir_url = NULL;
             res = curl_easy_getinfo(m_curl, CURLINFO_EFFECTIVE_URL, &redir_url);
@@ -220,7 +220,7 @@ unsigned long Curl::getCacheControlMaxAge() const
     return m_cacheControlMaxAge;
 }
 
-unsigned long Curl::getAge() const 
+unsigned long Curl::getAge() const
 {
     return m_age;
 }
@@ -285,9 +285,9 @@ void Curl::processHeaderLine(std::string_view &header_line)
 
             // Look for the "max-age=" directive within the header line.
             auto pos = header_line.find("max-age=");
-	    if (pos == std::string_view::npos) {
-	        pos = header_line.find("Max-age=");
-	    }
+            if (pos == std::string_view::npos) {
+                pos = header_line.find("Max-age=");
+            }
             if (pos != std::string_view::npos) {
                 pos += 8; // Move past "max-age="
                 // Find where the numeric value ends (comma, space, or end-of-line)

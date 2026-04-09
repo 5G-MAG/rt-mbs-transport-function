@@ -101,7 +101,7 @@ public:
     const DistributionSessionSubscription &getSubscription(const std::string &subscription_id) const;
     void updateSubscription(const std::string &subscription_id, fiveg_mag_reftools::CJson &json, bool as_request=true);
     void removeSubscription(const std::string &subscription_id);
-    
+
     const DistributionSessionEvents &eventTimestamps() const { return m_eventTimestamps; };
 
     void haveEmptyQueue();

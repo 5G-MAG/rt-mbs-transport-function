@@ -68,15 +68,15 @@ public:
         : SubscriptionService(), m_objectStore(objectStore), m_controller(controller), m_workerThread(), m_workerCancel(false) {}
 
     void abort() {
-	m_workerCancel = true;
+        m_workerCancel = true;
         cancelWorker();
         if (m_workerThread.get_id() != std::this_thread::get_id() && m_workerThread.joinable()) {
-	    m_workerThread.join();
+            m_workerThread.join();
         }
     }
 
     virtual ~ObjectIngester() {
-	abort();
+        abort();
     }
 
     bool workerCancelled() const { return m_workerCancel; };
