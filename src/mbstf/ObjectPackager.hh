@@ -178,9 +178,7 @@ protected:
     boost::asio::io_service m_io;
     uint32_t m_queuedToi;
     bool m_queued;
-    bool m_deactivating;
-    std::recursive_mutex m_deactivateMutex;
-    std::condition_variable_any m_deactivateCond;
+    std::atomic_bool m_deactivating;
     std::string m_queuedObjectId;
 
 private:

@@ -45,7 +45,7 @@ public:
 
         IngestItem() = delete;
         IngestItem(const ObjectStore::Metadata &object_meta, const std::optional<time_type> &download_deadline = std::nullopt);
-	IngestItem(const std::string &object_id, const std::string &url, const std::string &acquisition_id,
+        IngestItem(const std::string &object_id, const std::string &url, const std::string &acquisition_id,
                    const std::optional<std::string> &obj_ingest_base_url = std::nullopt,
                    const std::optional<std::string> &obj_distribution_base_url = std::nullopt,
                    const std::optional<time_type> &download_deadline = std::nullopt);
@@ -70,7 +70,7 @@ public:
 
         bool hasDeadline() const { return m_deadline.has_value(); };
         const std::optional<time_type> &deadline() const { return m_deadline; };
-	const time_type &getDeadline() const { return m_deadline.value(); };
+        const time_type &getDeadline() const { return m_deadline.value(); };
 
         time_type deadline(const time_type &default_deadline) const { return m_deadline.value_or(default_deadline); };
         IngestItem &deadline(std::nullopt_t) { m_deadline.reset(); return *this; };
@@ -80,10 +80,31 @@ public:
     private:
         std::string m_objectId;
         std::string m_url;
-	std::string m_acquisitionId;
+        std::string m_acquisitionId;
         std::optional<std::string> m_objIngestBaseUrl;
         std::optional<std::string> m_objDistributionBaseUrl;
         std::optional<time_type> m_deadline;
+    };
+
+    class PullIngestFailedEvent : public ObjectIngester::IngestFailedEvent {
+    public:
+        PullIngestFailedEvent(const PullObjectIngester::IngestItem &item, const std::string &url, ObjectIngester::IngestFailedEvent::FailureType fail_type) : ObjectIngester::IngestFailedEvent(url, fail_type), m_item(item) {};
+        PullIngestFailedEvent(const PullIngestFailedEvent &other) : ObjectIngester::IngestFailedEvent(other), m_item(other.m_item) {};
+        PullIngestFailedEvent(PullIngestFailedEvent &&other) : ObjectIngester::IngestFailedEvent(std::move(other)), m_item(std::move(other.m_item)) {};
+
+        virtual ~PullIngestFailedEvent() {};
+
+        PullIngestFailedEvent &operator=(const PullIngestFailedEvent &other) = delete;
+        PullIngestFailedEvent &operator=(PullIngestFailedEvent &&other) = delete;
+
+        const PullObjectIngester::IngestItem &item() const { return m_item; };
+
+        virtual Event clone() const { return PullIngestFailedEvent(*this); };
+        virtual Event *newClone() const { return new PullIngestFailedEvent(*this); };
+        virtual std::string reprString() const;
+
+    private:
+        PullObjectIngester::IngestItem m_item;
     };
 
     PullObjectIngester() = delete;
@@ -113,6 +134,7 @@ public:
 protected:
     virtual void doObjectIngest();
     virtual void cancelWorker() { m_ingestItemsCondVar.notify_all(); };
+    void emitObjectPullIngestFailedEvent(const IngestItem &item, const std::string &fetch_url, IngestFailedEvent::FailureType fail_type);
 
 private:
     void sortListByPolicy();

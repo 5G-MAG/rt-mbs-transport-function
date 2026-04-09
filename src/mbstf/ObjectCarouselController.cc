@@ -39,11 +39,14 @@
 #include "utilities.hh"
 #include "openapi/model/DistSessionState.h"
 #include "openapi/model/Object.h"
+#include "openapi/model/ProblemCause.hh"
 
 #include "ObjectCarouselController.hh"
 
 using reftools::mbstf::DistSessionState;
 using reftools::mbstf::Object;
+using fiveg_mag_reftools::ModelException;
+using fiveg_mag_reftools::ProblemCause;
 
 MBSTF_NAMESPACE_START
 
@@ -111,36 +114,39 @@ void ObjectCarouselController::processEvent(Event &event, SubscriptionService &e
         ObjectStore::ObjectChangedEvent &obj_added_event = dynamic_cast<ObjectStore::ObjectChangedEvent&>(event);
         std::string object_id = obj_added_event.objectId();
         ogs_debug("%s with ID: %s", event.eventName().c_str(), object_id.c_str());
-        const std::shared_ptr<ObjectStore::Object> &object = objectStore()[object_id];
-        ogs_debug("Object location: %s", object->second.getFetchedUrl().c_str());
-        object->second.keepAfterSend(true); /* keep all objects, we'll manually remove if the carousel changes */
-	if(check_if_object_added_is_manifest(object, getManifestUrl())) {
-	    if(manifestHandler()) {
-	        try {
-	            if(!manifestHandler()->update(object)) {
-		        ogs_error("Failed to update Manifest");
-			unsetObjectListPackager();
-			event.stopProcessing();
-			return;
-		    }
-		    startWorker();
-	        } catch (std::exception &ex) {
-                    ogs_error("Invalid Manifest update: %s", ex.what());
-		    unsetObjectListPackager();
-		    event.stopProcessing();
-		    return;
+        try {
+            const std::shared_ptr<ObjectStore::Object> &object = objectStore()[object_id];
+            ogs_debug("Object location: %s", object->second.getFetchedUrl().c_str());
+            object->second.keepAfterSend(true); /* keep all objects, we'll manually remove if the carousel changes */
+            if (check_if_object_added_is_manifest(object, getManifestUrl())) {
+                if (manifestHandler()) {
+                    try {
+                        if (!manifestHandler()->update(object)) {
+                            ogs_error("Failed to update Manifest");
+                            unsetObjectListPackager();
+                            event.stopProcessing();
+                            return;
+                        }
+                        startWorker();
+                    } catch (std::exception &ex) {
+                        ogs_error("Invalid Manifest update: %s", ex.what());
+                        unsetObjectListPackager();
+                        event.stopProcessing();
+                        return;
+                    }
+                } else {
+                    std::shared_ptr<ManifestHandler> manifest_handler(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL"));
+                    if (!manifest_handler) {
+                        throw std::runtime_error("Could not find suitable manifest handler");
+                    }
+                    manifestHandler(std::move(manifest_handler));
                 }
-
-	    } else {
-		std::shared_ptr<ManifestHandler> manifest_handler(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL"));
-                if (!manifest_handler) {
-                    throw std::runtime_error("Could not find suitable manifest handler");
-                }
-                manifestHandler(std::move(manifest_handler));
+            } else if (check_if_object_is_active_in_manifest(object, manifestHandler())) {
+                finish_request_in_manifest_handler(object, manifestHandler());
+                sendToPackager(object_id);
             }
-	} else if (check_if_object_is_active_in_manifest(object, manifestHandler())) {
-            finish_request_in_manifest_handler(object, manifestHandler());
-            sendToPackager(object_id);
+        } catch (std::out_of_range &ex) {
+            ogs_error("Object %s is not in the ObjectStore", object_id.c_str());
         }
     }
     ObjectManifestController::processEvent(event, event_service);
@@ -236,6 +242,7 @@ static void validate_distribution_session(DistributionSession &distribution_sess
     if (distribution_session.getObjectDistributionOperatingMode() != "CAROUSEL") {
         throw std::logic_error("Expected objDistributionOperatingMode to be set to CAROUSEL.");
     }
+    ObjectController::validateDistributionSession(distribution_session);
 }
 
 static bool check_if_object_added_is_manifest(const std::shared_ptr<ObjectStore::Object> &object, std::string &manifest_url)

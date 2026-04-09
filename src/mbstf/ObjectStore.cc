@@ -219,12 +219,12 @@ void ObjectStore::updateMetadata(const std::string& object_id, Metadata &&metada
     }
 }
 
-void ObjectStore::updateError(const std::string& object_id, int response_code, bool synchronous_event)
+void ObjectStore::updateError(const std::string& object_id, int response_code, const std::string &url, bool synchronous_event)
 {
     /* TODO: Evict Object? */
 
     /* send event */
-    std::shared_ptr<Event> event(new ObjectStore::ObjectUpdateErrorEvent(object_id, response_code));
+    std::shared_ptr<Event> event(new ObjectStore::ObjectUpdateErrorEvent(object_id, response_code, url));
     if (synchronous_event) {
         sendEventSynchronous(*event);
     } else {
@@ -299,7 +299,7 @@ bool ObjectStore::removeObject(const std::string& object_id) {
     auto it = m_store.find(object_id);
     if (it != m_store.end()) {
         m_store.erase(it);
-	return true;
+        return true;
     } else {
         return false;
     }

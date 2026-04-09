@@ -185,7 +185,10 @@ bool ObjectManifestHandler::update(const std::shared_ptr<ObjectStore::Object> &n
         if (new_it == new_objects.end()) {
             /* object removed from carousel */
             auto &object_store = m_controller->objectStore();
-            object_store.removeObject(object_store.findMetadataByURL(old_it->value()->getLocator())->objectId());
+            auto *metadata = object_store.findMetadataByURL(old_it->value()->getLocator());
+            if (metadata) {
+                object_store.removeObject(metadata->objectId());
+            }
             m_objectMetadataCache.erase(old_it->value().get());
             m_objectManifest.removeObjects(*old_it);
         } else {
@@ -373,7 +376,7 @@ static ObjectManifest ingest_manifest(const std::shared_ptr<ObjectStore::Object>
         new_metadata.mediaType() != "application/3gpp-mbs-object-manifest+json;version=\"Rel17\""){
          throw std::invalid_argument("Does not look like an ObjectManifest as the media type is invalid. Expected media type: application/3gpp-mbs-object-manifest+json;version=\"Rel17\"");
     }
-    
+
     try {
         auto json = CJson::parse(std::string(reinterpret_cast<const char*>(new_manifest->first.data()), new_manifest->first.size()));
         return ObjectManifest(json, true);

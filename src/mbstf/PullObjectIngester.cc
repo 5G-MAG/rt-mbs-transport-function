@@ -35,6 +35,8 @@ using namespace std::literals::chrono_literals;
 
 MBSTF_NAMESPACE_START
 
+/***** PullObjectIngester::IngestItem methods *****/
+
 PullObjectIngester::IngestItem::IngestItem(const ObjectStore::Metadata &object_meta,
                                            const std::optional<time_type> &download_deadline)
     :m_objectId(object_meta.objectId())
@@ -75,6 +77,14 @@ PullObjectIngester::IngestItem::IngestItem(IngestItem &&other)
     ,m_deadline(std::move(other.m_deadline))
 {
 }
+
+/***** PullObjectIngester::PullIngestFailedEvent methods *****/
+
+std::string PullObjectIngester::PullIngestFailedEvent::reprString() const {
+    return std::format("PullIngestFailedEvent(<item>, \"{}\", {})", url(), static_cast<int>(failureType()));
+}
+
+/***** PullObjectIngester methods *****/
 
 PullObjectIngester::~PullObjectIngester() {abort();}
 
@@ -182,8 +192,8 @@ void PullObjectIngester::doObjectIngest() {
         if (!m_fetchList.empty()) {
             // Make the GET request and get the number of bytes received
             auto item = m_fetchList.front();
-	    m_fetchList.pop_front();
-	    m_ingestItemsMutex->unlock(); // temp unlock while we fetch
+            m_fetchList.pop_front();
+            m_ingestItemsMutex->unlock(); // temp unlock while we fetch
             ObjectStore::Metadata *old_meta = nullptr;
             try {
                 auto &meta = objectStore().getMetadata(item.objectId());
@@ -197,7 +207,7 @@ void PullObjectIngester::doObjectIngest() {
             } catch (const std::out_of_range &ex) {
                 ogs_debug("Fetching %s...", item.url().c_str());
             }
-           
+
             const auto &deadline = item.deadline();
             std::chrono::milliseconds timeout(10000);
             if (deadline) {
@@ -221,38 +231,55 @@ void PullObjectIngester::doObjectIngest() {
                 ogs_debug("Received %ld bytes of data", bytesReceived);
                 std::string fetched_url = URI(m_curl->getPermanentRedirectUrl()).resolveUsingBaseURLs(std::list<BaseURL>{BaseURL(item.url())}).str();
                 if (fetched_url.empty()) fetched_url = item.url();
-	        ObjectStore::Metadata metadata(item.objectId(), m_curl->getContentType(), item.url(), fetched_url, item.acquisitionId(), m_curl->getLastModified(), item.objIngestBaseUrl(), item.objDistributionBaseUrl());
+                ObjectStore::Metadata metadata(item.objectId(), m_curl->getContentType(), item.url(), fetched_url, item.acquisitionId(), m_curl->getLastModified(), item.objIngestBaseUrl(), item.objDistributionBaseUrl());
+                /* re-get metadata from ObjectStore as it may have changed */
+                try {
+                    auto &meta = objectStore().getMetadata(item.objectId());
+                    old_meta = &meta;
+                } catch (const std::out_of_range &ex) {
+                    old_meta = nullptr;
+                }
                 if (old_meta) metadata.fluteFileDescription(old_meta->fluteFileDescription());
                 unsigned long max_age = m_curl->getCacheControlMaxAge();
                 unsigned long current_age = m_curl->getAge();
-	        metadata.cacheExpires(max_age ? std::chrono::system_clock::now() + std::chrono::seconds(max_age) - std::chrono::seconds(current_age) : std::chrono::system_clock::now() + std::chrono::seconds(ObjectStore::Metadata::cacheExpiry()));
+                metadata.cacheExpires(max_age ? std::chrono::system_clock::now() + std::chrono::seconds(max_age) - std::chrono::seconds(current_age) : std::chrono::system_clock::now() + std::chrono::seconds(ObjectStore::Metadata::cacheExpiry()));
                 const std::string& etag = m_curl->getEtag();
-	        if (!etag.empty()) {
+                if (!etag.empty()) {
                     metadata.entityTag(etag);
-	        }
+                }
                 auto response_code = m_curl->getResponseCode();
                 if (response_code >= 200 && response_code <= 299) {
                     /* received object - store it */
                     this->objectStore().addObject(item.objectId(), std::move(m_curl->getData()), std::move(metadata), true);
                 } else if (response_code == 304) {
                     /* Not Modified - just update metadata */
-                    if (old_meta) metadata.mediaType(old_meta->mediaType()); // 304 may not have Content-Type due to no content
-                    this->objectStore().updateMetadata(item.objectId(), std::move(metadata), true);
+                    if (old_meta) {
+                        metadata.mediaType(old_meta->mediaType()); // 304 may not have Content-Type due to no content
+                        this->objectStore().updateMetadata(item.objectId(), std::move(metadata), true);
+                    }
                 } else {
                     /* error response - do we throw the object away? */
-                    this->objectStore().updateError(item.objectId(), response_code, true);
+                    ogs_debug("Fetch error %i", response_code);
+                    emitObjectPullIngestFailedEvent(item, fetched_url, (response_code >= 400 && response_code <= 499)?ObjectIngester::IngestFailedEvent::CLIENT_ERROR:ObjectIngester::IngestFailedEvent::SERVER_ERROR);
+                    this->objectStore().updateError(item.objectId(), response_code, item.url(), false);
                 }
             } else if (bytesReceived == -1) {
                 ogs_error("Request timed out.");
-                emitObjectIngestFailedEvent(item.url(), ObjectIngester::IngestFailedEvent::TIMED_OUT);
+                emitObjectPullIngestFailedEvent(item, item.url(), ObjectIngester::IngestFailedEvent::TIMED_OUT);
             } else {
                 ogs_error("An error occurred while fetching the data.");
-                emitObjectIngestFailedEvent(item.url(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
+                emitObjectPullIngestFailedEvent(item, item.url(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
             }
             m_ingestItemsMutex->lock();
             if (m_fetchList.empty()) sendEventAsynchronous(new ObjectPullQueueExhaustedEvent);
-	}
+        }
     }
+}
+
+void PullObjectIngester::emitObjectPullIngestFailedEvent(const PullObjectIngester::IngestItem &item, const std::string &fetch_url,
+                                                         IngestFailedEvent::FailureType fail_type)
+{
+    sendEventAsynchronous(PullIngestFailedEvent(item, fetch_url, fail_type));
 }
 
 MBSTF_NAMESPACE_STOP

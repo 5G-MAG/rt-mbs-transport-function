@@ -35,7 +35,7 @@ public:
     ObjectController() = delete;
     ObjectController(DistributionSession &distributionSession)
         :Controller(distributionSession)
-	,Subscriber()
+        ,Subscriber()
         ,m_objectStore(new ObjectStore(*this))
         ,m_pullIngesters()
         ,m_pushIngester()
@@ -84,6 +84,8 @@ public:
     virtual void activateOutput();          /* Active state for DistSession */
     virtual void deactivateOutput();        /* Deactivating state for DistSession */
     virtual void flushPackagerQueue();      /* Ensure there are no objects queued for packaging */
+
+    static void validateDistributionSession(DistributionSession &distribution_session);
 
 protected:
     const std::shared_ptr<PullObjectIngester> &addPullObjectIngester(const std::shared_ptr<PullObjectIngester> &pull_obj_ingester);

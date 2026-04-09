@@ -24,11 +24,11 @@
 
 #include "common.hh"
 #include "ObjectPackager.hh"
+#include "ObjectStore.hh"
 
 MBSTF_NAMESPACE_START
 
 class ObjectController;
-class ObjectStore;
 
 class ObjectListPackager : public ObjectPackager {
 public:
@@ -36,15 +36,21 @@ public:
 
     class PackageItem {
     public:
-        PackageItem() = delete;
-        PackageItem(const std::string &object_id, const std::optional<time_type> &deadline = std::nullopt);
+        PackageItem();
+        PackageItem(const std::shared_ptr<ObjectStore::Object> &object, const std::optional<time_type> &deadline = std::nullopt);
         PackageItem(const PackageItem &other);
         PackageItem(PackageItem &&other);
         virtual ~PackageItem() {};
 
-        const std::string &objectId() const { return m_objectId; }
-        PackageItem &objectId(const std::string &object_id) { m_objectId = object_id; return *this; }
-        PackageItem &objectId(std::string &&object_id) { m_objectId = std::move(object_id); return *this; }
+        PackageItem &operator=(const PackageItem &other);
+        PackageItem &operator=(PackageItem &&other);
+
+        operator bool() const { return !!m_object; };
+
+        const std::shared_ptr<ObjectStore::Object> &object() { return m_object; };
+        std::shared_ptr<const ObjectStore::Object> object() const { return m_object; };
+        PackageItem &object(const std::shared_ptr<ObjectStore::Object> &object) { m_object = object; return *this; };
+        PackageItem &object(std::shared_ptr<ObjectStore::Object> &&object) { m_object = std::move(object); return *this; };
 
         bool hasDeadline() const { return m_deadline.has_value(); }
         const std::optional<time_type> &deadline() const { return m_deadline; }
@@ -54,7 +60,7 @@ public:
         PackageItem &deadline(time_type &&deadline) { m_deadline = std::move(deadline); return *this; }
 
     private:
-        std::string m_objectId;
+        std::shared_ptr<ObjectStore::Object> m_object;
         std::optional<time_type> m_deadline;
     };
 
@@ -87,9 +93,11 @@ protected:
 private:
     void sortListByPolicy();
     void objectSendCompletion(std::string &object_id, bool queue_empty);
+
+    std::unique_ptr<std::recursive_mutex> m_packageItemsMutex;
     std::list<PackageItem> m_packageItems;
     std::optional<boost::asio::ip::udp::endpoint> m_tunnelEndpoint;
-    std::unique_ptr<std::recursive_mutex> m_packageItemsMutex;
+    std::shared_ptr<ObjectStore::Object> m_currentObject;
 };
 
 MBSTF_NAMESPACE_STOP

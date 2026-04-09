@@ -23,11 +23,14 @@
 #include "ObjectPackager.hh"
 #include "PullObjectIngester.hh"
 #include "PushObjectIngester.hh"
+#include "openapi/model/CreateReqData.h"
 #include "openapi/model/DistSessionState.h"
 
 #include "ObjectController.hh"
 
 using reftools::mbstf::DistSessionState;
+using fiveg_mag_reftools::ModelException;
+using fiveg_mag_reftools::ProblemCause;
 
 MBSTF_NAMESPACE_START
 
@@ -73,18 +76,18 @@ const std::shared_ptr<PushObjectIngester> &ObjectController::pushObjectIngester(
 void ObjectController::processEvent(Event &event, SubscriptionService &event_service)
 {
     if (event.eventName() == "ObjectSendCompleted") {
-	ObjectPackager::ObjectSendCompleted &objSendEvent = dynamic_cast<ObjectPackager::ObjectSendCompleted&>(event);
+        ObjectPackager::ObjectSendCompleted &objSendEvent = dynamic_cast<ObjectPackager::ObjectSendCompleted&>(event);
         std::string object_id = objSendEvent.objectId();
         ogs_info("Object [%s] sent", object_id.c_str());
 
-	const ObjectStore::Metadata &metadata = objectStore().getMetadata(object_id);
+        const ObjectStore::Metadata &metadata = objectStore().getMetadata(object_id);
 
-	if(!metadata.keepAfterSend()) {
+        if(!metadata.keepAfterSend()) {
 
-	    objectStore().deleteObject(object_id);
-	} else {
+            objectStore().deleteObject(object_id);
+        } else {
             ogs_debug("Keeping object [%s] in object store after sending...", object_id.c_str());
-	}
+        }
 
         if (objSendEvent.queueEmpty()) {
             distributionSession().haveEmptyQueue();
@@ -167,6 +170,26 @@ void ObjectController::deactivateOutput()
 void ObjectController::flushPackagerQueue()
 {
     if (m_packager) m_packager->flushQueue();
+}
+
+void ObjectController::validateDistributionSession(DistributionSession &distribution_session)
+{
+    const auto &create_req_data = distribution_session.distributionSessionReqData();
+    if (!create_req_data) {
+        throw ModelException("CreateReqData missing", "ObjectController", std::string(), ProblemCause::MANDATORY_IE_MISSING);
+    }
+    const auto &dist_session = create_req_data->getDistSession();
+    if (!dist_session) {
+        throw ModelException("distSession missing", "ObjectController", "distSession", ProblemCause::MANDATORY_IE_MISSING);
+    }
+    const auto &up_traffic_flow_info = dist_session->getUpTrafficFlowInfo();
+    if (!up_traffic_flow_info || !up_traffic_flow_info.value()) {
+        throw ModelException("Object distribution operating mode requires upTrafficFlowInfo", "ObjectController", "distSession.upTrafficFlowInfo", ProblemCause::MANDATORY_IE_MISSING);
+    }
+    const auto &obj_distr_data = dist_session->getObjDistributionData();
+    if (!obj_distr_data || !obj_distr_data.value()) {
+        throw ModelException("Object distribution operating mode requires objDistributionData", "ObjectController", "distSession.objDistributionData", ProblemCause::MANDATORY_IE_MISSING);
+    }
 }
 
 MBSTF_NAMESPACE_STOP

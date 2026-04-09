@@ -89,8 +89,8 @@ void ObjectPackager::activate()
 
 bool ObjectPackager::deactivate()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_deactivateMutex);
     m_deactivating = true;
+    std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
     ogs_debug("FLUTE Transmitter has %zu files left", m_transmitter?m_transmitter->number_of_files():0);
     if (m_transmitter && m_transmitter->number_of_files() == 0) {
         ogs_debug("Deactivating FLUTE stream, no files to purge");

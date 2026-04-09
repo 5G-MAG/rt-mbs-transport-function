@@ -36,10 +36,13 @@
 #include "SubscriptionService.hh"
 #include "utilities.hh"
 #include "openapi/model/DistSessionState.h"
+#include "openapi/model/ProblemCause.hh"
 
 #include "ObjectListController.hh"
 
 using reftools::mbstf::DistSessionState;
+using fiveg_mag_reftools::ModelException;
+using fiveg_mag_reftools::ProblemCause;
 
 MBSTF_NAMESPACE_START
 
@@ -76,15 +79,15 @@ void ObjectListController::setObjectPackager() {
     packager(new ObjectListPackager(objectStore(), *this, dest_ip_addr, rate_limit, mtu, port, tunnel_addr, tunnel_port));
     // Send all objects that are in the ObjectStore
     for (const auto &[obj_id, object] : obj_list) {
-        sendToPackager(obj_id);
+        sendToPackager(object);
     }
 }
 
-void ObjectListController::sendToPackager(const std::string &objectId)
+void ObjectListController::sendToPackager(const std::shared_ptr<ObjectStore::Object> &object)
 {
-    ObjectListPackager::PackageItem item(objectId);
     auto packager = getObjectListPackager();
     if (packager) {
+        ObjectListPackager::PackageItem item(object);
         packager->add(item);
     }
 }
@@ -116,7 +119,7 @@ void ObjectListController::processEvent(Event &event, SubscriptionService &event
         std::string object_id = obj_changed_event.objectId();
         ogs_info("%s with ID: %s", event.eventName().c_str(), object_id.c_str());
 
-        sendToPackager(object_id);
+        sendToPackager(objectStore()[object_id]);
     } else if (event.eventName() == "ObjectPushStart") {
         PushObjectIngester::ObjectPushEvent &obj_push_event = dynamic_cast<PushObjectIngester::ObjectPushEvent&>(event);
         const PushObjectIngester::Request &request(obj_push_event.request());
@@ -255,35 +258,36 @@ namespace {
 static const struct init { init() {ControllerFactory::registerController(new ControllerConstructor<ObjectListController>);};} g_init;
 }
 
-static bool validate_push_url(DistributionSession &distributionSession, const std::string &url)
+static bool validate_push_url(DistributionSession &distribution_session, const std::string &url)
 {
-    std::optional<std::string> object_acquisition_push_id = distributionSession.getObjectAcquisitionPushId();
+    std::optional<std::string> object_acquisition_push_id = distribution_session.getObjectAcquisitionPushId();
     if (object_acquisition_push_id.has_value()) {
-	std::string push_id = object_acquisition_push_id.value();
-	std::string url_path(url);
-	if ((push_id.front() == '/' && url_path.front() != '/')) {
-	    url_path = '/' + url_path;
-	} else if ((url_path.front() == '/' && push_id.front() != '/')) {
-	    push_id = '/' + push_id;
-	}
-	if(push_id == url_path) {
-	    return true;
-	} else {
-	    return false;
-	}
+        std::string push_id = object_acquisition_push_id.value();
+        std::string url_path(url);
+        if ((push_id.front() == '/' && url_path.front() != '/')) {
+            url_path = '/' + url_path;
+        } else if ((url_path.front() == '/' && push_id.front() != '/')) {
+            push_id = '/' + push_id;
+        }
+        if(push_id == url_path) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     return true;
 }
 
-static int validate_distribution_session(DistributionSession &distributionSession)
+static int validate_distribution_session(DistributionSession &distribution_session)
 {
-    if (distributionSession.getObjectAcquisitionMethod() == "PUSH" && distributionSession.getObjectDistributionOperatingMode() == "SINGLE") {
-        std::optional<std::string> object_acquisition_push_id = distributionSession.getObjectAcquisitionPushId();
+    if (distribution_session.getObjectAcquisitionMethod() == "PUSH" && distribution_session.getObjectDistributionOperatingMode() == "SINGLE") {
+        std::optional<std::string> object_acquisition_push_id = distribution_session.getObjectAcquisitionPushId();
         if (object_acquisition_push_id.has_value()) {
             return 0;
         }
     }
+    ObjectController::validateDistributionSession(distribution_session);
 
     return 1;
 }

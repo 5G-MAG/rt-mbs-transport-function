@@ -125,31 +125,35 @@ public:
     class ObjectUpdateErrorEvent : public ObjectChangedEvent {
     public:
         constexpr static const char *event_name = "ObjectUpdateError";
-        ObjectUpdateErrorEvent(const std::string& object_id, int response_code) :ObjectChangedEvent(event_name, object_id), m_responseCode(response_code) {};
-        ObjectUpdateErrorEvent(const ObjectUpdateErrorEvent &other) :ObjectChangedEvent(other), m_responseCode(other.m_responseCode) {};
-        ObjectUpdateErrorEvent(ObjectUpdateErrorEvent &&other) :ObjectChangedEvent(std::move(other)), m_responseCode(other.m_responseCode) {};
+        ObjectUpdateErrorEvent(const std::string& object_id, int response_code, const std::string &url) :ObjectChangedEvent(event_name, object_id), m_responseCode(response_code), m_url(url) {};
+        ObjectUpdateErrorEvent(const ObjectUpdateErrorEvent &other) :ObjectChangedEvent(other), m_responseCode(other.m_responseCode), m_url(other.m_url) {};
+        ObjectUpdateErrorEvent(ObjectUpdateErrorEvent &&other) :ObjectChangedEvent(std::move(other)), m_responseCode(other.m_responseCode), m_url(std::move(other.m_url)) {};
 
         virtual ~ObjectUpdateErrorEvent() {};
 
         ObjectUpdateErrorEvent &operator=(const ObjectUpdateErrorEvent &other) {
             ObjectChangedEvent::operator=(other);
             m_responseCode = other.m_responseCode;
+            m_url = other.m_url;
             return *this;
         };
         ObjectUpdateErrorEvent &operator=(ObjectUpdateErrorEvent &&other) {
             ObjectChangedEvent::operator=(std::move(other));
             m_responseCode = other.m_responseCode;
+            m_url = std::move(other.m_url);
             return *this;
         };
 
         int responseCode() const { return m_responseCode; };
+        const std::string &url() const { return m_url; };
 
         virtual Event clone() const { return ObjectUpdateErrorEvent(*this); };
         virtual Event *newClone() const { return new ObjectUpdateErrorEvent(*this); };
-        virtual std::string reprString() const { return std::format("ObjectUpdateErrorEvent(\"{}\", {})", objectId(), m_responseCode); };
+        virtual std::string reprString() const { return std::format("ObjectUpdateErrorEvent(\"{}\", {}, \"{}\")", objectId(), m_responseCode, m_url); };
 
     private:
         int m_responseCode;
+        std::string m_url;
     };
 
     class Metadata {
@@ -193,8 +197,8 @@ public:
         Metadata &mediaType(const std::string &media_type) {m_mediaType = media_type; return *this;};
         Metadata &mediaType(std::string &&media_type) {m_mediaType = std::move(media_type); return *this;};
 
-	bool hasExpiryTime() const { return m_cacheExpires.has_value(); };
-	const datetime_type &ExpiryTime() const { return m_cacheExpires.value();};
+        bool hasExpiryTime() const { return m_cacheExpires.has_value(); };
+        const datetime_type &ExpiryTime() const { return m_cacheExpires.value();};
         const std::optional<datetime_type>& cacheExpires() const { return m_cacheExpires;};
         std::optional<datetime_type>& cacheExpires(const datetime_type &cacheExpires) {
             m_cacheExpires = cacheExpires;
@@ -209,7 +213,7 @@ public:
 
         Metadata &entityTag(const std::optional<std::string>& entityTag) {m_entityTag = entityTag; if (m_fileDescription && entityTag) m_fileDescription->set_etag(entityTag.value()); return *this;};
 
-	Metadata &keepAfterSend(bool keep_after_send) {m_keepAfterSend = keep_after_send; return *this;};
+        Metadata &keepAfterSend(bool keep_after_send) {m_keepAfterSend = keep_after_send; return *this;};
         bool keepAfterSend() const { return m_keepAfterSend;};
 
         const std::optional<std::string> &objIngestBaseUrl() const { return m_objIngestBaseUrl;};
@@ -234,15 +238,15 @@ public:
         };
         Metadata &objDistributionBaseUrl(std::nullopt_t) {m_objDistributionBaseUrl.reset(); return *this;};
 
-	const datetime_type &receivedTime() const { return m_receivedTime;};
+        const datetime_type &receivedTime() const { return m_receivedTime;};
         Metadata &receivedTime(const datetime_type &val) { m_receivedTime = val; return *this; };
         Metadata &receivedTime(datetime_type &&val) { m_receivedTime = std::move(val); return *this; };
 
-	const datetime_type &created() const { return m_created;};
+        const datetime_type &created() const { return m_created;};
         Metadata &created(const datetime_type &val) { m_created = val; return *this; };
         Metadata &created(datetime_type &&val) { m_created = std::move(val); return *this; };
 
-	const datetime_type &modified() const { return m_modified;};
+        const datetime_type &modified() const { return m_modified;};
         Metadata &modified(const datetime_type &val) { m_modified = val; return *this; };
         Metadata &modified(datetime_type &&val) { m_modified = std::move(val); return *this; };
 
@@ -261,12 +265,12 @@ public:
         };
 
     private:
-	std::string m_objectId;
+        std::string m_objectId;
         std::string m_mediaType;
         std::string m_originalUrl;
         std::string m_fetchedUrl;
         std::string m_acquisitionId;
-	bool m_keepAfterSend;
+        bool m_keepAfterSend;
         std::optional<std::string> m_objIngestBaseUrl;
         std::optional<std::string> m_objDistributionBaseUrl;
         std::optional<std::string> m_entityTag;
@@ -290,7 +294,7 @@ public:
 
     void addObject(const std::string& object_id, ObjectData &&object, Metadata &&metadata, bool synchronous_event = false);
     void updateMetadata(const std::string& object_id, Metadata &&metadata, bool synchronous_event = false);
-    void updateError(const std::string& object_id, int response_code, bool synchronous_event = false);
+    void updateError(const std::string& object_id, int response_code, const std::string &url, bool synchronous_event = false);
     const ObjectData& getObjectData(const std::string& object_id) const;
     ObjectData& getObjectData(const std::string& object_id);
     const Metadata& getMetadata(const std::string& object_id) const;

@@ -73,7 +73,7 @@ bool Context::parseConfig()
                 if (mbstf_key == "sbi" || mbstf_key == "service_name" || mbstf_key == "discovery") {
                     // Handled by SBI config parser
                 } else if (mbstf_key == "serverResponseCacheControl") {
-		    Open5GSYamlIter cc_array(mbstf_iter);
+                    Open5GSYamlIter cc_array(mbstf_iter);
                     if (cc_array.type() == YAML_MAPPING_NODE) {
                         parseCacheControl(cc_array);
                     } else if (cc_array.type() == YAML_SEQUENCE_NODE) {
@@ -86,7 +86,7 @@ bool Context::parseConfig()
                         throw std::out_of_range("Bad configuration node at mbstf.serverResponseCacheControl");
                      }
 
-		} else if (mbstf_key == "distSessionAPI" || mbstf_key == "httpPushIngest" || mbstf_key == "rtpIngest") {
+                } else if (mbstf_key == "distSessionAPI" || mbstf_key == "httpPushIngest" || mbstf_key == "rtpIngest") {
                     Open5GSYamlIter distSess_array(mbstf_iter);
                     do {
                         if (distSess_array.type() == YAML_MAPPING_NODE) {
@@ -159,6 +159,15 @@ void Context::deleteDistributionSession(const std::string &distributionSessionid
     }
 }
 
+const std::shared_ptr<DistributionSession> &Context::findDistributionSession(const std::string &distributionSessionid)
+{
+    auto it = distributionSessions.find(distributionSessionid);
+    if (it != distributionSessions.end()) {
+        return it->second;
+    }
+    static const std::shared_ptr<DistributionSession> null_dist_sess(nullptr);
+    return null_dist_sess;
+}
 
 void Context::parseCacheControl(Open5GSYamlIter &iter) {
     while (iter.next()) {
@@ -195,14 +204,14 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
 
      while (iter.next()) {
          std::string sbi_key(iter.key());
-	 if(sbi_key == "family") {
-	     const char *v = iter.value();
-	     if (v) family = atoi(v);
+         if(sbi_key == "family") {
+             const char *v = iter.value();
+             if (v) family = atoi(v);
              if (family != AF_UNSPEC && family != AF_INET && family != AF_INET6) {
                  ogs_warn("Ignore family(%d) : ""AF_UNSPEC(%d), " "AF_INET(%d), AF_INET6(%d) ", family, AF_UNSPEC, AF_INET, AF_INET6);
                  family = AF_UNSPEC;
              }
-	 } else if ((sbi_key == "addr") || (sbi_key == "name")) {
+         } else if ((sbi_key == "addr") || (sbi_key == "name")) {
              Open5GSYamlIter hostname_iter(iter);
              ogs_assert(hostname_iter.type() != YAML_MAPPING_NODE);
              do {
@@ -212,7 +221,7 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
                     ogs_assert(num < OGS_MAX_NUM_OF_HOSTNAME);
                     hostname[num++] = hostname_iter.value();
                 } while (hostname_iter.type() == YAML_SEQUENCE_NODE);
-	 } else if (sbi_key == "advertise") {
+         } else if (sbi_key == "advertise") {
              Open5GSYamlIter advertise_iter(iter);
              ogs_assert(advertise_iter.type() != YAML_MAPPING_NODE);
              do {
@@ -229,17 +238,17 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
              dev = iter.value();
         } else if (sbi_key == "option") {
              /*
-	     rv = ogs_app_config_parse_sockopt(&iter, &option);
+             rv = ogs_app_config_parse_sockopt(&iter, &option);
              if (rv != OGS_OK) {
                  ogs_debug("ogs_app_config_parse_sockopt() failed");
                  return rv;
              }
-	     */
+             */
              is_option = true;
-	} else if (sbi_key == "tls") {
-	    Open5GSYamlIter tls_iter(iter);
+        } else if (sbi_key == "tls") {
+            Open5GSYamlIter tls_iter(iter);
             while (tls_iter.next()) {
-	      std::string tls_key(tls_iter.key());
+              std::string tls_key(tls_iter.key());
               if (tls_key == "key") {
                    //key = tls_iter.value();
                } else if (tls_key == "pem") {
@@ -247,7 +256,7 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
                } else
                    ogs_warn("unknown key `%s`", tls_key.c_str());
             }
-	} else
+        } else
             ogs_warn("unknown key `%s`", sbi_key.c_str());
 
     }
@@ -269,12 +278,12 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
             ogs_socknode_add(&list, AF_INET, addr, NULL);
         if (ogs_app()->parameter.no_ipv6 == 0)
             ogs_socknode_add(&list6, AF_INET6, addr, NULL);
-	ogs_freeaddrinfo(addr);
+        ogs_freeaddrinfo(addr);
     }
 
     if (dev) {
         rv = ogs_socknode_probe(
-			ogs_app()->parameter.no_ipv4 ? NULL : &list,
+                        ogs_app()->parameter.no_ipv4 ? NULL : &list,
                                     ogs_app()->parameter.no_ipv6 ? NULL : &list6,
                                     dev, port, NULL);
         ogs_assert(rv == OGS_OK);
@@ -290,31 +299,7 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
     if (node) {
         int matches = 0;
         //ogs_sbi_server_t *server;
-	matches = checkForAddr(node);
-
-	if(!matches) {
-	    std::shared_ptr<Open5GSSBIServer> newServer;
-            newServer.reset(new Open5GSSBIServer(node, is_option ? &option : nullptr));
-            newServer->ogsSBIServerAdvertise(addr);
-
-            if (pc_key == "distSessionAPI") {
-	        servers[SERVER_DISTRIBUTION_SESSION].push_back(newServer);
-            } else if (pc_key == "httpPushIngest") {
-		 servers[SERVER_OBJECT_PUSH].push_back(newServer);
-	    } else if (pc_key == "rtpIngest") {
-		servers[SERVER_RTP].push_back(newServer);
-            }
-
-            /*
-                if (key) server->tls.key = key;
-                if (pem) server->tls.pem = pem;
-            */
-        }
-    }
-    node6 = (ogs_socknode_t *)ogs_list_first(&list6);
-    if (node6) {
-        int matches = 0;
-	matches = checkForAddr(node);
+        matches = checkForAddr(node);
 
         if(!matches) {
             std::shared_ptr<Open5GSSBIServer> newServer;
@@ -328,7 +313,31 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
             } else if (pc_key == "rtpIngest") {
                 servers[SERVER_RTP].push_back(newServer);
             }
-	}
+
+            /*
+                if (key) server->tls.key = key;
+                if (pem) server->tls.pem = pem;
+            */
+        }
+    }
+    node6 = (ogs_socknode_t *)ogs_list_first(&list6);
+    if (node6) {
+        int matches = 0;
+        matches = checkForAddr(node);
+
+        if(!matches) {
+            std::shared_ptr<Open5GSSBIServer> newServer;
+            newServer.reset(new Open5GSSBIServer(node, is_option ? &option : nullptr));
+            newServer->ogsSBIServerAdvertise(addr);
+
+            if (pc_key == "distSessionAPI") {
+                servers[SERVER_DISTRIBUTION_SESSION].push_back(newServer);
+            } else if (pc_key == "httpPushIngest") {
+                 servers[SERVER_OBJECT_PUSH].push_back(newServer);
+            } else if (pc_key == "rtpIngest") {
+                servers[SERVER_RTP].push_back(newServer);
+            }
+        }
     }
 
     if (addr) ogs_freeaddrinfo(addr);

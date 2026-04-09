@@ -275,14 +275,23 @@ void ObjectCarouselPackager::flushQueue()
 
 bool ObjectCarouselPackager::deactivate()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_deactivateMutex);
     m_deactivating = true;
-    std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-    bool queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
+    bool queue_empty;
+    {
+        std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+        if (!m_transmitter) {
+            queue_empty = (m_packageItems.size() == 0);
+        } else {
+            queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
+        }
+    }
     if (queue_empty) {
         ogs_debug("Deactivating FLUTE stream, no files to purge");
         abort();
-        m_transmitter->deactivate();
+        {
+            std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+            if (m_transmitter) m_transmitter->deactivate();
+        }
         m_deactivating = false;
         return true;
     }
@@ -293,7 +302,11 @@ bool ObjectCarouselPackager::streamsAllocateToi(const std::function<std::pair<ui
 {
     std::lock_guard<decltype(m_streamsMutex)::element_type> lock(*m_streamsMutex);
     if (m_streams.size() < m_maxStreams) {
-        m_streams.insert(get_toi_fn());
+        try {
+            m_streams.insert(get_toi_fn());
+        } catch (std::runtime_error &ex) {
+            ogs_error("Unable to schedule carousel stream: %s", ex.what());
+        }
         return true;
     }
     return false;
@@ -439,8 +452,19 @@ void ObjectCarouselPackager::scheduleCarousel()
                         file_desc->set_content(pkg_item.object()->first);
                     }
                 }
+                /* update Cache expiry time */
+                LibFlute::Transmitter::FileDescription::date_time_type default_expiry(LibFlute::Transmitter::FileDescription::date_time_type::clock::now() + 60s);
+                file_desc->set_expiry_time(pkg_item.object()->second.cacheExpires().value_or(std::move(default_expiry)));
+
+                /* update Content-Type */
+                file_desc->set_content_type(pkg_item.object()->second.mediaType());
+
+                /* update ETag */
+                file_desc->set_etag(pkg_item.object()->second.entityTag().value_or(std::string{}));
+
                 /* add PackageItem to the FLUTE Transmitter as a current file */
                 m_transmitter->send(file_desc);
+
                 /* Return TOI to set in stream */
                 return std::make_pair(pkg_item.toi(), pkg_item.object());
             })) {

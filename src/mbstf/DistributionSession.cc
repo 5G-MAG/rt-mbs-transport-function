@@ -302,7 +302,7 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                                             } else if (method == OGS_SBI_HTTP_METHOD_PATCH) {
                                                 dist_session->_apiSubscriptionPatch(*dist_sess_subsc, stream, message, request, api, app_meta);
                                             } else if (method == OGS_SBI_HTTP_METHOD_OPTIONS) {
-                                                std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(std::nullopt, std::nullopt, std::nullopt, std::nullopt, 0, /*OGS_SBI_HTTP_METHOD_PATCH ", " OGS_SBI_HTTP_METHOD_DELETE ", " */ OGS_SBI_HTTP_METHOD_OPTIONS, api, app_meta));
+                                                std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(std::nullopt, std::nullopt, std::nullopt, std::nullopt, 0, OGS_SBI_HTTP_METHOD_PATCH ", " OGS_SBI_HTTP_METHOD_DELETE ", " OGS_SBI_HTTP_METHOD_OPTIONS, api, app_meta));
                                                 NfServer::populateResponse(response, "", OGS_SBI_HTTP_STATUS_NO_CONTENT);
                                                 ogs_assert(true == Open5GSSBIServer::sendResponse(stream, *response));
                                             } else {
@@ -358,13 +358,13 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                                 } else if (method == OGS_SBI_HTTP_METHOD_OPTIONS) {
                                     std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(
                                                     std::nullopt, std::nullopt, std::nullopt, std::nullopt, 0,
-                                                    OGS_SBI_HTTP_METHOD_POST ", " OGS_SBI_HTTP_METHOD_OPTIONS, api, app_meta));
+                                                    OGS_SBI_HTTP_METHOD_GET ", " OGS_SBI_HTTP_METHOD_PATCH ", " OGS_SBI_HTTP_METHOD_DELETE ", " OGS_SBI_HTTP_METHOD_OPTIONS, api, app_meta));
                                     NfServer::populateResponse(response, "", OGS_SBI_HTTP_STATUS_NO_CONTENT);
                                     ogs_assert(true == Open5GSSBIServer::sendResponse(stream, *response));
                                 } else {
                                     std::ostringstream err;
                                     err << "Distribution Session [" << ptr_resource1 << "], method [" << method
-                                        << "] is not allowed for a Distribution Session"; 
+                                        << "] is not allowed for a Distribution Session";
                                     ogs_error("%s", err.str().c_str());
                                     ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_MEHTOD_NOT_ALLOWED,
                                                                         2, message, app_meta, api, std::nullopt, err.str()));
@@ -378,7 +378,7 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                                 DistributionSession::_apiSessionCreate(stream, message, request, api, app_meta);
                             } else if (method == OGS_SBI_HTTP_METHOD_OPTIONS) {
                                 std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(
-                                                    std::nullopt, std::nullopt, std::nullopt, std::nullopt, 0, 
+                                                    std::nullopt, std::nullopt, std::nullopt, std::nullopt, 0,
                                                     OGS_SBI_HTTP_METHOD_POST ", " OGS_SBI_HTTP_METHOD_OPTIONS, api, app_meta));
                                 NfServer::populateResponse(response, "", OGS_SBI_HTTP_STATUS_NO_CONTENT);
                                 ogs_assert(true == Open5GSSBIServer::sendResponse(stream, *response));
@@ -1003,6 +1003,13 @@ void DistributionSession::_apiSessionCreate(Open5GSSBIStream &stream, Open5GSSBI
     std::shared_ptr<DistributionSession> distributionSession;
     try {
         distributionSession.reset(new DistributionSession(distSession, true));
+
+        /* check this isn't a duplicate */
+        const auto &existing = App::self().context()->findDistributionSession(distributionSession->distributionSessionId());
+        if (existing) {
+            throw ModelException("MBSTF Distribution Session already exists", "DistributionSession", "distSessionId", ProblemCause::MANDATORY_IE_INCORRECT);
+        }
+
         /* If a subscription came with the create request, add the subscription */
         const auto &dist_session = distributionSession->distributionSessionReqData()->getDistSession();
         const auto &opt_subsc = dist_session->getDistSessionSubscription();
@@ -1038,6 +1045,7 @@ void DistributionSession::_apiSessionCreate(Open5GSSBIStream &stream, Open5GSSBI
     } catch (ModelException &err) {
         send_model_error(err, stream, 1, message, app_meta, api, "Bad Request",
                             "Error while populating MBSTF Distribution Session");
+        return;
     } catch (std::exception &err) {
         ogs_error("Error while populating MBSTF Distribution Session: %s", err.what());
         char *error = ogs_msprintf("Invalid ObjDistributionData parameters [%s]", err.what());
@@ -1345,7 +1353,7 @@ static void send_model_params_error(const ModelParamsException &err, Open5GSSBIS
     }
 
     const std::string &error = error_oss.str();
-    
+
     if (err.cause) {
         auto cause = err.cause.value();
         oss << cause.reason() << ": " << error;

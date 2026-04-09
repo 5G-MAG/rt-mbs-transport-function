@@ -50,7 +50,7 @@ static bool validate_push_acquisition_method(DistributionSession &distributionSe
 ObjectManifestController::ObjectManifestController(DistributionSession &dist_session)
         :ObjectController(dist_session)
         ,m_manifestHandler(nullptr)
-	,m_scheduledPullCancel(false)
+        ,m_scheduledPullCancel(false)
 
 {
     validate_pull_acquisition_method(dist_session);
@@ -72,6 +72,24 @@ void ObjectManifestController::processEvent(Event &event, SubscriptionService &e
         // event.preventDefault() if checks fail
     } else if (event.eventName() == ObjectManifestHandler::ObjectManifestChangeEvent::event_name) {
         m_manifestHandlerChange.notify_all();
+    } else if (event.eventName() == ObjectIngester::IngestFailedEvent::event_name) {
+        ObjectIngester::IngestFailedEvent &ingest_failed_event = dynamic_cast<ObjectIngester::IngestFailedEvent&>(event);
+        ogs_debug("Failed ingest of %s, response code was %i", ingest_failed_event.url().c_str(), ingest_failed_event.failureType());
+        if (distributionSession().getObjectAcquisitionMethod() != "PUSH") {
+            // try fetch again
+            try {
+                PullObjectIngester::PullIngestFailedEvent &pull_ingest_failed_event = dynamic_cast<PullObjectIngester::PullIngestFailedEvent&>(event);
+                std::lock_guard<std::recursive_mutex> lock(m_pullObjectIngestersMutex);
+                auto &ingesters = getPullObjectIngesters();
+                if (!ingesters.empty()) {
+                    auto &ingester = ingesters.front();
+                    ingester->fetch(pull_ingest_failed_event.item());
+                }
+            } catch (std::bad_cast &ex) {
+                // Should never happen, but just incase
+                ogs_error("Unable to refetch failed non-PUSH ingest");
+            }
+        }
     }
     ObjectController::processEvent(event, event_service);
 
@@ -287,34 +305,34 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
         std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> next_ingest_items;
         ManifestHandler::durn_type default_deadline;
         // Get the next ingest items
-	try {
+        try {
             std::lock_guard<std::recursive_mutex> lock(controller->m_manifestHandlerMutex);
             next_ingest_items = controller->manifestHandler()->nextIngestItems();
             default_deadline = controller->manifestHandler()->getDefaultDeadline();
-	} catch ( std::domain_error &err) {
-	    ogs_error("While fetching next manifest ingest item: %s", err.what());
-	}
+        } catch ( std::domain_error &err) {
+            ogs_error("While fetching next manifest ingest item: %s", err.what());
+        }
 
-	if (next_ingest_items.second.empty()) break;
+        if (next_ingest_items.second.empty()) break;
 
-	auto fetch_time = next_ingest_items.first; // Get fetch_time using .first
+        auto fetch_time = next_ingest_items.first; // Get fetch_time using .first
 
-	std::list<PullObjectIngester::IngestItem> urls;
+        std::list<PullObjectIngester::IngestItem> urls;
 
         {
             std::lock_guard<std::recursive_mutex> lock(controller->m_pullObjectIngestersMutex);
             auto &ingesters = controller->getPullObjectIngesters();
             while (ingesters.size() < next_ingest_items.second.size()) {
-	        controller->addPullObjectIngester(new PullObjectIngester(controller->objectStore(), *controller, urls));
+                controller->addPullObjectIngester(new PullObjectIngester(controller->objectStore(), *controller, urls));
             }
-	}
+        }
 
         // Wait until the fetch_time
-	{
+        {
             std::ostringstream oss;
-	    oss << fetch_time ;
-	    ogs_debug("Sleeping until...%s", oss.str().c_str());
-	}
+            oss << fetch_time ;
+            ogs_debug("Sleeping until...%s", oss.str().c_str());
+        }
 
         {
             std::unique_lock<std::recursive_mutex> lock(controller->m_manifestHandlerMutex);
@@ -342,7 +360,7 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
                 if (next_ingest_items.second.empty()) break;
                 auto ingest_item = next_ingest_items.second.front();
                 next_ingest_items.second.pop_front();  // remove the item
-	        //ingest_item.deadline(std::nullopt);
+                //ingest_item.deadline(std::nullopt);
                 if (!ingest_item.deadline()) {
                     ingest_item.deadline(std::chrono::system_clock::now() + default_deadline);
                 }
@@ -356,7 +374,7 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
                     ogs_debug("Failed to fetch item: %s", ingest_item.url().c_str());
                 }
             }
-	}
+        }
     }
     controller->m_scheduledPullRunning = false;
 }
@@ -397,7 +415,7 @@ static bool validate_push_acquisition_method(DistributionSession &distributionSe
                 std::optional<std::string> id = "manifest";
                 distributionSession.setObjectAcquisitionIdPush(id);
             }
-	    return true;
+            return true;
         }
     }
     return false;
@@ -407,18 +425,18 @@ static bool validate_push_url(DistributionSession &distributionSession, const st
 {
     std::optional<std::string> object_acquisition_push_id = distributionSession.getObjectAcquisitionPushId();
     if (object_acquisition_push_id.has_value()) {
-	std::string push_id = object_acquisition_push_id.value();
-	std::string url_path(url);
-	if ((push_id.front() == '/' && url_path.front() != '/')) {
-	    url_path = '/' + url_path;
-	} else if ((url_path.front() == '/' && push_id.front() != '/')) {
-	    push_id = '/' + push_id;
-	}
-	if(push_id == url_path) {
-	    return true;
-	} else {
-	    return false;
-	}
+        std::string push_id = object_acquisition_push_id.value();
+        std::string url_path(url);
+        if ((push_id.front() == '/' && url_path.front() != '/')) {
+            url_path = '/' + url_path;
+        } else if ((url_path.front() == '/' && push_id.front() != '/')) {
+            push_id = '/' + push_id;
+        }
+        if(push_id == url_path) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     return true;

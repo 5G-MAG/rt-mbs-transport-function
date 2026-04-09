@@ -39,22 +39,42 @@ MBSTF_NAMESPACE_START
 
 // ObjectListPackager::PackageItem
 
-ObjectListPackager::PackageItem::PackageItem(const std::string &object_id, const std::optional<time_type> &deadline)
-    :m_objectId(object_id)
+ObjectListPackager::PackageItem::PackageItem()
+    :m_object()
+    ,m_deadline()
+{
+}
+
+ObjectListPackager::PackageItem::PackageItem(const std::shared_ptr<ObjectStore::Object> &object, const std::optional<time_type> &deadline)
+    :m_object(object)
     ,m_deadline(deadline)
 {
 }
 
 ObjectListPackager::PackageItem::PackageItem(const PackageItem &other)
-    :m_objectId(other.m_objectId)
+    :m_object(other.m_object)
     ,m_deadline(other.m_deadline)
 {
 }
 
 ObjectListPackager::PackageItem::PackageItem(PackageItem &&other)
-    :m_objectId(std::move(other.m_objectId))
+    :m_object(std::move(other.m_object))
     ,m_deadline(std::move(other.m_deadline))
 {
+}
+
+ObjectListPackager::PackageItem &ObjectListPackager::PackageItem::operator=(const PackageItem &other)
+{
+    m_object = other.m_object;
+    m_deadline = other.m_deadline;
+    return *this;
+}
+
+ObjectListPackager::PackageItem &ObjectListPackager::PackageItem::operator=(PackageItem &&other)
+{
+    m_object = std::move(other.m_object);
+    m_deadline = std::move(other.m_deadline);
+    return *this;
 }
 
 // ObjectListPackager
@@ -64,9 +84,9 @@ ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectControll
                                        const std::optional<std::string> &address,
                                        uint32_t rateLimit, unsigned short mtu, in_port_t port, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
     :ObjectPackager(object_store, controller, address, rateLimit, mtu, port, tunnel_address, tunnel_port)
+    ,m_packageItemsMutex (new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems(object_to_package)
     ,m_tunnelEndpoint()
-    ,m_packageItemsMutex (new std::recursive_mutex)
 {
     sortListByPolicy();
     if (tunnel_address) {
@@ -79,9 +99,9 @@ ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectControll
                                        std::list<PackageItem> &&object_to_package, const std::optional<std::string> &address,
                                        uint32_t rateLimit, unsigned short mtu, in_port_t port, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
     :ObjectPackager(object_store, controller, address, rateLimit, mtu, port, tunnel_address, tunnel_port)
+    ,m_packageItemsMutex (new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems(std::move(object_to_package))
     ,m_tunnelEndpoint()
-    ,m_packageItemsMutex (new std::recursive_mutex)
 {
     sortListByPolicy();
     if (tunnel_address) {
@@ -94,9 +114,9 @@ ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectControll
                                        const std::optional<std::string> &address, uint32_t rateLimit, unsigned short mtu,
                                        in_port_t port, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
     :ObjectPackager(object_store, controller, address, rateLimit, mtu, port, tunnel_address, tunnel_port)
+    ,m_packageItemsMutex (new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems()
     ,m_tunnelEndpoint()
-    ,m_packageItemsMutex (new std::recursive_mutex)
 {
     if (tunnel_address) {
         m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::address::from_string(tunnel_address.value()), tunnel_port);
@@ -112,7 +132,7 @@ bool ObjectListPackager::add(const PackageItem &item) {
     ogs_debug("ObjectListPackager::add(): deactivating=%s", m_deactivating?"true":"false");
     if (m_deactivating) return false;
     std::lock_guard<std::recursive_mutex> lock(*m_packageItemsMutex);
-    m_packageItems.remove_if([&item](const PackageItem &pkg_item) -> bool { return item.objectId() == pkg_item.objectId(); });
+    m_packageItems.remove_if([&item](const PackageItem &pkg_item) -> bool { return item.object()->second.objectId() == pkg_item.object()->second.objectId(); });
     m_packageItems.push_back(item);
     sortListByPolicy();
     return true;
@@ -122,7 +142,7 @@ bool ObjectListPackager::add(PackageItem &&item) {
     ogs_debug("ObjectListPackager::add(): deactivating=%s", m_deactivating?"true":"false");
     if (m_deactivating) return false;
     std::lock_guard<std::recursive_mutex> lock(*m_packageItemsMutex);
-    m_packageItems.remove_if([&item](const PackageItem &pkg_item) -> bool { return item.objectId() == pkg_item.objectId(); });
+    m_packageItems.remove_if([&item](const PackageItem &pkg_item) -> bool { return item.object()->second.objectId() == pkg_item.object()->second.objectId(); });
     m_packageItems.push_back(std::move(item));
     sortListByPolicy();
     return true;
@@ -167,73 +187,95 @@ void ObjectListPackager::doObjectPackage() {
 
     if (!destAddr) return;
 
-    std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+    {
+        std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
 
-    if (!m_transmitter) {
-        m_transmitter.reset(new LibFlute::Transmitter(
-                destAddr.value(),
-                static_cast<short>(port()),
-                0,
-                mtu(),
-                rateLimit(),
-                m_io,
-                m_tunnelEndpoint,
-                LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005));
-        m_transmitter->register_completion_callback(
-                [this](uint32_t toi) {
-                    ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", m_transmitter->number_of_files(), m_packageItems.size());
-                    std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-                    bool queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
-                    if (m_queuedToi == toi) {
-                        m_queued = false;
-                        objectSendCompletion(m_queuedObjectId, queue_empty);
-                        ogs_info("Transmitted: Object with TOI: %d", toi);
-                    } else {
-                        ogs_error("Unscheduled completion of Object with TOI: %d", toi);
-                    }
-                    std::lock_guard<std::recursive_mutex> guard(m_deactivateMutex);
-                    if (m_deactivating && queue_empty) {
-                        ogs_debug("Deactivating FLUTE stream on last file");
-                        m_transmitter->deactivate();
-                        abort();
-                        m_deactivating = false;
-                    }
-                });
+        if (!m_transmitter) {
+            m_transmitter.reset(new LibFlute::Transmitter(
+                    destAddr.value(),
+                    static_cast<short>(port()),
+                    0,
+                    mtu(),
+                    rateLimit(),
+                    m_io,
+                    m_tunnelEndpoint,
+                    LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005));
+            m_transmitter->register_completion_callback(
+                    [this](uint32_t toi) {
+                        ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", m_transmitter->number_of_files(), m_packageItems.size());
+                        bool queue_empty;
+                        {
+                            std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+                            queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
+                        }
+                        if (m_queuedToi == toi) {
+                            m_queued = false;
+                            m_currentObject.reset();
+                            objectSendCompletion(m_queuedObjectId, queue_empty);
+                            ogs_info("Transmitted: Object with TOI: %d", toi);
+                        } else {
+                            ogs_error("Unscheduled completion of Object with TOI: %d", toi);
+                        }
+                        if (m_deactivating && queue_empty) {
+                            ogs_debug("Deactivating FLUTE stream on last file");
+                            {
+                                std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+                                m_transmitter->deactivate();
+                            }
+                            abort();
+                            m_deactivating = false;
+                        }
+                    });
 
-        // emitFluteSessionStartedEvent();
+            // emitFluteSessionStartedEvent();
+        }
     }
+
+    PackageItem item;
 
     {
         std::lock_guard<std::recursive_mutex> lock(*m_packageItemsMutex);
 
         if (!m_packageItems.empty() && !m_queued) {
-            auto &item = m_packageItems.front();
-            m_packageItemsMutex->unlock();
-            std::string location;
-            m_queuedObjectId = item.objectId();
-            std::vector<unsigned char> &objData = objectStore().getObjectData(item.objectId());
-            ObjectStore::Metadata &metadata = objectStore().getMetadata(item.objectId());
-            std::string obj_ingest_base_url = metadata.objIngestBaseUrl().value_or(std::string());
-            std::string obj_distribution_base_url = metadata.objDistributionBaseUrl().value_or(std::string());
+            item = m_packageItems.front();
+            m_packageItems.pop_front();
+        }
+    }
 
-            // If we need to substitute objIngestBaseUrl for objDistributionBaseUrl then do so
-            if (!obj_ingest_base_url.empty() && !obj_distribution_base_url.empty() &&
-                metadata.getFetchedUrl().starts_with(obj_ingest_base_url)) {
-                location = obj_distribution_base_url + metadata.getFetchedUrl().substr(obj_ingest_base_url.size());
-            } else {
-                // Just use the fetched URL
-                location = metadata.getFetchedUrl();
-            }
-            std::shared_ptr<LibFlute::Transmitter::FileDescription> file_desc(metadata.fluteFileDescription());
+    if (item) {
+        std::string location;
+        m_currentObject = item.object();
+        m_queuedObjectId = m_currentObject->second.objectId();
+        std::vector<unsigned char> &objData = m_currentObject->first;
+        ObjectStore::Metadata &metadata = m_currentObject->second;
+        std::string obj_ingest_base_url = metadata.objIngestBaseUrl().value_or(std::string());
+        std::string obj_distribution_base_url = metadata.objDistributionBaseUrl().value_or(std::string());
+
+        // If we need to substitute objIngestBaseUrl for objDistributionBaseUrl then do so
+        if (!obj_ingest_base_url.empty() && !obj_distribution_base_url.empty() &&
+            metadata.getFetchedUrl().starts_with(obj_ingest_base_url)) {
+            location = obj_distribution_base_url + metadata.getFetchedUrl().substr(obj_ingest_base_url.size());
+        } else {
+            // Just use the fetched URL
+            location = metadata.getFetchedUrl();
+        }
+        std::shared_ptr<LibFlute::Transmitter::FileDescription> file_desc(metadata.fluteFileDescription());
+        {
+            std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
             if (!file_desc) {
                 ogs_debug("New FileDescription(%s, ...)", location.c_str());
                 file_desc.reset(new LibFlute::Transmitter::FileDescription(location, objData));
                 metadata.fluteFileDescription(file_desc);
             } else {
                 ogs_debug("Existing FileDescription(%s, ...)", file_desc->file_entry().content_location.c_str());
-                file_desc->set_content_location(location);
-                ogs_debug("Set FileDescription location to %s", location.c_str());
-                file_desc->set_content(objData);
+                if (file_desc->file_entry().content_location != location) {
+                    file_desc->set_content_location(location);
+                    ogs_debug("Set FileDescription location to %s", location.c_str());
+                }
+                if (file_desc->data() != reinterpret_cast<const char*>(objData.data())) {
+                    file_desc->set_content(objData);
+                    ogs_debug("Set FileDescription object data");
+                }
             }
 
             m_queued = true;
@@ -253,13 +295,7 @@ void ObjectListPackager::doObjectPackage() {
                 file_desc->set_etag(entity_tag.value());
             }
 
-            {
-                std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-                m_queuedToi = m_transmitter->send(file_desc);
-            }
-
-            m_packageItemsMutex->lock();
-            m_packageItems.pop_front();
+            m_queuedToi = m_transmitter->send(file_desc);
         }
     }
 
@@ -289,15 +325,20 @@ void ObjectListPackager::flushQueue()
 
 bool ObjectListPackager::deactivate()
 {
-    std::lock_guard<decltype(m_deactivateMutex)> guard(m_deactivateMutex);
     m_deactivating = true;
-    std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-    ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", m_transmitter->number_of_files(), m_packageItems.size());
-    bool queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
+    bool queue_empty;
+    {
+        std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+        ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", m_transmitter->number_of_files(), m_packageItems.size());
+        queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
+    }
     if (queue_empty) {
         ogs_debug("Deactivating FLUTE stream, no files to purge");
         abort();
-        m_transmitter->deactivate();
+        {
+            std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+            m_transmitter->deactivate();
+        }
         m_deactivating = false;
         return true;
     }

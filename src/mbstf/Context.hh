@@ -55,11 +55,12 @@ public:
 */
     void addDistributionSession(const std::shared_ptr<DistributionSession> &DistributionSession);
     void deleteDistributionSession(const std::string &distributionSessionid);
+    const std::shared_ptr<DistributionSession> &findDistributionSession(const std::string &distributionSessionid);
 
     enum ServerType {
-	SERVER_DISTRIBUTION_SESSION,
+        SERVER_DISTRIBUTION_SESSION,
         SERVER_OBJECT_PUSH,
-	SERVER_RTP,
+        SERVER_RTP,
         SERVER_MAX_NUM
     };
 

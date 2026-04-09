@@ -19,6 +19,7 @@
 #include "common.hh"
 #include "openapi/model/ObjDistributionData.h"
 #include "ObjectManifestController.hh"
+#include "ObjectStore.hh"
 
 MBSTF_NAMESPACE_START
 
@@ -71,7 +72,7 @@ protected:
     virtual void deactivateObjectPackager();
 
 private:
-    void sendToPackager(const std::string &object_id);
+    void sendToPackager(const std::shared_ptr<ObjectStore::Object> &object);
     //std::string generateUUID();
     //std::shared_ptr<ObjectListPackager> m_objectListPackager;
 //    std::thread m_ingestSchedulingThread;

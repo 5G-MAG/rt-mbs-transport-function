@@ -37,10 +37,13 @@
 #include "ObjectListPackager.hh"
 #include "utilities.hh"
 #include "openapi/model/DistSessionState.h"
+#include "openapi/model/ProblemCause.hh"
 
 #include "ObjectStreamingController.hh"
 
 using reftools::mbstf::DistSessionState;
+using fiveg_mag_reftools::ModelException;
+using fiveg_mag_reftools::ProblemCause;
 
 MBSTF_NAMESPACE_START
 
@@ -76,7 +79,7 @@ void ObjectStreamingController::setObjectPackager()
     startWorker();
     const auto &obj_list = objectStore().getObjects();
     for (const auto &[obj_id, object] : obj_list) {
-        sendToPackager(obj_id);
+        sendToPackager(object);
     }
 }
 
@@ -108,42 +111,42 @@ void ObjectStreamingController::processEvent(Event &event, SubscriptionService &
         ObjectStore::ObjectChangedEvent &obj_changed_event = dynamic_cast<ObjectStore::ObjectChangedEvent&>(event);
         const std::string &object_id = obj_changed_event.objectId();
         ogs_info("%s with ID: %s", event.eventName().c_str(), object_id.c_str());
-	if(check_if_object_added_is_manifest(object_id, objectStore(), getManifestUrl())) {
-	    const std::shared_ptr<ObjectStore::Object> &object = objectStore()[object_id];
-	    if(manifestHandler()) {
-	        try {
-	            if(!manifestHandler()->update(object)) {
-		        ogs_error("Failed to update Manifest");
-			unsetObjectListPackager();
-			event.stopProcessing();
-			return;
-		    }
-		    startWorker();
-                    sendToPackager(object_id);
-	        } catch (std::exception &ex) {
+        const std::shared_ptr<ObjectStore::Object> &object = objectStore()[object_id];
+        if(check_if_object_added_is_manifest(object_id, objectStore(), getManifestUrl())) {
+            if(manifestHandler()) {
+                try {
+                    if(!manifestHandler()->update(object)) {
+                        ogs_error("Failed to update Manifest");
+                        unsetObjectListPackager();
+                        event.stopProcessing();
+                        return;
+                    }
+                    startWorker();
+                    sendToPackager(object);
+                } catch (std::exception &ex) {
                     ogs_error("Invalid Manifest update: %s", ex.what());
-		    unsetObjectListPackager();
-		    event.stopProcessing();
-		    return;
+                    unsetObjectListPackager();
+                    event.stopProcessing();
+                    return;
                 }
 
-	    } else {
-		std::unique_ptr<ManifestHandler> manifest_handler(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL"));
+            } else {
+                std::unique_ptr<ManifestHandler> manifest_handler(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL"));
                 manifestHandler(std::move(manifest_handler));
-                sendToPackager(object_id);
+                sendToPackager(object);
             }
-	} else {
-            sendToPackager(object_id);
+        } else {
+            sendToPackager(object);
         }
     }
     ObjectManifestController::processEvent(event, event_service);
 }
 
-void ObjectStreamingController::sendToPackager(const std::string &object_id)
+void ObjectStreamingController::sendToPackager(const std::shared_ptr<ObjectStore::Object> &object)
 {
     auto packager = getObjectListPackager();
     if (packager) {
-        ObjectListPackager::PackageItem item(object_id);
+        ObjectListPackager::PackageItem item(object);
         packager->add(item);
     }
 }
@@ -178,11 +181,12 @@ static const struct init {
 } g_init;
 }
 
-static void validate_distribution_session(DistributionSession &distributionSession)
+static void validate_distribution_session(DistributionSession &distribution_session)
 {
-    if (distributionSession.getObjectDistributionOperatingMode() != "STREAMING") {
+    if (distribution_session.getObjectDistributionOperatingMode() != "STREAMING") {
         throw std::logic_error("Expected objDistributionOperatingMode to be set to STREAMING.");
     }
+    ObjectController::validateDistributionSession(distribution_session);
 }
 
 static bool check_if_object_added_is_manifest(const std::string &object_id, ObjectStore &object_store,
