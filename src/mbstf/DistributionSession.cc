@@ -728,12 +728,20 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
     }
 
     /* Make sure we are in the right state */
-    auto new_state = new_dist_session->getDistSessionState()->getValue();
-    if (new_state == DistSessionState::VAL_INACTIVE || new_state == DistSessionState::VAL_DEACTIVATING) {
+    const auto &old_state = old_dist_session->getDistSessionState();
+    const auto &new_state = new_dist_session->getDistSessionState();
+    auto new_state_enum = new_state->getValue();
+    if (new_state_enum == DistSessionState::VAL_INACTIVE || new_state_enum == DistSessionState::VAL_DEACTIVATING) {
         /* If you request deactivating or inactive, make sure no more files are packaged */
         m_controller->flushPackagerQueue();
     }
-    _transitionTo(new_state);
+    try {
+        _transitionTo(new_state_enum);
+    } catch (std::runtime_error &exc) {
+        // bad state transition
+        ex.addInvalidParameter("distSession.distSessionState", exc.what());
+        throw ex;
+    }
 
     /* Update the last-used and hash values to reflect the new CreateReqData */
     _setLastUsed();
@@ -826,7 +834,7 @@ void DistributionSession::_inactiveState(const DistributionSession::Action &acti
                 _changeState(&DistributionSession::_establishedState);
                 break;
             case DistSessionState::VAL_DEACTIVATING:
-                throw std::runtime_error("Invalid state transition in DistSession");
+                throw std::runtime_error("Invalid state transition from INACTIVE to DEACTIVATING in DistSession");
             default:
                 throw std::runtime_error("Request for unhandled state in DistSession");
             }
@@ -861,7 +869,7 @@ void DistributionSession::_establishedState(const DistributionSession::Action &a
                 _changeState(&DistributionSession::_activeState);
                 break;
             case DistSessionState::VAL_DEACTIVATING:
-                throw std::runtime_error("Invalid state transition in DistSession");
+                throw std::runtime_error("Invalid state transition from ESTABLISHED to DEACTIVATING in DistSession");
             default:
                 throw std::runtime_error("Request for unhandled state in DistSession");
             }
@@ -891,7 +899,7 @@ void DistributionSession::_activeState(const DistributionSession::Action &action
                 _changeState(&DistributionSession::_deactivatingState);
                 break;
             case DistSessionState::VAL_ESTABLISHED:
-                throw std::runtime_error("Invalid state transition in DistSession");
+                throw std::runtime_error("Invalid state transition from ACTIVE to ESTABLISHED in DistSession");
             case DistSessionState::VAL_ACTIVE:
                 break;
             default:
