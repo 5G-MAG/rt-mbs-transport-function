@@ -257,7 +257,9 @@ std::string SubscriptionService::reprString() const
 bool SubscriptionService::sendEventSynchronous(Event &event)
 {
     std::lock_guard guard(*m_asyncMutex);
-    auto self = shared_from_this(); /* make sure we don't get deleted while sending events */
+    // make sure we don't get deleted while sending events
+    auto self = weak_from_this().lock();
+    if (!self) return false; // If this object has been deleted, abort event
     auto it = m_namedEventSubscriptions.find(event.eventName());
     if (it != m_namedEventSubscriptions.end()) {
         for (auto &subsc : it->second) {
@@ -326,7 +328,9 @@ void SubscriptionService::asyncEventsLoopRunner(SubscriptionService *svc)
 void SubscriptionService::asyncEventsLoop()
 {
     using namespace std::literals;
-    auto self = shared_from_this(); /* make sure we don't get deleted while sending events, but exit if we are the last holder */
+    /* make sure we don't get deleted while sending events, but exit if we are the last holder */
+    auto self = weak_from_this().lock();
+    if (!self) return; // object has already been deleted
     while (!m_asyncCancel && self.use_count() > 1) {
         std::lock_guard guard(*m_asyncMutex);
         while (!m_asyncCancel && m_asyncEventQueue.empty() && self.use_count() > 1) {
