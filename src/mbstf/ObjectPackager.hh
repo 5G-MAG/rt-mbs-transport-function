@@ -21,7 +21,7 @@
 
 #include <netinet/in.h>
 
-#include <boost/asio/io_service.hpp>
+#include <boost/asio/io_context.hpp>
 
 #include "common.hh"
 #include "Event.hh"
@@ -174,7 +174,7 @@ protected:
 
     std::shared_ptr<std::recursive_mutex> m_transmitterMutex;
     std::shared_ptr<LibFlute::Transmitter> m_transmitter;
-    boost::asio::io_service m_io;
+    boost::asio::io_context m_io;
     uint32_t m_queuedToi;
     bool m_queued;
     std::atomic_bool m_deactivating;

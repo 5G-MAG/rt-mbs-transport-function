@@ -34,7 +34,7 @@ fiveg_api_release = get_option('fiveg_api_release')
 
 fs = import('fs')
 
-boost_dep = dependency('boost', required: true)
+boost_dep = dependency('boost', version: '>=1.66.0', required: true)
 uuid_dep = dependency('uuid', required: true)
 zlib_dep = dependency('zlib', required: true)
 libmpdpp_dep = dependency('mpd++', fallback: ['libmpdpp'])

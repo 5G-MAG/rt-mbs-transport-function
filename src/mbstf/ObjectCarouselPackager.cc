@@ -124,7 +124,7 @@ ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, Object
     ,m_maxStreams(0)
 {
     if (tunnel_address) {
-        m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::address::from_string(tunnel_address.value()), tunnel_port);
+        m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::make_address(tunnel_address.value()), tunnel_port);
     }
     startWorker();
     startScheduler();
@@ -146,7 +146,7 @@ ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, Object
     ,m_maxStreams(0)
 {
     if (tunnel_address) {
-        m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::address::from_string(tunnel_address.value()), tunnel_port);
+        m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::make_address(tunnel_address.value()), tunnel_port);
     }
     startWorker();
     startScheduler();
@@ -168,7 +168,7 @@ ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, Object
     ,m_maxStreams(0)
 {
     if (tunnel_address) {
-        m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::address::from_string(tunnel_address.value()), tunnel_port);
+        m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::make_address(tunnel_address.value()), tunnel_port);
     }
     startWorker();
     startScheduler();

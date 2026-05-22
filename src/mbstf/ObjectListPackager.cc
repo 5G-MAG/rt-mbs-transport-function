@@ -91,7 +91,7 @@ ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectControll
 {
     sortListByPolicy();
     if (tunnel_address) {
-        m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::address::from_string(tunnel_address.value()), tunnel_port);
+        m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::make_address(tunnel_address.value()), tunnel_port);
     }
     startWorker();
 }
@@ -106,7 +106,7 @@ ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectControll
 {
     sortListByPolicy();
     if (tunnel_address) {
-        m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::address::from_string(tunnel_address.value()), tunnel_port);
+        m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::make_address(tunnel_address.value()), tunnel_port);
     }
     startWorker();
 }
@@ -120,7 +120,7 @@ ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectControll
     ,m_tunnelEndpoint()
 {
     if (tunnel_address) {
-        m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::address::from_string(tunnel_address.value()), tunnel_port);
+        m_tunnelEndpoint = boost::asio::ip::udp::endpoint(boost::asio::ip::make_address(tunnel_address.value()), tunnel_port);
     }
     startWorker();
 }
