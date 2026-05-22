@@ -176,6 +176,7 @@ bool ObjectManifestHandler::update(const std::shared_ptr<ObjectStore::Object> &n
 
     const auto &new_objects = new_manifest.getObjects();
     const auto &old_objects = m_objectManifest.getObjects();
+    ObjectManifest::ObjectsType to_del;
     for (auto old_it = old_objects.begin(); old_it != old_objects.end(); old_it++) {
         if (!*old_it || !old_it->value()) continue;
         auto new_it = std::find_if(new_objects.begin(), new_objects.end(), [&old_it](const auto &new_obj) -> bool {
@@ -190,12 +191,16 @@ bool ObjectManifestHandler::update(const std::shared_ptr<ObjectStore::Object> &n
                 object_store.removeObject(metadata->objectId());
             }
             m_objectMetadataCache.erase(old_it->value().get());
-            m_objectManifest.removeObjects(*old_it);
+            to_del.push_back(*old_it);
         } else {
             /* object same or update */
             (*old_it->value()) = std::move(*new_it->value());
             new_manifest.removeObjects(*new_it);
         }
+    }
+
+    for (const auto &obj : to_del) {
+        m_objectManifest.removeObjects(obj);
     }
 
     auto now = datetime_type::clock::now();
