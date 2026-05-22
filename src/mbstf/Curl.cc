@@ -11,6 +11,8 @@
  * https://drive.google.com/file/d/1cinCiA778IErENZ3JN52VFW-1ffHpx7Z/view
  */
 
+#include <unistd.h>
+
 #include <chrono>
 #include <iostream>
 #include <map>
@@ -228,6 +230,16 @@ unsigned long Curl::getAge() const
 int Curl::getResponseCode() const
 {
     return m_statusCode;
+}
+
+void Curl::abortFetch()
+{
+    if (!m_curl) return;
+    curl_socket_t sockfd;
+    CURLcode res = curl_easy_getinfo(m_curl, CURLINFO_ACTIVESOCKET, &sockfd);
+    if (res == CURLE_OK) {
+        close(sockfd);
+    }
 }
 
 bool Curl::extractProtocolAndStatusCode(std::string_view &header_line)

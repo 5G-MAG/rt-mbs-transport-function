@@ -45,6 +45,8 @@ public:
     unsigned long getAge() const;
     int getResponseCode() const;
 
+    void abortFetch();
+
     Curl &setUserAgent(const std::string &user_agent);
 
 private:

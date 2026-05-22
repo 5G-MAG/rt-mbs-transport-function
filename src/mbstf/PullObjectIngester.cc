@@ -86,7 +86,10 @@ std::string PullObjectIngester::PullIngestFailedEvent::reprString() const {
 
 /***** PullObjectIngester methods *****/
 
-PullObjectIngester::~PullObjectIngester() {abort();}
+PullObjectIngester::~PullObjectIngester() {
+    if (m_curl) m_curl->abortFetch();
+    abort();
+}
 
 bool PullObjectIngester::fetch(const std::string &object_id, const std::optional<time_type> &download_deadline)
 {
