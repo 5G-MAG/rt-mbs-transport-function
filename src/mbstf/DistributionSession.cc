@@ -388,8 +388,7 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                                 ogs_assert(true == Open5GSSBIServer::sendResponse(stream, *response));
                             } else {
                                 std::ostringstream err;
-                                err << "Distribution Session [" << ptr_resource1 << "], method [" << method
-                                    << "] is not allowed for a Distribution Session";
+                                err << "Distribution Sessions method [" << method << "] is not allowed for a Distribution Session";
                                 ogs_error("%s", err.str().c_str());
                                 ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_MEHTOD_NOT_ALLOWED,
                                                                           2, message, app_meta, api, std::nullopt, err.str()));
