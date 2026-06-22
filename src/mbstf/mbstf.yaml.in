@@ -189,6 +189,7 @@ mbstf:
         port: 0 # ephemeral
     totalMaxBitRateSoftLimit: 1000 # 1Gbps
     consecutiveIngestFailuresBeforeDeactivate: 5
+    packetModeSchedulingQueueSize: 131072 # 128KB queue per packet mode DistSession
     serverResponseCacheControl:
       - distMaxAge: 60
         ObjectMaxAge: 60

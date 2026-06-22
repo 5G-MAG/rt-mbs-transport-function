@@ -498,6 +498,13 @@ uint64_t DistributionSession::getTSI() const
     return static_cast<uint32_t>(tsi.value());
 }
 
+const std::optional<std::shared_ptr<TunnelAddress>> &DistributionSession::getTunnel() const
+{
+    std::shared_ptr<CreateReqData> create_req_data = distributionSessionReqData();
+    std::shared_ptr<DistSession> dist_session = create_req_data->getDistSession();
+    return dist_session->getMbUpfTunAddr();
+}
+
 const std::optional<std::string> &DistributionSession::getTunnelAddr() const
 {
     std::shared_ptr<CreateReqData> create_req_data = distributionSessionReqData();

@@ -72,6 +72,7 @@ public:
     } cacheControl;
     int totalMaxBitRateSoftLimit; // total maximum bit rate this MBSTF ought to asked to handle
     int consecutiveIngestFailuresBeforeDeactivate; // The number of consecutive ingest failures allowed before the session aborts
+    size_t packetModeSchedulingQueueSize; // The maximum queue size for packet mode scheduling per DistSession
 
 private:
     void parseCacheControl(Open5GSYamlIter &iter);

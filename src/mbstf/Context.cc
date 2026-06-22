@@ -47,6 +47,7 @@ Context::Context()
     ,cacheControl({60, 60})
     ,totalMaxBitRateSoftLimit(100)
     ,consecutiveIngestFailuresBeforeDeactivate(5)
+    ,packetModeSchedulingQueueSize(128*1024) // 128KB queue for rate smoothing
 {
 }
 
@@ -124,6 +125,17 @@ bool Context::parseConfig()
                         }
                     } else {
                         throw std::out_of_range("Bad configuration node at mbstf.consecutiveIngestFailuresBeforeDeactivate");
+                    }
+                } else if (mbstf_key == "packetModeSchedulingQueueSize") {
+                    if (mbstf_iter.type() == YAML_MAPPING_NODE) {
+                        std::string num_val(mbstf_iter.value());
+                        size_t idx = 0;
+                        packetModeSchedulingQueueSize = std::stoi(num_val, &idx);
+                        if (idx != num_val.size()) {
+                            throw std::out_of_range("Bad configuration value at mbstf.packetModeSchedulingQueueSize");
+                        }
+                    } else {
+                        throw std::out_of_range("Bad configuration node at mbstf.packetModeSchedulingQueueSize");
                     }
                 } else {
                     ogs_warn("Unknown key `mbstf.%s` in configuration", mbstf_key.c_str());

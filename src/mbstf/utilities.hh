@@ -18,7 +18,11 @@
  * See the License for the specific language governing permissions and limitations
  * under the License.
  */
+#include <netinet/in.h>
+#include <sys/socket.h>
+
 #include <chrono>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -35,8 +39,15 @@ std::string time_point_to_iso8601_utc_str(const std::chrono::system_clock::time_
 std::chrono::system_clock::time_point iso8601_utc_str_to_time_point(const std::string &iso8601_str);
 std::chrono::system_clock::time_point http_datetime_str_to_time_point(const std::string &rfc9110_str);
 
-int get_path_mtu(const ogs_sockaddr_t &sock_addr);
-int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port);
+enum GetMTULevels {
+    GET_MTU_ETHERNET_PAYLOAD = 0,
+    GET_MTU_IP_PAYLOAD = 1
+};
+
+int get_path_mtu(const ogs_sockaddr_t &sock_addr, int minus_level_hdrs = GET_MTU_ETHERNET_PAYLOAD);
+int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port, int minus_level_hdrs = GET_MTU_ETHERNET_PAYLOAD);
+
+std::shared_ptr<struct sockaddr> make_shared_sockaddr(int family_hint, const std::string &hostname, in_port_t port);
 
 MBSTF_NAMESPACE_STOP
 

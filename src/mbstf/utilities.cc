@@ -19,6 +19,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
 
 #include "ogs-core.h"
 
@@ -89,7 +91,7 @@ std::chrono::system_clock::time_point http_datetime_str_to_time_point(const std:
     return retval;
 }
 
-int get_path_mtu(const ogs_sockaddr_t &sock_addr)
+int get_path_mtu(const ogs_sockaddr_t &sock_addr, int minus_level_hdrs)
 {
     ogs_sock_t *sock = ogs_sock_socket(sock_addr.ogs_sa_family, SOCK_DGRAM, 0);
     ogs_sock_connect(sock, const_cast<ogs_sockaddr_t*>(&sock_addr));
@@ -97,33 +99,57 @@ int get_path_mtu(const ogs_sockaddr_t &sock_addr)
     socklen_t mtu_size = sizeof(mtu);
     if (sock_addr.ogs_sa_family == AF_INET) {
         getsockopt(sock->fd, IPPROTO_IP, IP_MTU, &mtu, &mtu_size);
+        if (minus_level_hdrs >= GET_MTU_IP_PAYLOAD) mtu -= sizeof(iphdr);
     } else if (sock_addr.ogs_sa_family == AF_INET6) {
         getsockopt(sock->fd, IPPROTO_IPV6, IPV6_MTU, &mtu, &mtu_size);
+        if (minus_level_hdrs >= GET_MTU_IP_PAYLOAD) mtu -= sizeof(ip6_hdr);
     }
     ogs_sock_destroy(sock);
     return mtu;
 }
 
-int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port)
+int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port, int minus_level_hdrs)
 {
     int mtu = 1500; // default to 1500 if no MTU can be found.
 
     if (tunnel_ip) { // Use MTU of tunnel if provided
         ogs_sockaddr_t *sa = nullptr;
         if (ogs_addaddrinfo(&sa, AF_UNSPEC, tunnel_ip.value().c_str(), tunnel_port, AI_NUMERICSERV) == OGS_OK) {
-            mtu = get_path_mtu(*sa);
+            mtu = get_path_mtu(*sa, minus_level_hdrs);
             ogs_freeaddrinfo(sa);
         } // else error already reported
     } else { // No tunnel provided so try MTU of direct destination
         if (ssm_port) {
             ogs_sockaddr_t *sa = nullptr;
             if (ogs_addaddrinfo(&sa, AF_UNSPEC, ssm_port.destinationAddress().c_str(), ssm_port.port(), AI_NUMERICSERV) == OGS_OK) {
-                mtu = get_path_mtu(*sa);
+                mtu = get_path_mtu(*sa, minus_level_hdrs);
                 ogs_freeaddrinfo(sa);
             }
         }
     }
     return mtu;
+}
+
+std::shared_ptr<struct sockaddr> make_shared_sockaddr(int family_hint, const std::string &hostname, in_port_t port)
+{
+    std::shared_ptr<struct sockaddr> ret;
+    if (!hostname.empty()) {
+        struct addrinfo *ai = nullptr;
+        getaddrinfo(hostname.c_str(), std::format("{}", port).c_str(), nullptr, &ai);
+        if (ai) {
+            for (const auto *it = ai; it; it = it->ai_next) {
+                if ((family_hint == AF_UNSPEC && (it->ai_family == AF_INET || it->ai_family == AF_INET6)) ||
+                    (family_hint == it->ai_family)) {
+                    auto sa_data = std::make_shared<uint8_t[]>(static_cast<size_t>(it->ai_addrlen));
+                    memcpy(sa_data.get(), it->ai_addr, it->ai_addrlen);
+                    ret = std::reinterpret_pointer_cast<struct sockaddr>(sa_data);
+                    break;
+                }
+            }
+            freeaddrinfo(ai);
+        }
+    }
+    return ret;
 }
 
 MBSTF_NAMESPACE_STOP

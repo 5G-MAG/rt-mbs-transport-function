@@ -157,6 +157,28 @@ libmbstf_dist_sources = files('''
     Open5GSYamlDocument.hh
     Open5GSYamlIter.cc
     Open5GSYamlIter.hh
+    PacketController.cc
+    PacketController.hh
+    PacketFEC.cc
+    PacketFEC.hh
+    PacketForwardPacketisation.cc
+    PacketForwardPacketisation.hh
+    Packet.cc
+    Packet.hh
+    PacketIngester.cc
+    PacketIngester.hh
+    PacketForwardOnlyController.cc
+    PacketForwardOnlyController.hh
+    PacketPacketisation.cc
+    PacketPacketisation.hh
+    PacketProcessing.cc
+    PacketProcessing.hh
+    PacketProxyController.cc
+    PacketProxyController.hh
+    PacketProxyPacketisation.cc
+    PacketProxyPacketisation.hh
+    PacketScheduler.cc
+    PacketScheduler.hh
     PullObjectIngester.cc
     PullObjectIngester.hh
     PushObjectIngester.cc
@@ -167,6 +189,8 @@ libmbstf_dist_sources = files('''
     SubscriptionService.hh
     Subscriber.cc
     Subscriber.hh
+    ThreadedWorker.cc
+    ThreadedWorker.hh
     TimerFunc.hh
     utilities.cc
     utilities.hh

@@ -74,7 +74,7 @@ void ObjectListController::setObjectPackager() {
     std::optional<std::string> tunnel_addr = distributionSession().getTunnelAddr();
     uint32_t rate_limit = distributionSession().getRateLimit();
     in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
-    unsigned short mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port) - GTP_HEADER_SIZE;
+    unsigned short mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port, GET_MTU_ETHERNET_PAYLOAD) - GTP_HEADER_SIZE;
     const auto &obj_list = objectStore().getObjects();
     packager(new ObjectListPackager(objectStore(), *this, ssm_port, rate_limit, mtu, tunnel_addr, tunnel_port));
     // Send all objects that are in the ObjectStore

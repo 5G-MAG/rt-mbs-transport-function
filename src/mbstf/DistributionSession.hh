@@ -42,6 +42,7 @@ namespace reftools::mbstf {
     class CreateReqData;
     class DistSessionSubscription;
     class ObjDistributionData;
+    class TunnelAddress;
 }
 
 MBSTF_NAMESPACE_START
@@ -86,6 +87,7 @@ public:
     const std::string &getObjectDistributionOperatingMode() const;
     const SsmPort getSsmPort() const;
     uint64_t getTSI() const;
+    const std::optional<std::shared_ptr<reftools::mbstf::TunnelAddress>> &getTunnel() const;
     const std::optional<std::string> &getTunnelAddr() const;
     in_port_t getTunnelPortNumber() const;
     uint32_t getRateLimit() const;
