@@ -84,8 +84,9 @@ Packet::Packet(const uint8_t *buffer, size_t buffer_size, bool encapsulated_hdrs
             m_encapsulatedUdpOffset = m_encapsulatedIpOffset + sizeof(ip6_hdr);
             for (const struct ip6_ext *ip6e = reinterpret_cast<const struct ip6_ext*>(buffer + sizeof(ip6_hdr));
                  ip6e->ip6e_nxt != IPPROTO_UDP;
-                 ip6e = reinterpret_cast<const struct ip6_ext*>(reinterpret_cast<const uint8_t*>(ip6e) + ip6e->ip6e_len)) {
-                m_encapsulatedUdpOffset += ip6e->ip6e_len;
+                 ip6e = reinterpret_cast<const struct ip6_ext*>(reinterpret_cast<const uint8_t*>(ip6e) + (ip6e->ip6e_len + 1) * 8))
+            {
+                m_encapsulatedUdpOffset += (ip6e->ip6e_len + 1) * 8;
             }
         }
         if (m_encapsulatedUdpOffset) m_encapsulatedPayloadOffset = m_encapsulatedUdpOffset + sizeof(udphdr);
@@ -307,7 +308,7 @@ bool Packet::setEncapsulatedUdpHeader(struct in6_addr *source_address, in_port_t
     m_haveEncapsulation = true;
 
     struct ip6_hdr *ip = reinterpret_cast<struct ip6_hdr*>(m_packet.data() + m_encapsulatedIpOffset);
-    ip->ip6_vfc = 6;
+    ip->ip6_vfc = 0x60; // version = 6, tc top bits = 0
     ip->ip6_nxt = IPPROTO_UDP;
     ip->ip6_hlim = ttl;
     ip->ip6_src = *source_address;
@@ -650,7 +651,7 @@ int Packet::sendICMP6(uint8_t typ, uint8_t code, uint32_t icmpdata, ssize_t orig
     auto sin6_orig_dst = std::reinterpret_pointer_cast<struct sockaddr_in6>(m_originalDestinationAddress);
 
     struct ip6_hdr ip;
-    ip.ip6_vfc = 6;
+    ip.ip6_vfc = 0x60; // version = 6, top tc bits = 0
     ip.ip6_nxt = IPPROTO_ICMPV6;
     ip.ip6_hlim = 64;
     ip.ip6_src = sin6_orig_dst->sin6_addr; // going back from our address
@@ -666,7 +667,7 @@ int Packet::sendICMP6(uint8_t typ, uint8_t code, uint32_t icmpdata, ssize_t orig
     auto icmp_cksum_it = packet.end() - 6;
 
     // Recreate original IPv6 hdr
-    ip.ip6_vfc = 6;
+    ip.ip6_vfc = 0x60; // version = 6, top tc bits = 0
     ip.ip6_nxt = IPPROTO_UDP;
     ip.ip6_hlim = 64;
     ip.ip6_src = sin6_orig_src->sin6_addr;
