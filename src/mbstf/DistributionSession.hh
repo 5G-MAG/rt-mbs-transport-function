@@ -3,8 +3,9 @@
 /******************************************************************************
  * 5G-MAG Reference Tools: MBS Transport Function: Distribution Session class
  ******************************************************************************
- * Copyright: (C)2024-2025 British Broadcasting Corporation
+ * Copyright: (C)2024-2026 British Broadcasting Corporation
  * Author(s): Dev Audsin <dev.audsin@bbc.co.uk>
+ *            David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
  * Licensed under the License terms and conditions for use, reproduction, and

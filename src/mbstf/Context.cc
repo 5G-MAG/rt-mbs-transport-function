@@ -1,7 +1,7 @@
 /******************************************************************************
  * 5G-MAG Reference Tools: MBS Transport Function: App context class
  ******************************************************************************
- * Copyright: (C)2024 British Broadcasting Corporation
+ * Copyright: (C)2024-2026 British Broadcasting Corporation
  * Author(s): David Waring <david.waring2@bbc.co.uk>
  * License: 5G-MAG Public License v1
  *
