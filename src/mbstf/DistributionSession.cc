@@ -1060,10 +1060,10 @@ void DistributionSession::_apiSessionCreate(Open5GSSBIStream &stream, Open5GSSBI
         return;
     } catch (std::exception &err) {
         ogs_error("Error while populating MBSTF Distribution Session: %s", err.what());
-        char *error = ogs_msprintf("Invalid ObjDistributionData parameters [%s]", err.what());
+        char *error = ogs_msprintf("Invalid ObjDistributionData or PktDistributionData parameters [%s]", err.what());
         ogs_error("%s", error);
         ogs_assert(true == NfServer::sendError(stream, ProblemCause::INVALID_MSG_FORMAT, 1, message, app_meta, api,
-                                                "Invalid ObjDistributionData parameters", error));
+                                                "Invalid ObjDistributionData  or PktDistributionData parameters", error));
         ogs_free(error);
         return;
     }

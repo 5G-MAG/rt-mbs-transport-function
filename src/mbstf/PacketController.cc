@@ -194,7 +194,8 @@ void PacketController::validateDistributionSession(DistributionSession &distribu
     }
     const auto &pkt_distr_data = dist_session->getPktDistributionData();
     if (!pkt_distr_data || !pkt_distr_data.value()) {
-        throw ModelException("Packet distribution operating mode requires pktDistributionData", "PacketController", "distSession.pktDistributionData", ProblemCause::MANDATORY_IE_MISSING);
+        // throw logic error to indicate that this Controller is not right for the given distribution session, but another may be
+        throw std::logic_error("Packet distribution operating mode requires pktDistributionData");
     }
 }
 
