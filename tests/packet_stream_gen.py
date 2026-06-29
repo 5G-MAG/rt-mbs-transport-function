@@ -219,8 +219,8 @@ async def main():
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MTU_DISCOVER, socket.IP_PMTUDISC_PROBE)
         else:
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MTU_DISCOVER, socket.IP_PMTUDISC_DONT)
-        (host, port) = sock.getsockname()
-        if ipaddress.ip_address(host).is_multicast:
+        if ipaddress.ip_address(remote_addr_port[0]).is_multicast:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(local_addr_port[0]))
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
     elif sock.family == socket.AF_INET6:
@@ -229,8 +229,7 @@ async def main():
             sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MTU_DISCOVER, socket.IPV6_PMTUDISC_PROBE)
         else:
             sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MTU_DISCOVER, socket.IPV6_PMTUDISC_DONT)
-        (host, port, flowinfo, scope_id) = sock.getsockname()
-        if ipaddress.ip_address(host).is_multicast:
+        if ipaddress.ip_address(remote_addr_port[0]).is_multicast:
             sock.setsockopt(socket.IPPROTO_IPv6, socket.IPV6_MULTICAST_HOPS, ttl)
             sock.setsockopt(socket.IPPROTO_IPv6, socket.IPV6_MULTICAST_LOOP, 1)
 

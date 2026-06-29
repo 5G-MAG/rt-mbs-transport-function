@@ -15,10 +15,13 @@
 #include <netinet/in.h>
 #include <netinet/ip_icmp.h>
 #include <net/ethernet.h>
+#include <net/if.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
+#include <ifaddrs.h>
 
 #include <chrono>
 #include <cstring>
@@ -42,6 +45,7 @@ MBSTF_NAMESPACE_START
 static bool fill_sockaddr_by_hostname(void /*struct sockaddr*/ *addr, const std::string &hostname, int family);
 static bool match_sockaddrs(const struct sockaddr *a, const struct sockaddr *b);
 static const char *inet_sockaddr_to_str(const struct sockaddr *sa, char *buf, socklen_t buf_len);
+static int get_interface_for_sockaddr(const struct sockaddr *sa);
 
 // public:
 
@@ -140,28 +144,49 @@ PacketIngester::PacketIngester(const SsmPort &multicast_source) // Multicast ing
     ,m_worker()
 {
     //ogs_debug("Construct multicast ingester");
-    m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (m_socket < 0) throw std::generic_category().default_error_condition(errno);
-
     if (multicast_source.hasSourceAddress()) {
         struct group_source_req mreq = {};
         fill_sockaddr_by_hostname(&mreq.gsr_group, multicast_source.destinationAddress(), AF_UNSPEC);
         fill_sockaddr_by_hostname(&mreq.gsr_source, multicast_source.sourceAddress().value(), mreq.gsr_group.ss_family);
-        setsockopt(m_socket, mreq.gsr_group.ss_family, MCAST_JOIN_SOURCE_GROUP, &mreq, sizeof(mreq));
+        mreq.gsr_interface = get_interface_for_sockaddr(reinterpret_cast<struct sockaddr*>(&mreq.gsr_source));
+        int yes = 1;
+        m_socket = socket(mreq.gsr_source.ss_family, SOCK_DGRAM, IPPROTO_UDP);
+        if (m_socket < 0) throw std::generic_category().default_error_condition(errno);
         if (mreq.gsr_source.ss_family == AF_INET) {
+            struct sockaddr_in any = {.sin_family = AF_INET, .sin_port = htons(multicast_source.port())};
+            bind(m_socket, reinterpret_cast<struct sockaddr*>(&any), sizeof(any));
+            setsockopt(m_socket, SOL_IP, IP_PKTINFO, &yes, sizeof(yes));
+            setsockopt(m_socket, SOL_IP, MCAST_JOIN_SOURCE_GROUP, &mreq, sizeof(mreq));
             m_remoteAddr = std::reinterpret_pointer_cast<struct sockaddr>(std::make_shared<struct sockaddr_in>(*reinterpret_cast<struct sockaddr_in*>(&mreq.gsr_source)));
         } else if (mreq.gsr_source.ss_family == AF_INET6) {
+            struct sockaddr_in6 any = {.sin6_family = AF_INET6, .sin6_port = htons(multicast_source.port())};
+            bind(m_socket, reinterpret_cast<struct sockaddr*>(&any), sizeof(any));
+            setsockopt(m_socket, SOL_IPV6, IPV6_RECVPKTINFO, &yes, sizeof(yes));
+            setsockopt(m_socket, SOL_IPV6, MCAST_JOIN_SOURCE_GROUP, &mreq, sizeof(mreq));
             m_remoteAddr = std::reinterpret_pointer_cast<struct sockaddr>(std::make_shared<struct sockaddr_in6>(*reinterpret_cast<struct sockaddr_in6*>(&mreq.gsr_source)));
         }
     } else {
         struct group_req mreq = {};
         fill_sockaddr_by_hostname(&mreq.gr_group, multicast_source.destinationAddress(), AF_UNSPEC);
-        setsockopt(m_socket, mreq.gr_group.ss_family, MCAST_JOIN_GROUP, &mreq, sizeof(mreq));
+        int yes = 1;
+        m_socket = socket(mreq.gr_group.ss_family, SOCK_DGRAM, IPPROTO_UDP);
+        if (m_socket < 0) throw std::generic_category().default_error_condition(errno);
+        if (mreq.gr_group.ss_family == AF_INET) {
+            struct sockaddr_in any = {.sin_family = AF_INET, .sin_port = htons(multicast_source.port())};
+            bind(m_socket, reinterpret_cast<struct sockaddr*>(&any), sizeof(any));
+            setsockopt(m_socket, SOL_IP, IP_PKTINFO, &yes, sizeof(yes));
+            setsockopt(m_socket, SOL_IP, MCAST_JOIN_GROUP, &mreq, sizeof(mreq));
+        } else if (mreq.gr_group.ss_family == AF_INET6) {
+            struct sockaddr_in6 any = {.sin6_family = AF_INET6, .sin6_port = htons(multicast_source.port())};
+            bind(m_socket, reinterpret_cast<struct sockaddr*>(&any), sizeof(any));
+            setsockopt(m_socket, SOL_IPV6, IPV6_RECVPKTINFO, &yes, sizeof(yes));
+            setsockopt(m_socket, SOL_IPV6, MCAST_JOIN_GROUP, &mreq, sizeof(mreq));
+        }
     }
 
     {
-        char src_buf[INET6_ADDRSTRLEN + 6];
-        inet_sockaddr_to_str(m_remoteAddr.get(), src_buf, sizeof(src_buf));
+        char src_buf[INET6_ADDRSTRLEN + 8] = "Unspecified";
+        if (m_remoteAddr) inet_sockaddr_to_str(m_remoteAddr.get(), src_buf, sizeof(src_buf));
         ogs_debug("Opened multicast packet socket from %s for group %s:%i", src_buf, multicast_source.destinationAddress().c_str(), multicast_source.port());
     }
 
@@ -344,11 +369,12 @@ void PacketIngester::closeSocket()
                 struct group_source_req mreq = {};
                 fill_sockaddr_by_hostname(&mreq.gsr_group, m_ssm.destinationAddress(), AF_UNSPEC);
                 fill_sockaddr_by_hostname(&mreq.gsr_source, m_ssm.sourceAddress().value(), mreq.gsr_group.ss_family);
+                mreq.gsr_interface = get_interface_for_sockaddr(reinterpret_cast<struct sockaddr*>(&mreq.gsr_source));
                 setsockopt(m_socket, mreq.gsr_group.ss_family, MCAST_LEAVE_SOURCE_GROUP, &mreq, sizeof(mreq));
             } else {
                 struct group_req mreq = {};
                 fill_sockaddr_by_hostname(&mreq.gr_group, m_ssm.destinationAddress(), AF_UNSPEC);
-                setsockopt(m_socket, mreq.gr_group.ss_family, MCAST_JOIN_GROUP, &mreq, sizeof(mreq));
+                setsockopt(m_socket, mreq.gr_group.ss_family, MCAST_LEAVE_GROUP, &mreq, sizeof(mreq));
             }
         }
         close(m_socket);
@@ -368,19 +394,20 @@ void PacketIngester::sendICMPNeedSmallerMTU(uint16_t mtu, const Packet &pkt)
 static bool fill_sockaddr_by_hostname(void /*struct sockaddr*/ *addr, const std::string &hostname, int af_family)
 {
     struct addrinfo *ai = nullptr;
+    bool result = false;
     getaddrinfo(hostname.c_str(), nullptr, nullptr, &ai);
     if (ai) {
         for (const auto *it = ai; it; it = it->ai_next) {
             if ((af_family == AF_UNSPEC && (it->ai_family == AF_INET || it->ai_family == AF_INET6)) ||
-                (af_family == it->ai_family)) {
+                (af_family != AF_UNSPEC && af_family == it->ai_family)) {
                 memcpy(addr, it->ai_addr, it->ai_addrlen);
-                freeaddrinfo(ai);
-                return true;
+                result = true;
+                break;
             }
         }
         freeaddrinfo(ai);
     }
-    return false;
+    return result;
 }
 
 static bool match_sockaddrs(const struct sockaddr *a, const struct sockaddr *b)
@@ -435,6 +462,54 @@ static const char *inet_sockaddr_to_str(const struct sockaddr *sa, char *buf, so
     }
 
     return nullptr;
+}
+
+static int get_interface_for_sockaddr(const struct sockaddr *sa)
+{
+    int s = socket(sa->sa_family, SOCK_DGRAM, 0);
+    if (s < 0) return 0;
+
+    // connect the socket to get the kernel to find the best interface
+    if (sa->sa_family==AF_INET) {
+        connect(s, sa, sizeof(struct sockaddr_in));
+    } else if (sa->sa_family==AF_INET6) {
+        connect(s, sa, sizeof(struct sockaddr_in6));
+    }
+
+    // ask socket for the local address for the interface
+    struct sockaddr_storage local_addr;
+    socklen_t local_len = sizeof(local_addr);
+    getsockname(s, reinterpret_cast<struct sockaddr*>(&local_addr), &local_len);
+
+    // Now search network interfaces for an interface matching the local address
+    struct ifaddrs *ifa = nullptr;
+    struct ifreq ifr = {};
+    if (!getifaddrs(&ifa)) {
+        for (auto *it = ifa; it; it = it->ifa_next) {
+            if (!it->ifa_addr) continue;
+            if (it->ifa_addr->sa_family == local_addr.ss_family) {
+                if (local_addr.ss_family == AF_INET) {
+                    struct sockaddr_in *a = reinterpret_cast<struct sockaddr_in*>(it->ifa_addr);
+                    struct sockaddr_in *b = reinterpret_cast<struct sockaddr_in*>(&local_addr);
+                    if (a->sin_addr.s_addr == b->sin_addr.s_addr) {
+                        strcpy(ifr.ifr_name, it->ifa_name);
+                        break;
+                    }
+                } else if (local_addr.ss_family == AF_INET6) {
+                    struct sockaddr_in6 *a = reinterpret_cast<struct sockaddr_in6*>(it->ifa_addr);
+                    struct sockaddr_in6 *b = reinterpret_cast<struct sockaddr_in6*>(&local_addr);
+                    if (IN6_ARE_ADDR_EQUAL(&a->sin6_addr, &b->sin6_addr)) {
+                        strcpy(ifr.ifr_name, it->ifa_name);
+                        break;
+                    }
+                }
+            }
+        }
+        freeifaddrs(ifa);
+    }
+    ioctl(s, SIOCGIFINDEX, &ifr);
+    close(s);
+    return ifr.ifr_ifindex;
 }
 
 MBSTF_NAMESPACE_STOP
