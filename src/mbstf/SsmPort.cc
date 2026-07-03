@@ -102,9 +102,9 @@ static std::string _conv_IpAddr_to_string(const std::shared_ptr<IpAddr> &ip_addr
     const auto &ipv4_addr = ip_addr->getIpv4Addr();
     if (ipv4_addr) return ipv4_addr.value();
     const auto &ipv6_addr = ip_addr->getIpv6Addr();
-    if (ipv6_addr) return ipv6_addr.value();
+    if (ipv6_addr) return *ipv6_addr.value();
     const auto &ipv6_prefix = ip_addr->getIpv6Prefix();
-    if (ipv6_prefix) return ipv6_prefix.value();
+    if (ipv6_prefix) return *ipv6_prefix.value();
     return std::string();
 }
 

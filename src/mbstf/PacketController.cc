@@ -40,6 +40,7 @@
 
 using fiveg_mag_reftools::ModelException;
 using fiveg_mag_reftools::ProblemCause;
+using reftools::mbstf::Ipv6Addr;
 using reftools::mbstf::MbStfIngestAddr;
 using reftools::mbstf::PktIngestMethod;
 using reftools::mbstf::TunnelAddress;
@@ -105,7 +106,7 @@ void PacketController::establishInactiveInputs()
                 char buf[INET6_ADDRSTRLEN];
                 const auto *sin6 = reinterpret_cast<const struct sockaddr_in6*>(&local_addr);
                 if (inet_ntop(AF_INET6, &sin6->sin6_addr, buf, sizeof(buf))) {
-                    local_listening_addr.setIpv6Addr(std::string(buf));
+                    local_listening_addr.setIpv6Addr(std::make_shared<Ipv6Addr>(buf));
                 }
                 local_listening_addr.setPortNumber(ntohs(sin6->sin6_port));
             }
@@ -290,7 +291,7 @@ static std::shared_ptr<struct sockaddr> make_shared_sockaddr(const std::shared_p
         in_port_t port = static_cast<in_port_t>(tunnel_addr->getPortNumber());
         const auto &ipv6_addr = tunnel_addr->getIpv6Addr();
         if (ipv6_addr) {
-            hostname = ipv6_addr.value();
+            hostname = *ipv6_addr.value();
             family = AF_INET6;
         } else {
             const auto &ipv4_addr = tunnel_addr->getIpv4Addr();
@@ -313,11 +314,11 @@ static SsmPort make_ssm(const MbStfIngestAddr::AfSsmType::value_type &af_ssm)
     in_port_t af_ssm_port = static_cast<in_port_t>(af_ssm->getPortNumber());
     std::string dest;
     const auto &dest_ip_addr = *af_ssm_addr->getDestIpAddr();
-    if (dest_ip_addr.getIpv6Addr()) dest = dest_ip_addr.getIpv6Addr().value();
+    if (dest_ip_addr.getIpv6Addr()) dest = *dest_ip_addr.getIpv6Addr().value();
     else if (dest_ip_addr.getIpv4Addr()) dest = dest_ip_addr.getIpv4Addr().value();
     std::string src;
     const auto &src_ip_addr = *af_ssm_addr->getSourceIpAddr();
-    if (src_ip_addr.getIpv6Addr()) src = src_ip_addr.getIpv6Addr().value();
+    if (src_ip_addr.getIpv6Addr()) src = *src_ip_addr.getIpv6Addr().value();
     else if (src_ip_addr.getIpv4Addr()) src = src_ip_addr.getIpv4Addr().value();
     return SsmPort(af_ssm_port, dest, src);
 }
