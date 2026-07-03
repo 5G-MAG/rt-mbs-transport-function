@@ -181,7 +181,7 @@ if [ -x "$scriptdir/post-process.sh" ]; then
     CPP_POST_PROCESS_FILE="$scriptdir/post-process.sh" export CPP_POST_PROCESS_FILE
 fi
 
-if ! "$rt_common_shared_dir/open5gs-tools/scripts/generate_openapi" -a "${APIS}" -o "$rt_common_shared_dir/mbs/5G_APIs-overrides" -b "${BRANCH}" -c "$templates_dir/config.yaml" -l cpp-restbed-server -d "$scriptdir/openapi" -g 7.23.0 -P "reftools.mbstf" $DEBUG_FLAG ${CACHE_DIR:+-C "$CACHE_DIR"}; then
+if ! "$rt_common_shared_dir/open5gs-tools/scripts/generate_openapi" -a "${APIS}" -b "${BRANCH}" -c "$templates_dir/config.yaml" -l cpp-restbed-server -d "$scriptdir/openapi" -g 7.23.0 -P "reftools.mbstf" $DEBUG_FLAG ${CACHE_DIR:+-C "$CACHE_DIR"}; then
     echo "Error: Failed to generate OpenAPI model" 1>&2
     exit 1
 fi
