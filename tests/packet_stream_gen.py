@@ -159,7 +159,7 @@ class StreamClientProtocol:
 
     def connection_made(self, transport):
         self.__transport = transport
-self.__send_task = asyncio.get_running_loop().create_task(self.send_loop(), eager_start=True)
+        self.__send_task = asyncio.get_running_loop().create_task(self.send_loop())
         
     def datagram_received(self, data, addr):
         print(f"Unexpected packet of {len(data)} bytes from: {addr}")
