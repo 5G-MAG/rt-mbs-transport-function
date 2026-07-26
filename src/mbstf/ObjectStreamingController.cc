@@ -133,6 +133,17 @@ void ObjectStreamingController::processEvent(Event &event, SubscriptionService &
 
             } else {
                 std::unique_ptr<ManifestHandler> manifest_handler(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL"));
+                if (!manifest_handler) {
+                    // No registered handler recognised this object's media type as a manifest
+                    // (e.g. it matched getManifestUrl() spuriously, or genuinely isn't a
+                    // supported manifest format). Storing/using a null handler here crashes
+                    // later at the first manifestHandler()->... call, which asserts rather
+                    // than null-checks (see LibFlute/shared_ptr_deref) -- mirror
+                    // ObjectCarouselController's handling of this exact case instead.
+                    ogs_error("Could not find suitable manifest handler for object %s", object_id.c_str());
+                    sendToPackager(object);
+                    return;
+                }
                 manifestHandler(std::move(manifest_handler));
                 sendToPackager(object);
             }
