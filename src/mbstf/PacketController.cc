@@ -173,6 +173,14 @@ void PacketController::deactivateOutput()
     if (m_fec) m_fec->stop();
     if (m_packetiser) m_packetiser->stop();
     m_scheduler.stop();
+    // BUG FIX: unlike the Object controllers (which reach this asynchronously, once an
+    // ObjectSendCompleted event confirms the queue is actually drained), nothing here ever told
+    // DistributionSession the queue was empty -- the DEACTIVATING state's only exit path is
+    // haveEmptyQueue() (see DistributionSession::_deactivatingState()), so a Packet Distribution
+    // Session was stuck there forever, unable to reactivate, once deactivated once.
+    // fec/packetiser/scheduler stop() all join their worker threads synchronously (see e.g.
+    // PacketScheduler::stop()/haltThreads()), so by this point the queue genuinely is empty.
+    distributionSession().haveEmptyQueue();
 }
 
 void PacketController::flushPackagerQueue()
