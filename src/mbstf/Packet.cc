@@ -122,10 +122,14 @@ Packet::Packet(struct msghdr *msg, const std::shared_ptr<struct sockaddr> &liste
             m_encapsulatedUdpOffset = m_encapsulatedIpOffset + ip->ihl * 4;
         } else if (ip->version == 6) {
             m_encapsulatedUdpOffset = m_encapsulatedIpOffset + sizeof(ip6_hdr);
+            // RFC 8200 cl.4.1: Hdr Ext Len is in 8-octet units, NOT counting the first 8 octets
+            // -- the actual header length is (ip6e_len + 1) * 8, as the buffer-based constructor
+            // above correctly computes. This was missing the "+1)*8" conversion entirely, using
+            // the raw unit count as a byte offset instead.
             for (const struct ip6_ext *ip6e = reinterpret_cast<const struct ip6_ext*>(buffer + sizeof(ip6_hdr));
                  ip6e->ip6e_nxt != IPPROTO_UDP;
-                 ip6e = reinterpret_cast<const struct ip6_ext*>(reinterpret_cast<const uint8_t*>(ip6e) + ip6e->ip6e_len)) {
-                m_encapsulatedUdpOffset += ip6e->ip6e_len;
+                 ip6e = reinterpret_cast<const struct ip6_ext*>(reinterpret_cast<const uint8_t*>(ip6e) + (ip6e->ip6e_len + 1) * 8)) {
+                m_encapsulatedUdpOffset += (ip6e->ip6e_len + 1) * 8;
             }
         }
         if (m_encapsulatedUdpOffset) m_encapsulatedPayloadOffset = m_encapsulatedUdpOffset + sizeof(udphdr);
@@ -390,7 +394,10 @@ uint16_t Packet::checksum(const void *buffer, size_t buffer_len)
 
     if (i > 0) {
         const uint8_t *buf8 = reinterpret_cast<const uint8_t*>(buf32);
-        std::array<uint8_t, sizeof(uint32_t)> partial_word;
+        // Zero-initialise: only the first i (1-3) bytes get overwritten below, and the read a
+        // few lines down reads all 4 bytes of this array -- an uninitialised tail here folded
+        // indeterminate stack memory into the checksum for any buffer_len not a multiple of 4.
+        std::array<uint8_t, sizeof(uint32_t)> partial_word{};
         size_t j = 0;
         while (i > 0) {
             partial_word[j++] = *buf8++;
