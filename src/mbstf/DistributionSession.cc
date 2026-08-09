@@ -929,6 +929,20 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
         ex.addInvalidParameter(err.parameter, err.what());
     }
 
+    /* upTrafficFlowInfo (transportSessionId, destination address and port) names the FLUTE session that has been
+       announced for this Distribution Session. TS 29.581 V19.3.0 gives it only "Write-Only: true" and no clause says
+       whether an update may change it; as for objDistributionOperatingMode above, a change is refused rather than
+       applied to a session that is running. */
+    auto old_up_traffic_flow_info = old_dist_session->getUpTrafficFlowInfo();
+    auto new_up_traffic_flow_info = new_dist_session->getUpTrafficFlowInfo();
+    if (!old_up_traffic_flow_info != !new_up_traffic_flow_info) {
+        ex.addInvalidParameter("distSession.upTrafficFlowInfo", "Cannot add or remove upTrafficFlowInfo");
+    } else if (old_up_traffic_flow_info &&
+               *new_up_traffic_flow_info.value() != *old_up_traffic_flow_info.value()) {
+        ex.addInvalidParameter("distSession.upTrafficFlowInfo",
+                                "Cannot change upTrafficFlowInfo (transportSessionId/destIpAddr/portNumber) once set");
+    }
+
     /* If errors then report them */
     if (!ex.invalidParams.empty()) {
         throw ex;
