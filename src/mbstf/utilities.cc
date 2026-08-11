@@ -93,15 +93,31 @@ std::chrono::system_clock::time_point http_datetime_str_to_time_point(const std:
 
 int get_path_mtu(const ogs_sockaddr_t &sock_addr, int minus_level_hdrs)
 {
+    // BUG FIX (found live, 2026-08-10): IP_MTU/IPV6_MTU getsockopt() on a UDP socket that has
+    // never sent traffic or received a PMTUD "fragmentation needed" ICMP is unreliable -- for a
+    // destination whose route resolves to a local/virtual interface (loopback, or a multicast
+    // route with no explicit egress interface set), the kernel reports THAT interface's own MTU
+    // (commonly 65536 for lo), not any real end-to-end path MTU. Confirmed live: this produced
+    // ~65KB FLUTE/UDP packets for a genuinely 1500-MTU veth path, which then arrived at the gNB's
+    // N3mb GTP-U receiver as truncated/unreassembled fragments ("PDU length does not match the
+    // length in GTP-U header", "Dropped PDU, error reading GTP-U header") -- silently breaking
+    // all real content delivery despite every step up to this point genuinely working. Clamp to
+    // a conservative standard-Ethernet ceiling; nothing this function's callers do (FLUTE/ROUTE
+    // packaging for delivery over a real RAN path) can safely assume anything larger regardless
+    // of what a local socket happens to report.
+    static const int MAX_SANE_MTU = 1500;
+
     ogs_sock_t *sock = ogs_sock_socket(sock_addr.ogs_sa_family, SOCK_DGRAM, 0);
     ogs_sock_connect(sock, const_cast<ogs_sockaddr_t*>(&sock_addr));
     int mtu = 1500;
     socklen_t mtu_size = sizeof(mtu);
     if (sock_addr.ogs_sa_family == AF_INET) {
         getsockopt(sock->fd, IPPROTO_IP, IP_MTU, &mtu, &mtu_size);
+        if (mtu <= 0 || mtu > MAX_SANE_MTU) mtu = MAX_SANE_MTU;
         if (minus_level_hdrs >= GET_MTU_IP_PAYLOAD) mtu -= sizeof(iphdr);
     } else if (sock_addr.ogs_sa_family == AF_INET6) {
         getsockopt(sock->fd, IPPROTO_IPV6, IPV6_MTU, &mtu, &mtu_size);
+        if (mtu <= 0 || mtu > MAX_SANE_MTU) mtu = MAX_SANE_MTU;
         if (minus_level_hdrs >= GET_MTU_IP_PAYLOAD) mtu -= sizeof(ip6_hdr);
     }
     ogs_sock_destroy(sock);

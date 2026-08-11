@@ -55,6 +55,10 @@ namespace {
         ~RequestData() {};
         const DistributionSessionSubscription *subscription;
         std::shared_ptr<Open5GSSBIRequest> request;
+        // Snapshot of lastReportedEventTimes taken *before* this notification's events were
+        // marked as reported -- restored on failure (see processClientResponse()) so a dropped
+        // connection or non-2xx MBSF response doesn't silently and permanently drop the event.
+        DistributionSessionEvents preSendCache;
     };
 }
 
@@ -241,6 +245,9 @@ void DistributionSessionSubscription::sendNotifications() const
     const auto &notify_uri = m_distSessionSubscription.getNotifyUri();
     if (notify_uri) {
         //ogs_debug("DistributionSessionSubscription[%p]: notify URL = %s", this, notify_uri.value().c_str());
+        // Snapshot before makeReportList() marks these events as reported -- see RequestData's
+        // preSendCache and processClientResponse()'s failure branch.
+        DistributionSessionEvents pre_send_cache = m_cache->lastReportedEventTimes;
         auto report_list = makeReportList();
         const auto &reports = report_list->getEventReportList();
         if (!reports.empty()) {
@@ -259,7 +266,7 @@ void DistributionSessionSubscription::sendNotifications() const
             static const std::string api_version(std::format("{}/{}", StatusNotifyReqData::apiName, StatusNotifyReqData::apiVersion));
             std::shared_ptr<Open5GSSBIRequest> request(new Open5GSSBIRequest(post_method, notify_uri.value(), api_version,
                                                 body, OGS_SBI_CONTENT_JSON_TYPE));
-            RequestData *data = new RequestData{this, request};
+            RequestData *data = new RequestData{this, request, pre_send_cache};
             m_cache->client->sendRequest(__notify_client_cb, request, data);
         }
     }
@@ -272,11 +279,22 @@ bool DistributionSessionSubscription::processClientResponse(const Open5GSEvent &
     {
         RequestData *req_data = reinterpret_cast<RequestData*>(event.sbiData());
         if (req_data && req_data->subscription == this) {
+            // BUG FIX: makeReportList() marks each event as reported *before* this response is
+            // known, so a dropped connection or a non-2xx MBSF response used to permanently and
+            // silently drop that event (TS 29.581 cl.5.2.2.8 obliges the MBSTF to report it) --
+            // restore the pre-send snapshot on any failure so the event is included again in the
+            // next notification attempt instead.
             if (event.sbiState() == OGS_OK) {
                 auto resp = event.sbiResponse(true);
                 ogs_debug("Got %i response from notification(s) to %s", resp.status(), req_data->request->uri());
+                if (resp.status() < 200 || resp.status() >= 300) {
+                    ogs_warn("Notification to %s rejected (status %i) -- will retry on next notification",
+                             req_data->request->uri(), resp.status());
+                    m_cache->lastReportedEventTimes = req_data->preSendCache;
+                }
             } else {
-                ogs_debug("Problem sending notification(s) to %s", req_data->request->uri());
+                ogs_warn("Problem sending notification(s) to %s -- will retry on next notification", req_data->request->uri());
+                m_cache->lastReportedEventTimes = req_data->preSendCache;
             }
             req_data->request.reset();
             delete req_data;

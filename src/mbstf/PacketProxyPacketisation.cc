@@ -131,7 +131,9 @@ void PacketProxyPacketisation::ssmToAddrs()
     if (m_srcAddr) {
         if (m_srcAddr->sa_family == AF_INET) {
             mtu(m_outerMTU - sizeof(iphdr) - sizeof(udphdr));
-        } else if (m_srcAddr->sa_family == AF_INET) {
+        } else if (m_srcAddr->sa_family == AF_INET6) {
+            // Was erroneously AF_INET again, so this branch was unreachable and the IPv6+UDP
+            // encapsulation overhead was never subtracted for an IPv6 source/SSM address.
             mtu(m_outerMTU - sizeof(ip6_hdr) - sizeof(udphdr));
         }
     }

@@ -251,7 +251,24 @@ void ObjectListController::reconfigureObjectPackager()
 {
     /* only set the packager in the ACTIVE state */
     if (distributionSession().getState() == DistSessionState::VAL_ACTIVE) {
-        setObjectPackager();
+        // BUG FIX: this used to unconditionally call setObjectPackager(), which destroys and
+        // fully recreates the FLUTE transmitter (re-reading a fresh TSI from the DistSession) on
+        // every ACTIVE-state PATCH -- unlike ObjectStreamingController/ObjectCarouselController,
+        // which live-patch an already-running transmitter's endpoint/rate/tunnel via
+        // updateFluteInfo() and never touch TSI. Mirror that here: only fall back to a full
+        // recreate if no packager exists yet.
+        auto packager = getObjectListPackager();
+        if (packager) {
+            auto ssm_port = distributionSession().getSsmPort();
+            const std::optional<std::string> &tunnel_addr = distributionSession().getTunnelAddr();
+            uint32_t rate_limit = distributionSession().getRateLimit();
+            in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
+            if (ssm_port) {
+                packager->updateFluteInfo(ssm_port, rate_limit, tunnel_addr, tunnel_port);
+            }
+        } else {
+            setObjectPackager();
+        }
     }
 }
 
@@ -285,7 +302,19 @@ static int validate_distribution_session(DistributionSession &distribution_sessi
     if (distribution_session.getObjectAcquisitionMethod() == "PUSH" && distribution_session.getObjectDistributionOperatingMode() == "SINGLE") {
         std::optional<std::string> object_acquisition_push_id = distribution_session.getObjectAcquisitionPushId();
         if (object_acquisition_push_id.has_value()) {
-            return 0;
+            // BUG FIX (found live, 2026-08-10): this early-return path is reached for the
+            // standard, valid PUSH+SINGLE configuration (an objAcquisitionPushId was resolved),
+            // meaning this session is already good and the generic ObjectController::
+            // validateDistributionSession() check below can be skipped. It returned 0 here, but
+            // the caller (ObjectListController::ObjectListController(), "if
+            // (!validate_distribution_session(...)) throw...") treats 0 as INVALID and 1 as
+            // valid -- matching the fall-through path a few lines below, which always returns 1
+            // after a successful (non-throwing) generic validation. So this valid PUSH+SINGLE
+            // case was being rejected with "Invalid Distribution Session" 100% of the time,
+            // unconditionally blocking every real PUSH-mode single-object distribution session
+            // (confirmed live against rt-mbs-application-provider: MBSF's 502 "Failed to create
+            // MBS Distribution Session in MBSTF" traced directly to this).
+            return 1;
         }
     }
     ObjectController::validateDistributionSession(distribution_session);
