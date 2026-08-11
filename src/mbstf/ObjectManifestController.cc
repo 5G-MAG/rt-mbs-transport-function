@@ -233,7 +233,18 @@ ObjectManifestController &ObjectManifestController::manifestHandler(std::shared_
 {
     std::lock_guard guard(m_manifestHandlerMutex);
     m_manifestHandler = std::move(manifest_handler);
-    subscribeTo({ObjectManifestHandler::ObjectManifestChangeEvent::event_name}, *m_manifestHandler);
+    // BUG FIX: ManifestHandlerFactory::makeManifestHandler() legitimately returns nullptr when no
+    // registered handler matches the pushed object's media type (e.g. HLS/"application/vnd.apple.
+    // mpegurl" -- this build only registers manifest handlers for certain types, not every object
+    // that gets pushed is itself a manifest needing multi-file orchestration). This unconditionally
+    // dereferenced m_manifestHandler ("*m_manifestHandler") to subscribe to it, with no null check
+    // -- confirmed live: a real HLS playlist push crashed MBSTF outright
+    // ("std::__shared_ptr_deref ... Assertion '__p != nullptr' failed"). An object with no
+    // manifest handler is not an error case; it's simply not a manifest, so there is nothing to
+    // subscribe to for change notifications -- skip it rather than crash.
+    if (m_manifestHandler) {
+        subscribeTo({ObjectManifestHandler::ObjectManifestChangeEvent::event_name}, *m_manifestHandler);
+    }
     m_manifestHandlerChange.notify_all();
     return *this;
 }
