@@ -43,12 +43,14 @@ ObjectStore::Metadata::Metadata()
     ,m_fetchedUrl()
     ,m_acquisitionId()
     ,m_keepAfterSend(false)
+    ,m_compressedSend(false)
     ,m_objIngestBaseUrl()
     ,m_objDistributionBaseUrl()
     ,m_cacheExpires(std::nullopt)
     ,m_receivedTime(std::chrono::system_clock::now())
     ,m_created(std::chrono::system_clock::now())
     ,m_modified(std::chrono::system_clock::now())
+    ,m_lastSentTime(std::chrono::system_clock::duration(0)) // set to epoch initially
     ,m_fileDescription()
 {
 }
@@ -65,12 +67,14 @@ ObjectStore::Metadata::Metadata(const std::string &object_id, const std::string 
     ,m_fetchedUrl(fetched_url)
     ,m_acquisitionId(acquisition_id)
     ,m_keepAfterSend(false)
+    ,m_compressedSend(false)
     ,m_objIngestBaseUrl(obj_ingest_base_url)
     ,m_objDistributionBaseUrl(obj_distribution_base_url)
     ,m_cacheExpires(cache_expires)
     ,m_receivedTime(std::chrono::system_clock::now())
     ,m_created(std::chrono::system_clock::now())
     ,m_modified(last_modified)
+    ,m_lastSentTime(std::chrono::system_clock::duration(0)) // set to epoch initially
     ,m_fileDescription()
 {
 }
@@ -82,12 +86,14 @@ ObjectStore::Metadata::Metadata(const Metadata &other)
     ,m_fetchedUrl(other.m_fetchedUrl)
     ,m_acquisitionId(other.m_acquisitionId)
     ,m_keepAfterSend(other.m_keepAfterSend)
+    ,m_compressedSend(other.m_compressedSend)
     ,m_objIngestBaseUrl(other.m_objIngestBaseUrl)
     ,m_objDistributionBaseUrl(other.m_objDistributionBaseUrl)
     ,m_cacheExpires(other.m_cacheExpires)
     ,m_receivedTime(other.m_receivedTime)
     ,m_created(other.m_created)
     ,m_modified(other.m_modified)
+    ,m_lastSentTime(other.m_lastSentTime)
     ,m_fileDescription(other.m_fileDescription)
 {
 }
@@ -98,13 +104,15 @@ ObjectStore::Metadata::Metadata(Metadata &&other)
     ,m_originalUrl(std::move(other.m_originalUrl))
     ,m_fetchedUrl(std::move(other.m_fetchedUrl))
     ,m_acquisitionId(std::move(other.m_acquisitionId))
-    ,m_keepAfterSend(std::move(other.m_keepAfterSend))
+    ,m_keepAfterSend(other.m_keepAfterSend)
+    ,m_compressedSend(other.m_compressedSend)
     ,m_objIngestBaseUrl(std::move(other.m_objIngestBaseUrl))
     ,m_objDistributionBaseUrl(std::move(other.m_objDistributionBaseUrl))
     ,m_cacheExpires(std::move(other.m_cacheExpires))
     ,m_receivedTime(std::move(other.m_receivedTime))
     ,m_created(std::move(other.m_created))
     ,m_modified(std::move(other.m_modified))
+    ,m_lastSentTime(std::move(other.m_lastSentTime))
     ,m_fileDescription(std::move(other.m_fileDescription))
 {
 }
@@ -117,12 +125,14 @@ ObjectStore::Metadata &ObjectStore::Metadata::operator=(const ObjectStore::Metad
     m_fetchedUrl = other.m_fetchedUrl;
     m_acquisitionId = other.m_acquisitionId;
     m_keepAfterSend = other.m_keepAfterSend;
+    m_compressedSend = other.m_compressedSend;
     m_objIngestBaseUrl = other.m_objIngestBaseUrl;
     m_objDistributionBaseUrl = other.m_objDistributionBaseUrl;
     m_cacheExpires = other.m_cacheExpires;
     m_receivedTime = other.m_receivedTime;
     m_created = other.m_created;
     m_modified = other.m_modified;
+    m_lastSentTime = other.m_lastSentTime;
     m_fileDescription = other.m_fileDescription;
 
     return *this;
@@ -135,13 +145,15 @@ ObjectStore::Metadata &ObjectStore::Metadata::operator=(ObjectStore::Metadata &&
     m_originalUrl = std::move(other.m_originalUrl);
     m_fetchedUrl = std::move(other.m_fetchedUrl);
     m_acquisitionId = std::move(other.m_acquisitionId);
-    m_keepAfterSend = std::move(other.m_keepAfterSend);
+    m_keepAfterSend = other.m_keepAfterSend;
+    m_compressedSend = other.m_compressedSend;
     m_objIngestBaseUrl = std::move(other.m_objIngestBaseUrl);
     m_objDistributionBaseUrl = std::move(other.m_objDistributionBaseUrl);
     m_cacheExpires = std::move(other.m_cacheExpires);
     m_receivedTime = std::move(other.m_receivedTime);
     m_created = std::move(other.m_created);
     m_modified = std::move(other.m_modified);
+    m_lastSentTime = std::move(other.m_lastSentTime);
     m_fileDescription = std::move(other.m_fileDescription);
 
     return *this;
@@ -150,6 +162,7 @@ ObjectStore::Metadata &ObjectStore::Metadata::operator=(ObjectStore::Metadata &&
 bool ObjectStore::Metadata::operator==(const ObjectStore::Metadata& other) const
 {
     return m_keepAfterSend == other.m_keepAfterSend &&
+           m_compressedSend == other.m_compressedSend &&
            m_cacheExpires == other.m_cacheExpires &&
            m_receivedTime == other.m_receivedTime &&
            m_created == other.m_created &&

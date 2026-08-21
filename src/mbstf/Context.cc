@@ -17,6 +17,7 @@
  * under the License.
  */
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <string>
@@ -28,6 +29,7 @@
 #include "common.hh"
 #include "App.hh"
 #include "DistributionSession.hh"
+#include "ManifestHandlerFactory.hh"
 #include "Open5GSNetworkFunction.hh"
 #include "Open5GSSBIServer.hh"
 #include "Open5GSSockAddr.hh"
@@ -48,6 +50,7 @@ Context::Context()
     ,totalMaxBitRateSoftLimit(100)
     ,consecutiveIngestFailuresBeforeDeactivate(5)
     ,packetModeSchedulingQueueSize(128*1024) // 128KB queue for rate smoothing
+    ,manifestGlobals()
 {
 }
 
@@ -105,8 +108,9 @@ bool Context::parseConfig()
                     } while (distSess_array.type() == YAML_SEQUENCE_NODE);
 
                 } else if (mbstf_key == "totalMaxBitRateSoftLimit") {
-                    if (mbstf_iter.type() == YAML_MAPPING_NODE) {
-                        std::string limit_val(mbstf_iter.value());
+                    Open5GSYamlIter total_max_iter(mbstf_iter);
+                    if (total_max_iter.type() == YAML_SCALAR_NODE) {
+                        std::string limit_val(total_max_iter.value());
                         size_t idx = 0;
                         totalMaxBitRateSoftLimit = std::stoi(limit_val, &idx);
                         if (idx != limit_val.size()) {
@@ -116,8 +120,9 @@ bool Context::parseConfig()
                         throw std::out_of_range("Bad configuration node at mbstf.totalMaxBitRateSoftLimit");
                     }
                 } else if (mbstf_key == "consecutiveIngestFailuresBeforeDeactivate") {
-                    if (mbstf_iter.type() == YAML_MAPPING_NODE) {
-                        std::string num_val(mbstf_iter.value());
+                    Open5GSYamlIter failures_iter(mbstf_iter);
+                    if (failures_iter.type() == YAML_SCALAR_NODE) {
+                        std::string num_val(failures_iter.value());
                         size_t idx = 0;
                         consecutiveIngestFailuresBeforeDeactivate = std::stoi(num_val, &idx);
                         if (idx != num_val.size()) {
@@ -127,7 +132,8 @@ bool Context::parseConfig()
                         throw std::out_of_range("Bad configuration node at mbstf.consecutiveIngestFailuresBeforeDeactivate");
                     }
                 } else if (mbstf_key == "packetModeSchedulingQueueSize") {
-                    if (mbstf_iter.type() == YAML_MAPPING_NODE) {
+                    Open5GSYamlIter queue_size_iter(mbstf_iter);
+                    if (queue_size_iter.type() == YAML_SCALAR_NODE) {
                         std::string num_val(mbstf_iter.value());
                         size_t idx = 0;
                         packetModeSchedulingQueueSize = std::stoi(num_val, &idx);
@@ -137,7 +143,14 @@ bool Context::parseConfig()
                     } else {
                         throw std::out_of_range("Bad configuration node at mbstf.packetModeSchedulingQueueSize");
                     }
-                } else {
+                } else if (mbstf_key == "manifestHandler") {
+                    Open5GSYamlIter manifest_handler_iter(mbstf_iter);
+                    if (manifest_handler_iter.type() == YAML_MAPPING_NODE) {
+                        parseManifestHandlerGlobals(mbstf_key, manifest_handler_iter);
+                    } else {
+                        throw std::out_of_range("Bad configuration node at mbstf.manifestHandler");
+                    }
+                } else if (!ManifestHandlerFactory::parseConfiguration(mbstf_key, mbstf_iter)) {
                     ogs_warn("Unknown key `mbstf.%s` in configuration", mbstf_key.c_str());
                 }
             }
@@ -195,6 +208,26 @@ void Context::parseCacheControl(Open5GSYamlIter &iter) {
             ogs_error("Cache control value for %s of \"%s\" is too big for integer storage.", cc_key.c_str(), cc_val.c_str());
         } catch (std::invalid_argument &ex) {
             ogs_error("Cache control value for %s of \"%s\" is not understood as an integer.", cc_key.c_str(), cc_val.c_str());
+        }
+    }
+}
+
+void Context::parseManifestHandlerGlobals(const std::string &pc_key, Open5GSYamlIter &iter)   {
+    while (iter.next()) {
+        std::string mhg_key(iter.key());
+        if (mhg_key == "manifestRepetitionRate") {
+            Open5GSYamlIter man_rep_iter(iter);
+            if (man_rep_iter.type() == YAML_SCALAR_NODE) {
+                try {
+                    manifestGlobals.manifestRepetitionRate = parseDuration(man_rep_iter.value());
+                } catch (std::out_of_range &ex) {
+                    throw std::out_of_range(std::format("Bad configuration data type for mbstf.{}.{}: {}", pc_key, mhg_key, ex.what()));
+                }
+            } else {
+                throw std::out_of_range(std::format("Bad configuration data type for mbstf.{}.{}: Value is not a duration", pc_key, mhg_key));
+            }
+        } else {
+            ogs_warn("Unknown configuration key mbstf.%s.%s", pc_key.c_str(), mhg_key.c_str());
         }
     }
 }
@@ -407,6 +440,29 @@ void Context::updateNFLoad()
             svc->load += new_load;
         }
     }
+}
+
+std::chrono::milliseconds Context::parseDuration(const std::string &duration_string)
+{
+    char *ext = NULL;
+    unsigned long long val = strtoull(duration_string.c_str(), &ext, 10);
+    if (ext == duration_string.c_str()) throw std::out_of_range("duration must be an integer with optional units");
+    std::string units(ext);
+    if (units == "ms") {
+        return std::chrono::milliseconds(val);
+    } else if (units.empty() || units == "s") {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::seconds(val));
+    } else if (units == "m") {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::minutes(val));
+    } else if (units == "h") {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::hours(val));
+    } else if (units == "d") {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::days(val));
+    } else if (units == "w") {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::weeks(val));
+    }
+
+    throw std::out_of_range("duration units must be either omitted, \"ms\", \"s\", \"m\", \"h\", \"d\" or \"w\"");
 }
 
 MBSTF_NAMESPACE_STOP

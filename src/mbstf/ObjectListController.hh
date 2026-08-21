@@ -67,7 +67,6 @@ protected:
     virtual void initPushObjectIngester();
     virtual void initPullObjectIngesters();
     virtual void setObjectPackager();
-    virtual void unsetObjectPackager();
     virtual void activateObjectPackager();
     virtual void deactivateObjectPackager();
 

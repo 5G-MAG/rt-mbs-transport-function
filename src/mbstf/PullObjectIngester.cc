@@ -38,23 +38,30 @@ MBSTF_NAMESPACE_START
 /***** PullObjectIngester::IngestItem methods *****/
 
 PullObjectIngester::IngestItem::IngestItem(const ObjectStore::Metadata &object_meta,
-                                           const std::optional<time_type> &download_deadline)
+                                           const std::optional<time_type> &download_deadline, bool force_recache,
+                                           bool keep_after_send, bool compress_send)
     :m_objectId(object_meta.objectId())
     ,m_url(object_meta.getFetchedUrl())
     ,m_acquisitionId(object_meta.acquisitionId())
     ,m_objIngestBaseUrl(object_meta.objIngestBaseUrl())
     ,m_objDistributionBaseUrl(object_meta.objDistributionBaseUrl())
     ,m_deadline(download_deadline)
+    ,m_forceRecache(force_recache)
+    ,m_markAsKeepAfterSend(keep_after_send)
+    ,m_markAsCompressedSend(compress_send)
 {
 }
 
-PullObjectIngester::IngestItem::IngestItem(const std::string &object_id, const std::string &url, const std::string &acquisition_id, const std::optional<std::string> &obj_ingest_base_url,  const std::optional<std::string> &obj_distribution_base_url, const std::optional<time_type> &download_deadline)
+PullObjectIngester::IngestItem::IngestItem(const std::string &object_id, const std::string &url, const std::string &acquisition_id, const std::optional<std::string> &obj_ingest_base_url,  const std::optional<std::string> &obj_distribution_base_url, const std::optional<time_type> &download_deadline, bool force_recache, bool keep_after_send, bool compress_send)
     :m_objectId(object_id)
     ,m_url(url)
     ,m_acquisitionId(acquisition_id)
     ,m_objIngestBaseUrl(obj_ingest_base_url)
     ,m_objDistributionBaseUrl(obj_distribution_base_url)
     ,m_deadline(download_deadline)
+    ,m_forceRecache(force_recache)
+    ,m_markAsKeepAfterSend(keep_after_send)
+    ,m_markAsCompressedSend(compress_send)
 {
 }
 
@@ -65,6 +72,9 @@ PullObjectIngester::IngestItem::IngestItem(const IngestItem &other)
     ,m_objIngestBaseUrl(other.m_objIngestBaseUrl)
     ,m_objDistributionBaseUrl(other.m_objDistributionBaseUrl)
     ,m_deadline(other.m_deadline)
+    ,m_forceRecache(other.m_forceRecache)
+    ,m_markAsKeepAfterSend(other.m_markAsKeepAfterSend)
+    ,m_markAsCompressedSend(other.m_markAsCompressedSend)
 {
 }
 
@@ -75,6 +85,9 @@ PullObjectIngester::IngestItem::IngestItem(IngestItem &&other)
     ,m_objIngestBaseUrl(std::move(other.m_objIngestBaseUrl))
     ,m_objDistributionBaseUrl(std::move(other.m_objDistributionBaseUrl))
     ,m_deadline(std::move(other.m_deadline))
+    ,m_forceRecache(other.m_forceRecache)
+    ,m_markAsKeepAfterSend(other.m_markAsKeepAfterSend)
+    ,m_markAsCompressedSend(other.m_markAsCompressedSend)
 {
 }
 
@@ -91,7 +104,7 @@ PullObjectIngester::~PullObjectIngester() {
     abort();
 }
 
-bool PullObjectIngester::fetch(const std::string &object_id, const std::optional<time_type> &download_deadline)
+bool PullObjectIngester::fetch(const std::string &object_id, const std::optional<time_type> &download_deadline, bool force_recache, bool keep_after_send, bool compress_send)
 {
     std::lock_guard<std::recursive_mutex> lock(*m_ingestItemsMutex);
 
@@ -102,13 +115,16 @@ bool PullObjectIngester::fetch(const std::string &object_id, const std::optional
             if (download_deadline.has_value()) {
                 it->deadline(download_deadline.value());
             }
+            it->forceRecache(it->forceRecache() || force_recache);
+            it->markAsKeepAfterSend(it->markAsKeepAfterSend() || keep_after_send);
+            it->markAsCompressedSend(it->markAsCompressedSend() || compress_send);
             break;
         }
     }
 
     // otherwise we need a new fetch based on the ObjectStore entry
     if (it == m_fetchList.end()) {
-        m_fetchList.emplace_back(objectStore().getMetadata(object_id), download_deadline);
+        m_fetchList.emplace_back(objectStore()->getMetadata(object_id).keepAfterSend(keep_after_send).compressedSend(compress_send), download_deadline, force_recache);
     }
 
     sortListByPolicy();
@@ -118,38 +134,16 @@ bool PullObjectIngester::fetch(const std::string &object_id, const std::optional
 }
 
 bool PullObjectIngester::fetch(const IngestItem &item) {
-    std::lock_guard<std::recursive_mutex> lock(*m_ingestItemsMutex);
-    try {
-        objectStore().getMetadata(item.objectId());
-        return fetch(item.objectId(), item.deadline());
-    } catch (const std::out_of_range &ex) {
-        // No previous version, this isn't a refresh, but may still be a re-request for an existing list item
-        decltype(m_fetchList)::iterator it;
-        for (it = m_fetchList.begin(); it != m_fetchList.end(); ++it) {
-            if (it->objectId() == item.objectId()) {
-                if (item.deadline().has_value()) {
-                    it->deadline(item.deadline().value());
-                }
-                break;
-            }
-        }
-
-        // otherwise we need a new fetch based on the ObjectStore entry
-        if (it == m_fetchList.end()) {
-            m_fetchList.push_back(item);
-        }
-
-        sortListByPolicy();
-        m_ingestItemsCondVar.notify_all();
-    }
-    return true;
+    return fetch(std::move(IngestItem(item)));
 }
 
 bool PullObjectIngester::fetch(IngestItem &&item) {
     std::lock_guard<std::recursive_mutex> lock(*m_ingestItemsMutex);
     try {
-        objectStore().getMetadata(item.objectId());
-        return fetch(item.objectId(), item.deadline());
+        auto &metadata = objectStore()->getMetadata(item.objectId());
+        if (!metadata.keepAfterSend()) metadata.keepAfterSend(item.markAsKeepAfterSend());
+        metadata.compressedSend(item.markAsCompressedSend());
+        return fetch(item.objectId(), item.deadline(), item.forceRecache(), item.markAsKeepAfterSend(), item.markAsCompressedSend());
     } catch (const std::out_of_range &ex) {
         // No previous version, this isn't a refresh, but may still be a re-request for an existing list item
         decltype(m_fetchList)::iterator it;
@@ -158,6 +152,9 @@ bool PullObjectIngester::fetch(IngestItem &&item) {
                 if (item.deadline().has_value()) {
                     it->deadline(item.deadline().value());
                 }
+                it->forceRecache(it->forceRecache() || item.forceRecache());
+                it->markAsKeepAfterSend(it->markAsKeepAfterSend() || item.markAsKeepAfterSend());
+                it->markAsCompressedSend(it->markAsCompressedSend() || item.markAsCompressedSend());
                 break;
             }
         }
@@ -199,8 +196,20 @@ void PullObjectIngester::doObjectIngest() {
             m_ingestItemsMutex->unlock(); // temp unlock while we fetch
             ObjectStore::Metadata *old_meta = nullptr;
             try {
-                auto &meta = objectStore().getMetadata(item.objectId());
+                auto &meta = objectStore()->getMetadata(item.objectId());
                 old_meta = &meta;
+                if (!item.forceRecache() && meta.hasExpiryTime() && meta.ExpiryTime() > ObjectStore::datetime_type::clock::now()) {
+                    // Existing store item is still fresh
+                    ogs_debug("Reusing cached object for %s instead of fetching again", item.url().c_str());
+                    ObjectStore::Metadata metadata(meta);
+                    try {
+                        this->objectStore()->updateMetadata(meta.objectId(), std::move(metadata), true);
+                    } catch (std::runtime_error &ex) {
+                        ogs_warn("While reusing cached object %s: %s", item.url().c_str(), ex.what());
+                        emitObjectPullIngestFailedEvent(item, item.url(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
+                    }
+                    return;
+                }
                 auto &file_desc = meta.fluteFileDescription();
                 if (file_desc) {
                     ogs_debug("Refetching %s (TOI %u)...", item.url().c_str(), file_desc->toi());
@@ -237,12 +246,17 @@ void PullObjectIngester::doObjectIngest() {
                 ObjectStore::Metadata metadata(item.objectId(), m_curl->getContentType(), item.url(), fetched_url, item.acquisitionId(), m_curl->getLastModified(), item.objIngestBaseUrl(), item.objDistributionBaseUrl());
                 /* re-get metadata from ObjectStore as it may have changed */
                 try {
-                    auto &meta = objectStore().getMetadata(item.objectId());
+                    auto &meta = objectStore()->getMetadata(item.objectId());
                     old_meta = &meta;
                 } catch (const std::out_of_range &ex) {
                     old_meta = nullptr;
                 }
-                if (old_meta) metadata.fluteFileDescription(old_meta->fluteFileDescription());
+                if (old_meta) {
+                    metadata.fluteFileDescription(old_meta->fluteFileDescription());
+                    metadata.keepAfterSend(old_meta->keepAfterSend() || item.markAsKeepAfterSend());
+                } else {
+                    metadata.keepAfterSend(item.markAsKeepAfterSend());
+                }
                 unsigned long max_age = m_curl->getCacheControlMaxAge();
                 unsigned long current_age = m_curl->getAge();
                 metadata.cacheExpires(max_age ? std::chrono::system_clock::now() + std::chrono::seconds(max_age) - std::chrono::seconds(current_age) : std::chrono::system_clock::now() + std::chrono::seconds(ObjectStore::Metadata::cacheExpiry()));
@@ -253,18 +267,30 @@ void PullObjectIngester::doObjectIngest() {
                 auto response_code = m_curl->getResponseCode();
                 if (response_code >= 200 && response_code <= 299) {
                     /* received object - store it */
-                    this->objectStore().addObject(item.objectId(), std::move(m_curl->getData()), std::move(metadata), true);
+                    try {
+                        this->objectStore()->addObject(item.objectId(), std::move(m_curl->getData()), std::move(metadata), true);
+                    } catch (std::runtime_error &ex) {
+                        // Add to ObjectStore failed, send error
+                        ogs_warn("While adding a new object: %s", ex.what());
+                        emitObjectPullIngestFailedEvent(item, item.url(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
+                    }
                 } else if (response_code == 304) {
                     /* Not Modified - just update metadata */
                     if (old_meta) {
                         metadata.mediaType(old_meta->mediaType()); // 304 may not have Content-Type due to no content
-                        this->objectStore().updateMetadata(item.objectId(), std::move(metadata), true);
+                        try {
+                            this->objectStore()->updateMetadata(item.objectId(), std::move(metadata), true);
+                        } catch (std::runtime_error &ex) {
+                            // Update in ObjectStore failed, send error
+                            ogs_warn("While updating object metadata: %s", ex.what());
+                            emitObjectPullIngestFailedEvent(item, item.url(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
+                        }
                     }
                 } else {
                     /* error response - do we throw the object away? */
                     ogs_debug("Fetch error %i", response_code);
                     emitObjectPullIngestFailedEvent(item, fetched_url, (response_code >= 400 && response_code <= 499)?ObjectIngester::IngestFailedEvent::CLIENT_ERROR:ObjectIngester::IngestFailedEvent::SERVER_ERROR);
-                    this->objectStore().updateError(item.objectId(), response_code, item.url(), false);
+                    this->objectStore()->updateError(item.objectId(), response_code, item.url(), false);
                 }
             } else if (bytesReceived == -1) {
                 ogs_error("Request timed out.");

@@ -175,6 +175,43 @@ sbi:
 #      'service-names' is always included in the URI query parameter.
 #    * That is, 'no_service_names' has no effect.
 #
+#
+
+# <Global MBSTF streaming options>
+#   manifestHandler:
+#      manifestRepetitionRate: 10s
+#
+# o This specifies the rate at which the manifest will be repeated in the stream if it is not overridden by the configuration for
+#   a specific manifest handler.
+#   The format is an integer followed by an optional unit (seconds assumed if no units).
+#   The units are:
+#     ms - Milliseconds
+#     s  - Seconds
+#     m  - Minutes
+#     h  - Hours
+#     d  - Days
+#     w  - Weeks
+#
+#   For example, to set the repetition to 10 seconds you could use any of the following:
+#     manifestRepetitionRate: 10
+#     manifestRepetitionRate: 10s
+#     manifestRepetitionRate: 10000ms
+#
+# o If this is omitted from the configuration then the manifest will not be repeated automatically
+#
+# <DASH Manifest Handler streaming options>
+#   dashManifestHandler:
+#     compressMPDOnSend: true
+#     mpdRepetitionRate: 2500ms
+#
+# o The compressMPDOnSend option, when set to true, will cause the MBSTF to send the MPD in the stream compressed with GZIP.
+#   When false or unset the MPD will be sent in plain text.
+#
+# o The mpdRepetitionRate option overrides the global MBSTF streaming manifestRepetitionRate option and takes the same format.
+#   If the MPD specifies an update period less than the repetition period then that will be used as the resend time. If the MPD
+#   update period is greater than the repetition period then the MPD will be repeated at the given interval until the update
+#   period elapses, at which point the MPD will be refetched and sent.
+#
 mbstf:
     sbi:
       - addr: 127.0.0.59
@@ -194,7 +231,11 @@ mbstf:
     serverResponseCacheControl:
       - distMaxAge: 60
         ObjectMaxAge: 60
-
+    manifestHandler:
+      manifestRepetitionRate: 10s
+    dashManifestHandler:
+      compressMPDOnSend: true
+      mpdRepetitionRate: 2000ms
 
 # nrf:
 #

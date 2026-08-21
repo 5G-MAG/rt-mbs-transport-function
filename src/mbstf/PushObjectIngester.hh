@@ -126,6 +126,9 @@ public:
 
     class ObjectPushEvent : public Event {
     public:
+        constexpr static const char *start_event_name = "ObjectPushStart";
+        constexpr static const char *block_received_event_name = "ObjectPushBlockReceived";
+        constexpr static const char *trailers_received_event_name = "ObjectPushTrailersReceived";
         enum ObjectPushEventType {
             ObjectPushStart,
             ObjectPushBlockReceived,
@@ -165,17 +168,19 @@ public:
         std::shared_ptr<Request> m_request;
     };
 
-    PushObjectIngester(ObjectStore& object_store, ObjectController &controller)
-      :ObjectIngester(object_store, controller)
-      ,m_mhdDaemon(nullptr)
-      ,m_sockaddr()
-      ,m_activeRequests()
-      ,m_IPAddress()
-      ,m_domain()
-      ,m_urlPrefix()
-      ,m_port(0)
-      ,m_mtx()
-    { startWorker(); };
+    PushObjectIngester(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller)
+        :ObjectIngester(object_store, controller)
+        ,m_mhdDaemon(nullptr)
+        ,m_sockaddr()
+        ,m_activeRequests()
+        ,m_IPAddress()
+        ,m_domain()
+        ,m_urlPrefix()
+        ,m_port(0)
+        ,m_mtx()
+    {
+        startWorker();
+    };
 
     bool start();
     bool stop();

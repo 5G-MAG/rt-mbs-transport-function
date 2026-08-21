@@ -34,6 +34,7 @@
 #include "DistributionSession.hh"
 #include "ManifestHandler.hh"
 #include "ManifestHandlerFactory.hh"
+#include "MimeContentType.hh"
 #include "ObjectController.hh"
 #include "ObjectStore.hh"
 #include "PullObjectIngester.hh"
@@ -124,7 +125,7 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> ObjectManife
         /* find the metadata entry for this object in the ObjectStore */
         auto &object_store = m_controller->objectStore();
         auto obj_locator = obj.value()->getLocator();
-        auto obj_metadata_ptr = object_store.findMetadataByURL(obj_locator);
+        auto obj_metadata_ptr = object_store->findMetadataByURL(obj_locator);
 
         auto it = m_objectMetadataCache.find(obj.value().get());
         if (it != m_objectMetadataCache.end() && !it->second.beenRequested) {
@@ -186,9 +187,9 @@ bool ObjectManifestHandler::update(const std::shared_ptr<ObjectStore::Object> &n
         if (new_it == new_objects.end()) {
             /* object removed from carousel */
             auto &object_store = m_controller->objectStore();
-            auto *metadata = object_store.findMetadataByURL(old_it->value()->getLocator());
+            auto *metadata = object_store->findMetadataByURL(old_it->value()->getLocator());
             if (metadata) {
-                object_store.removeObject(metadata->objectId());
+                object_store->removeObject(metadata->objectId());
             }
             m_objectMetadataCache.erase(old_it->value().get());
             to_del.push_back(*old_it);
@@ -324,7 +325,7 @@ void ObjectManifestHandler::finishRequest(const std::string &url)
             auto obj_meta_it = m_objectMetadataCache.find(obj.value().get());
             if (obj_meta_it != m_objectMetadataCache.end()) {
                 obj_meta_it->second.beenRequested = false;
-                auto obj_metadata_ptr = object_store.findMetadataByURL(obj_locator);
+                auto obj_metadata_ptr = object_store->findMetadataByURL(obj_locator);
                 auto &keep_updated_interval = obj.value()->getKeepUpdatedInterval();
                 std::optional<datetime_type> next_fetch_time;
                 if (obj_metadata_ptr) {
@@ -375,11 +376,12 @@ static bool g_registered3 = ManifestHandlerFactory::registerManifestHandler("app
 static ObjectManifest ingest_manifest(const std::shared_ptr<ObjectStore::Object> &new_manifest)
 {
     auto &new_metadata = new_manifest->second;
-    ogs_debug("%s", std::format("ingest_manifest: mediaType() = {}", new_metadata.mediaType()).c_str());
-    if (new_metadata.mediaType() != "application/3gpp-mbs-object-manifest+json" &&
-        new_metadata.mediaType() != "application/3gpp-mbs-object-manifest+json;version=Rel17" &&
-        new_metadata.mediaType() != "application/3gpp-mbs-object-manifest+json;version=\"Rel17\""){
-         throw std::invalid_argument("Does not look like an ObjectManifest as the media type is invalid. Expected media type: application/3gpp-mbs-object-manifest+json;version=\"Rel17\"");
+    static const MimeContentType mime_type_obj_manifest("application/3gpp-mbs-object-manifest+json");
+    MimeContentType new_mime_type(new_metadata.mediaType());
+    ogs_debug("%s", std::format("ingest_manifest: mediaType() = {}", new_mime_type).c_str());
+    if (mime_type_obj_manifest != new_mime_type ||
+        (new_mime_type.hasParameter("version") && new_mime_type.parameter("version") != "Rel17")) {
+        throw std::invalid_argument("Does not look like an ObjectManifest as the media type is invalid. Expected media type: application/3gpp-mbs-object-manifest+json;version=\"Rel17\"");
     }
 
     try {

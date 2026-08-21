@@ -63,6 +63,10 @@ public:
     virtual durn_type getDefaultDeadline() = 0;
     virtual bool update(const std::shared_ptr<ObjectStore::Object> &new_manifest) = 0;
     virtual void startedFetch(const PullObjectIngester::IngestItem &item) {};
+    virtual bool compressManifestOnSend() const { return false; };
+
+    //static bool parseConfiguration(const std::string &section_name, Open5GSYamlIter &iter);
+    //static void tidyConfiguration();
 
 protected:
    ObjectController *m_controller;

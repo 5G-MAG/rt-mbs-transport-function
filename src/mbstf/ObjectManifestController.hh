@@ -64,10 +64,15 @@ protected:
     ObjectManifestController &manifestHandler(std::shared_ptr<ManifestHandler> &&manifest_handler);
     const std::shared_ptr<ManifestHandler> &manifestHandler() const;
     virtual std::string nextObjectId();
-
+    virtual void objectAddOrUpdateEvent(const std::shared_ptr<ObjectStore::Object> &object) {};
+    virtual bool includeManifest() { return false; };
+    virtual bool checkObjectActiveInManifest(const std::shared_ptr<ObjectStore::Object> &object) { return true; };
+    virtual void finishRequestInManifestHandler(const std::shared_ptr<ObjectStore::Object> &object) {};
+    virtual void sendToPackager(const std::shared_ptr<ObjectStore::Object> &object) = 0;
 
 private:
     static void workerLoop(ObjectManifestController *controller);
+    std::list<PullObjectIngester::IngestItem> getPullAcquisitionIngestList();
     std::string generateUUID();
 
     std::string m_manifestUrl;

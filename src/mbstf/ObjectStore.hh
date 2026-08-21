@@ -216,6 +216,9 @@ public:
         Metadata &keepAfterSend(bool keep_after_send) {m_keepAfterSend = keep_after_send; return *this;};
         bool keepAfterSend() const { return m_keepAfterSend;};
 
+        bool compressedSend() const { return m_compressedSend; };
+        Metadata &compressedSend(bool compress_send) { m_compressedSend = compress_send; return *this; };
+
         const std::optional<std::string> &objIngestBaseUrl() const { return m_objIngestBaseUrl;};
         Metadata &objIngestBaseUrl(const std::optional<std::string> &obj_ingest_base_url) {
             m_objIngestBaseUrl = obj_ingest_base_url;
@@ -264,6 +267,11 @@ public:
             return *this;
         };
 
+        const datetime_type &lastSent() const { return m_lastSentTime; };
+        Metadata &lastSent(const datetime_type &val) { m_lastSentTime = val; return *this; };
+        Metadata &lastSent(datetime_type &&val) { m_lastSentTime = std::move(val); return *this; };
+        Metadata &lastSentNow() { m_lastSentTime = datetime_type::clock::now(); return *this; };
+
     private:
         std::string m_objectId;
         std::string m_mediaType;
@@ -271,6 +279,7 @@ public:
         std::string m_fetchedUrl;
         std::string m_acquisitionId;
         bool m_keepAfterSend;
+        bool m_compressedSend;
         std::optional<std::string> m_objIngestBaseUrl;
         std::optional<std::string> m_objDistributionBaseUrl;
         std::optional<std::string> m_entityTag;
@@ -278,6 +287,7 @@ public:
         datetime_type m_receivedTime;
         datetime_type m_created;
         datetime_type m_modified;
+        datetime_type m_lastSentTime;
         std::shared_ptr<LibFlute::Transmitter::FileDescription> m_fileDescription;
     };
 

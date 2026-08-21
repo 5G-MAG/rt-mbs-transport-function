@@ -151,7 +151,7 @@ void PushObjectIngester::Request::processRequest()
         m_objectId = m_pushObjectIngester.controller().nextObjectId();
     }
 
-    m_pushObjectIngester.objectStore().addObject(m_objectId, std::move(body), std::move(metadata));
+    m_pushObjectIngester.objectStore()->addObject(m_objectId, std::move(body), std::move(metadata), true);
     m_statusCode = 200;
 }
 
@@ -169,7 +169,12 @@ void PushObjectIngester::Request::requestHandler(struct MHD_Connection *connecti
     if (m_method != "PUSH" && m_method != "PUT" && m_method != "POST") {
         setError(405, "Method Not Allowed");
     } else {
-        processRequest();
+        try {
+            processRequest();
+        } catch (std::runtime_error &ex) {
+            ogs_warn("Failed to accept pushed object: %s", ex.what());
+            setError(400, "Bad Request");
+        }
     }
 
     if (m_statusCode >= 400 && m_statusCode <= 499) {
@@ -209,17 +214,17 @@ std::string PushObjectIngester::Request::reprString() const
 
 PushObjectIngester::ObjectPushEvent *PushObjectIngester::ObjectPushEvent::makeStartEvent(const std::shared_ptr<Request> &request)
 {
-    return new PushObjectIngester::ObjectPushEvent("ObjectPushStart", request);
+    return new PushObjectIngester::ObjectPushEvent(PushObjectIngester::ObjectPushEvent::start_event_name, request);
 }
 
 PushObjectIngester::ObjectPushEvent *PushObjectIngester::ObjectPushEvent::makeBlockReceivedEvent(const std::shared_ptr<Request> &request)
 {
-    return new PushObjectIngester::ObjectPushEvent("ObjectPushBlockReceived", request);
+    return new PushObjectIngester::ObjectPushEvent(PushObjectIngester::ObjectPushEvent::block_received_event_name, request);
 }
 
 PushObjectIngester::ObjectPushEvent *PushObjectIngester::ObjectPushEvent::makeTrailersReceivedEvent(const std::shared_ptr<Request> &request)
 {
-    return new PushObjectIngester::ObjectPushEvent("ObjectPushTrailersReceived", request);
+    return new PushObjectIngester::ObjectPushEvent(PushObjectIngester::ObjectPushEvent::trailers_received_event_name, request);
 }
 
 PushObjectIngester::ObjectPushEvent::~ObjectPushEvent()

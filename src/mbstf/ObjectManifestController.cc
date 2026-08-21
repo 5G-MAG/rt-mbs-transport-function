@@ -26,6 +26,8 @@
 #include "common.hh"
 #include "DistributionSession.hh"
 #include "Event.hh"
+#include "ManifestHandler.hh"
+#include "ManifestHandlerFactory.hh"
 #include "ObjectController.hh"
 #include "ObjectManifestHandler.hh"
 #include "ObjectStore.hh"
@@ -44,6 +46,7 @@ MBSTF_NAMESPACE_START
 static bool validate_push_url(DistributionSession &distributionSession, const std::string &url);
 static void validate_pull_acquisition_method(DistributionSession &distributionSession);
 static bool validate_push_acquisition_method(DistributionSession &distributionSession);
+static bool check_if_object_added_is_manifest(const std::shared_ptr<ObjectStore::Object> &object, const std::string &manifest_url);
 
 /* ObjectManifestController public methods */
 
@@ -59,7 +62,61 @@ ObjectManifestController::ObjectManifestController(DistributionSession &dist_ses
 
 void ObjectManifestController::processEvent(Event &event, SubscriptionService &event_service)
 {
-    if (event.eventName() == "ObjectPushStart") {
+    if (event.eventName() == ObjectStore::ObjectAddedEvent::event_name ||
+        event.eventName() == ObjectStore::ObjectUpdatedEvent::event_name) {
+
+        ObjectStore::ObjectChangedEvent &obj_changed_event = dynamic_cast<ObjectStore::ObjectChangedEvent&>(event);
+        const std::string &object_id = obj_changed_event.objectId();
+        ogs_debug("%s with ID: %s", event.eventName().c_str(), object_id.c_str());
+        try {
+            auto object_store = objectStore();
+            if (object_store) {
+                auto &obj_store = *object_store;
+                const std::shared_ptr<ObjectStore::Object> &object = obj_store[object_id];
+                ogs_debug("Object location: %s", object->second.getFetchedUrl().c_str());
+                objectAddOrUpdateEvent(object);
+                object->second.keepAfterSend(true); /* keep all objects, we'll manually remove if the carousel changes */
+                std::shared_ptr<ManifestHandler> manifest_handler = manifestHandler();
+                if (check_if_object_added_is_manifest(object, getManifestUrl())) {
+                    if (manifest_handler) {
+                        try {
+                            if (!manifest_handler->update(object)) {
+                                ogs_error("Failed to update Manifest");
+                                unsetObjectPackager();
+                                event.stopProcessing();
+                                object->second.keepAfterSend(false);
+                                throw std::runtime_error("Failed to update Manifest");
+                            }
+                            startWorker();
+                            if (includeManifest()) sendToPackager(object);
+                        } catch (std::exception &ex) {
+                            ogs_error("Invalid Manifest update: %s", ex.what());
+                            unsetObjectPackager();
+                            event.stopProcessing();
+                            object->second.keepAfterSend(false);
+                            throw std::runtime_error(ex.what());
+                        }
+                    } else {
+                        manifest_handler.reset(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL"));
+                        if (!manifest_handler) {
+                            object->second.keepAfterSend(false);
+                            throw std::runtime_error("Could not find suitable manifest handler");
+                        }
+                        manifestHandler(std::move(manifest_handler));
+                        if (includeManifest()) {
+                            object->second.compressedSend(manifestHandler()->compressManifestOnSend());
+                            sendToPackager(object);
+                        }
+                    }
+                } else if (checkObjectActiveInManifest(object)) {
+                    finishRequestInManifestHandler(object);
+                    sendToPackager(object);
+                }
+            }
+        } catch (std::out_of_range &ex) {
+            ogs_error("Object %s is not in the ObjectStore", object_id.c_str());
+        }
+    } else if (event.eventName() == PushObjectIngester::ObjectPushEvent::start_event_name) {
         PushObjectIngester::ObjectPushEvent &obj_push_event = dynamic_cast<PushObjectIngester::ObjectPushEvent&>(event);
         const PushObjectIngester::Request &request(obj_push_event.request());
         const std::optional<std::string> &content_type(request.contentType());
@@ -83,7 +140,9 @@ void ObjectManifestController::processEvent(Event &event, SubscriptionService &e
                 auto &ingesters = getPullObjectIngesters();
                 if (!ingesters.empty()) {
                     auto &ingester = ingesters.front();
-                    ingester->fetch(pull_ingest_failed_event.item());
+                    auto &item = pull_ingest_failed_event.item();
+                    item.forceRecache(true); // Force refetch on error
+                    ingester->fetch(item);
                 }
             } catch (std::bad_cast &ex) {
                 // Should never happen, but just incase
@@ -160,11 +219,60 @@ void ObjectManifestController::reconfigurePushObjectIngester()
 void ObjectManifestController::reconfigurePullObjectIngesters()
 {
     std::lock_guard<std::recursive_mutex> lock(this->m_pullObjectIngestersMutex);
-    removeAllPullObjectIngesters();
+    const auto &pull_ingesters = getPullObjectIngesters();
     if (distributionSession().getObjectAcquisitionMethod() == "PULL" &&
         distributionSession().getState() != DistSessionState::VAL_INACTIVE) {
-        initPullObjectIngesters();
+        if (pull_ingesters.empty()) {
+            initPullObjectIngesters();
+        } else {
+            auto pull_ingest_items = getPullAcquisitionIngestList();
+            auto &pull_ingester = pull_ingesters.front();
+            for (auto &item : pull_ingest_items) {
+                pull_ingester->fetch(item);
+            }
+        }
     }
+}
+
+std::list<PullObjectIngester::IngestItem> ObjectManifestController::getPullAcquisitionIngestList()
+{
+    std::list<PullObjectIngester::IngestItem> result;
+    const std::optional<std::string> &object_ingest_base_url = distributionSession().getObjectIngestBaseUrl();
+    const std::optional<std::string> &object_distribution_base_url = distributionSession().objectDistributionBaseUrl();
+
+    auto object_store = objectStore();
+    if (object_store) {
+        auto &pull_urls = distributionSession().getObjectAcquisitionPullUrls();
+        if (pull_urls.has_value()) {
+            for (auto &url : pull_urls.value()) {
+                std::string obj_ingest_url;
+
+                if (url.has_value()) {
+                    const std::string &url_str = url.value();
+                    if (object_ingest_base_url.has_value()) {
+                        if (url_str.starts_with("https:") || url_str.starts_with("http:") || url_str.starts_with("//")) {
+                            ogs_error("Invalid objectAcquisitionPullUrl when objectIngestBaseUrl is set: %s", url.value().c_str());
+                            continue;
+                        } else {
+                            obj_ingest_url = object_ingest_base_url.value();
+                            if (!obj_ingest_url.ends_with("/")) obj_ingest_url += "/";
+                            obj_ingest_url += trim_slashes(url_str);
+                        }
+                    }
+
+                    const auto *metadata = object_store->findMetadataByURL(obj_ingest_url);
+                    if (metadata) {
+                        /* this is a refetch */
+                        result.emplace_back(*metadata);
+                    } else {
+                        /* this is a new URL - always compress manifest for send and keep after sending */
+                        result.emplace_back(nextObjectId(), obj_ingest_url, url_str, object_ingest_base_url, object_distribution_base_url, std::nullopt /*download_deadline*/, false /*force_recache*/, true /*keep_after_send*/, true /*compressed_send*/);
+                    }
+                }
+            }
+        }
+    }
+    return result;
 }
 
 /* ObjectManifestController protected */
@@ -179,61 +287,33 @@ void ObjectManifestController::startWorker()
 
 void ObjectManifestController::initPullObjectIngesters()
 {
-    const std::optional<std::string> &object_ingest_base_url = distributionSession().getObjectIngestBaseUrl();
-    const std::optional<std::string> &object_distribution_base_url = distributionSession().objectDistributionBaseUrl();
-
-    auto &pull_urls = distributionSession().getObjectAcquisitionPullUrls();
-    if (pull_urls.has_value()) {
-        std::list<PullObjectIngester::IngestItem> urls;
-
-        for (auto &url : pull_urls.value()) {
-            std::string obj_ingest_url;
-
-            if (url.has_value()) {
-                const std::string &url_str = url.value();
-                if (object_ingest_base_url.has_value()) {
-                    if (url_str.starts_with("https:") || url_str.starts_with("http:") || url_str.starts_with("//")) {
-                        ogs_error("Invalid objectAcquisitionPullUrl when objectIngestBaseUrl is set: %s", url.value().c_str());
-                        continue;
-                    } else {
-                        obj_ingest_url = object_ingest_base_url.value();
-                        if (!obj_ingest_url.ends_with("/")) obj_ingest_url += "/";
-                        obj_ingest_url += trim_slashes(url_str);
-                    }
-
-                }
-
-                const auto *metadata = objectStore().findMetadataByURL(obj_ingest_url);
-                if (metadata) {
-                    /* this is a refetch */
-                    urls.emplace_back(*metadata);
-                } else {
-                    /* this is a new URL */
-                    urls.emplace_back(nextObjectId(), obj_ingest_url, url_str, object_ingest_base_url, object_distribution_base_url);
-                }
-            }
-        }
-
-        addPullObjectIngester(new PullObjectIngester(objectStore(), *this, urls));
+    auto object_store = objectStore();
+    if (object_store) {
+        auto pull_ingest_items = getPullAcquisitionIngestList();
+        addPullObjectIngester(new PullObjectIngester(object_store, *this, pull_ingest_items));
     }
 }
 
 void ObjectManifestController::initPushObjectIngester()
 {
-    const std::string objIngestBaseUrl;
+    if (objectStore()) {
+        const std::string objIngestBaseUrl;
 
-    PushObjectIngester *push_ingester = new PushObjectIngester(objectStore(), *this);
+        PushObjectIngester *push_ingester = new PushObjectIngester(objectStore(), *this);
 
-    distributionSession().setObjectIngestBaseUrl(push_ingester->getIngestServerPrefix());
-    subscribeTo({"ObjectPushStart"}, *push_ingester);
-    pushObjectIngester(push_ingester);
+        distributionSession().setObjectIngestBaseUrl(push_ingester->getIngestServerPrefix());
+        subscribeTo({"ObjectPushStart"}, *push_ingester);
+        pushObjectIngester(push_ingester);
+    }
 }
 
 ObjectManifestController &ObjectManifestController::manifestHandler(std::shared_ptr<ManifestHandler> &&manifest_handler)
 {
     std::lock_guard guard(m_manifestHandlerMutex);
     m_manifestHandler = std::move(manifest_handler);
-    subscribeTo({ObjectManifestHandler::ObjectManifestChangeEvent::event_name}, *m_manifestHandler);
+    if (m_manifestHandler) {
+        subscribeTo({ObjectManifestHandler::ObjectManifestChangeEvent::event_name}, *m_manifestHandler);
+    }
     m_manifestHandlerChange.notify_all();
     return *this;
 }
@@ -307,8 +387,10 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
         // Get the next ingest items
         try {
             std::lock_guard<std::recursive_mutex> lock(controller->m_manifestHandlerMutex);
-            next_ingest_items = controller->manifestHandler()->nextIngestItems();
-            default_deadline = controller->manifestHandler()->getDefaultDeadline();
+            if (controller->m_manifestHandler) {
+                next_ingest_items = controller->m_manifestHandler->nextIngestItems();
+                default_deadline = controller->m_manifestHandler->getDefaultDeadline();
+            }
         } catch ( std::domain_error &err) {
             ogs_error("While fetching next manifest ingest item: %s", err.what());
         }
@@ -319,11 +401,12 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
 
         std::list<PullObjectIngester::IngestItem> urls;
 
-        {
+        auto object_store = controller->objectStore();
+        if (object_store) {
             std::lock_guard<std::recursive_mutex> lock(controller->m_pullObjectIngestersMutex);
             auto &ingesters = controller->getPullObjectIngesters();
             while (ingesters.size() < next_ingest_items.second.size()) {
-                controller->addPullObjectIngester(new PullObjectIngester(controller->objectStore(), *controller, urls));
+                controller->addPullObjectIngester(new PullObjectIngester(object_store, *controller, urls));
             }
         }
 
@@ -367,7 +450,13 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
 
                 {
                     std::lock_guard<std::recursive_mutex> lock(controller->m_manifestHandlerMutex);
-                    controller->manifestHandler()->startedFetch(ingest_item);
+                    if (controller->m_manifestHandler) {
+                        controller->m_manifestHandler->startedFetch(ingest_item);
+                    } else {
+                        // Manifest handler has disappeared, end scheduled pull
+                        controller->m_scheduledPullRunning = false;
+                        break;
+                    }
                 }
 
                 if (!(*ingester_it)->fetch(ingest_item)) {
@@ -440,6 +529,17 @@ static bool validate_push_url(DistributionSession &distributionSession, const st
     }
 
     return true;
+}
+
+static bool check_if_object_added_is_manifest(const std::shared_ptr<ObjectStore::Object> &object, const std::string &manifest_url)
+{
+    auto &metadata = object->second;
+    if (metadata.getOriginalUrl() == manifest_url || metadata.getFetchedUrl() == manifest_url) {
+        metadata.keepAfterSend(true);
+        return true;
+    }
+    return false;
+
 }
 
 MBSTF_NAMESPACE_STOP

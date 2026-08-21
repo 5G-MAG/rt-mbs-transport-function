@@ -47,9 +47,6 @@ public:
 
     static unsigned int factoryPriority() { return 50; };
 
-    // Subscriber virtual methods
-    virtual void processEvent(Event &event, SubscriptionService &event_service);
-
     // Optional: virtual void subscriberRemoved(SubscriptionService &event_service);
     std::string reprString() const {
                 std::ostringstream os;
@@ -57,21 +54,18 @@ public:
                 return os.str();
     }
 
-    void unsetObjectListPackager() {
-        // Reset the shared pointer to release ownership.
-        packager(nullptr);
-    };
-
     virtual void reconfigureObjectPackager();
 
 protected:
     virtual void setObjectPackager();
-    virtual void unsetObjectPackager();
     virtual void activateObjectPackager();
     virtual void deactivateObjectPackager();
+    virtual void objectAddOrUpdateEvent(const std::shared_ptr<ObjectStore::Object> &object);
+    virtual bool checkObjectActiveInManifest(const std::shared_ptr<ObjectStore::Object> &object);
+    virtual void finishRequestInManifestHandler(const std::shared_ptr<ObjectStore::Object> &object);
+    virtual void sendToPackager(const std::shared_ptr<ObjectStore::Object> &object);
 
 private:
-    void sendToPackager(const std::string &object_id);
     void updateCarousel();
 };
 

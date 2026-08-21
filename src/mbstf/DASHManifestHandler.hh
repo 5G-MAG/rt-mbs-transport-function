@@ -21,6 +21,7 @@
 #include "common.hh"
 #include "ManifestHandler.hh"
 #include "ObjectStore.hh"
+#include "Open5GSYamlIter.hh"
 #include "PullObjectIngester.hh"
 
 MBSTF_NAMESPACE_START
@@ -41,19 +42,59 @@ public:
     virtual ManifestHandler::durn_type getDefaultDeadline();
     virtual bool update(const std::shared_ptr<ObjectStore::Object> &new_manifest);
     virtual std::string nextObjectId();
+    virtual bool compressManifestOnSend() const;
+
     static unsigned int factoryPriority() { return 100; };
+    static bool parseConfiguration(const std::string &section_name, Open5GSYamlIter &iter);
+    static void tidyConfiguration();
 
 private:
+    class SegmentEntry : public LIBMPDPP_NAMESPACE_CLASS(SegmentAvailability) {
+    public:
+        SegmentEntry();
+        SegmentEntry(const SegmentEntry &other);
+        SegmentEntry(SegmentEntry &&other);
+        SegmentEntry(const LIBMPDPP_NAMESPACE_CLASS(SegmentAvailability) &seg_avail, bool force_recache, bool keep_after_send,
+                     bool compress_entry);
+        SegmentEntry(LIBMPDPP_NAMESPACE_CLASS(SegmentAvailability) &&seg_avail, bool force_recache, bool keep_after_send,
+                     bool compress_entry);
+        SegmentEntry(const LIBMPDPP_NAMESPACE_CLASS(SegmentAvailability::time_type) &availability_start,
+                     const LIBMPDPP_NAMESPACE_CLASS(SegmentAvailability::duration_type) &segment_length,
+                     const LIBMPDPP_NAMESPACE_CLASS(URI) &segment_url,
+                     const std::optional<LIBMPDPP_NAMESPACE_CLASS(SegmentAvailability::time_type)> &availability_end = std::nullopt,
+                     bool force_recache = false, bool keep_after_send = false, bool compress_entry = false);
+
+        virtual ~SegmentEntry() {};
+
+        SegmentEntry &operator=(const SegmentEntry &other);
+        SegmentEntry &operator=(SegmentEntry &&other);
+
+        bool forceRecache() const { return m_forceRecache; };
+        SegmentEntry &forceRecache(bool force_recache) { m_forceRecache = force_recache; return *this; };
+
+        bool keepAfterSend() const { return m_keepAfterSend; };
+        SegmentEntry &keepAfterSend(bool keep_after_send) { m_keepAfterSend = keep_after_send; return *this; };
+
+        bool compressEntry() const { return m_compressFile; };
+        SegmentEntry &compressEntry(bool compress_file) { m_compressFile = compress_file; return *this; };
+
+    private:
+        bool m_forceRecache;
+        bool m_keepAfterSend;
+        bool m_compressFile;
+    };
+
     std::string generateUUID();
     void addMPDRefreshToExtraPullObjects();
-    void removeExtraPullObjectsEntry(const LIBMPDPP_NAMESPACE_CLASS(SegmentAvailability) &segment);
+    void removeExtraPullObjectsEntry(const SegmentEntry &segment);
+    std::list<SegmentEntry> augmentSegmentAvailabilityList(std::list<LIBMPDPP_NAMESPACE_CLASS(SegmentAvailability)> &&segments, bool force_recache = false, bool keep_after_send = false, bool compress_entry = false);
 
     std::recursive_mutex m_mpdMutex;
     LIBMPDPP_NAMESPACE_CLASS(MPD)  m_mpd;
     std::shared_ptr<ObjectStore::Object> m_manifest;
     bool m_refreshMpd;
     ManifestHandler::time_type m_mpdReceivedTime;
-    std::list<LIBMPDPP_NAMESPACE_CLASS(SegmentAvailability)> m_extraPullObjects;
+    std::list<SegmentEntry> m_extraPullObjects;
 };
 
 MBSTF_NAMESPACE_STOP

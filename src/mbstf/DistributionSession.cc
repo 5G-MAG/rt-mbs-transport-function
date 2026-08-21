@@ -729,12 +729,12 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
     m_createReqData = new_create_req_data;
 
     /* Reconfigure the controller using the new CreateReqData */
-    if (m_controller) {
-        m_controller->reconfigure();
-    }
+    //if (m_controller) {
+    //    m_controller->reconfigure();
+    //}
 
     /* Make sure we are in the right state */
-    const auto &old_state = old_dist_session->getDistSessionState();
+    //const auto &old_state = old_dist_session->getDistSessionState();
     const auto &new_state = new_dist_session->getDistSessionState();
     auto new_state_enum = new_state->getValue();
     if (new_state_enum == DistSessionState::VAL_INACTIVE || new_state_enum == DistSessionState::VAL_DEACTIVATING) {

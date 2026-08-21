@@ -64,7 +64,7 @@ public:
     };
 
     ObjectIngester() = delete;
-    ObjectIngester(ObjectStore &objectStore, ObjectController &controller)
+    ObjectIngester(const std::shared_ptr<ObjectStore> &objectStore, ObjectController &controller)
         : SubscriptionService(), m_objectStore(objectStore), m_controller(controller), m_workerThread(), m_workerCancel(false) {}
 
     void abort() {
@@ -82,8 +82,8 @@ public:
     bool workerCancelled() const { return m_workerCancel; };
 
 protected:
-    ObjectStore &objectStore() { return m_objectStore; }
-    const ObjectStore &objectStore() const { return m_objectStore; }
+    std::shared_ptr<ObjectStore> &objectStore() { return m_objectStore; }
+    const std::shared_ptr<ObjectStore> &objectStore() const { return m_objectStore; }
     ObjectController &controller() { return m_controller; }
     const ObjectController &controller() const { return m_controller; }
     void startWorker(){m_workerThread = std::thread(workerLoop, this);};
@@ -96,7 +96,7 @@ protected:
 
 private:
     static void workerLoop(ObjectIngester*);
-    ObjectStore &m_objectStore;
+    std::shared_ptr<ObjectStore> m_objectStore;
     ObjectController &m_controller;
     std::thread m_workerThread;
     std::atomic_bool m_workerCancel;

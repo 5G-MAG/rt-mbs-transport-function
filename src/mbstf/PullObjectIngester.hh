@@ -44,11 +44,13 @@ public:
     public:
 
         IngestItem() = delete;
-        IngestItem(const ObjectStore::Metadata &object_meta, const std::optional<time_type> &download_deadline = std::nullopt);
+        IngestItem(const ObjectStore::Metadata &object_meta, const std::optional<time_type> &download_deadline = std::nullopt,
+                   bool force_recache = false, bool keep_after_send = false, bool compress_send = false);
         IngestItem(const std::string &object_id, const std::string &url, const std::string &acquisition_id,
                    const std::optional<std::string> &obj_ingest_base_url = std::nullopt,
                    const std::optional<std::string> &obj_distribution_base_url = std::nullopt,
-                   const std::optional<time_type> &download_deadline = std::nullopt);
+                   const std::optional<time_type> &download_deadline = std::nullopt,
+                   bool force_recache = false, bool keep_after_send = false, bool compressed_send = false);
         IngestItem(const IngestItem &other);
         IngestItem(IngestItem &&other);
         virtual ~IngestItem() {};
@@ -77,6 +79,15 @@ public:
         IngestItem &deadline(const time_type &dl_deadline) { m_deadline = time_type(dl_deadline); return *this; };
         IngestItem &deadline(time_type &&dl_deadline) { m_deadline = std::move(dl_deadline); return *this; };
 
+        bool forceRecache() const { return m_forceRecache; };
+        IngestItem &forceRecache(bool force_recache) { m_forceRecache = force_recache; return *this; };
+
+        bool markAsKeepAfterSend() const { return m_markAsKeepAfterSend; };
+        IngestItem &markAsKeepAfterSend(bool keep_after_send) { m_markAsKeepAfterSend = keep_after_send; return *this; };
+
+        bool markAsCompressedSend() const { return m_markAsCompressedSend; };
+        IngestItem &markAsCompressedSend(bool compress_send) { m_markAsCompressedSend = compress_send; return *this; };
+
     private:
         std::string m_objectId;
         std::string m_url;
@@ -84,6 +95,9 @@ public:
         std::optional<std::string> m_objIngestBaseUrl;
         std::optional<std::string> m_objDistributionBaseUrl;
         std::optional<time_type> m_deadline;
+        bool m_forceRecache;
+        bool m_markAsKeepAfterSend;
+        bool m_markAsCompressedSend;
     };
 
     class PullIngestFailedEvent : public ObjectIngester::IngestFailedEvent {
@@ -97,6 +111,7 @@ public:
         PullIngestFailedEvent &operator=(const PullIngestFailedEvent &other) = delete;
         PullIngestFailedEvent &operator=(PullIngestFailedEvent &&other) = delete;
 
+        PullObjectIngester::IngestItem &item() { return m_item; };
         const PullObjectIngester::IngestItem &item() const { return m_item; };
 
         virtual Event clone() const { return PullIngestFailedEvent(*this); };
@@ -108,25 +123,31 @@ public:
     };
 
     PullObjectIngester() = delete;
-    PullObjectIngester(ObjectStore& object_store, ObjectController &controller, const std::list<IngestItem> &id_to_url_map)
-      :ObjectIngester(object_store, controller)
-      ,m_fetchList(id_to_url_map)
-      ,m_ingestItemsMutex (new std::recursive_mutex)
+    PullObjectIngester(const std::shared_ptr<ObjectStore>& object_store, ObjectController &controller,
+                       const std::list<IngestItem> &id_to_url_map)
+        :ObjectIngester(object_store, controller)
+        ,m_fetchList(id_to_url_map)
+        ,m_ingestItemsMutex (new std::recursive_mutex)
+    {
+        sortListByPolicy();
+        startWorker();
+    };
 
-    { sortListByPolicy(); startWorker(); };
-
-    PullObjectIngester(ObjectStore& object_store, ObjectController &controller, std::list<IngestItem> &&id_to_url_map)
-      :ObjectIngester(object_store, controller)
-      ,m_fetchList(std::move(id_to_url_map))
-      ,m_ingestItemsMutex (new std::recursive_mutex)
-
-    { sortListByPolicy(); startWorker();};
+    PullObjectIngester(const std::shared_ptr<ObjectStore>& object_store, ObjectController &controller, std::list<IngestItem> &&id_to_url_map)
+        :ObjectIngester(object_store, controller)
+        ,m_fetchList(std::move(id_to_url_map))
+        ,m_ingestItemsMutex (new std::recursive_mutex)
+    {
+        sortListByPolicy();
+        startWorker();
+    };
 
     virtual ~PullObjectIngester();
 
     bool fetch(const IngestItem &item);
     bool fetch(IngestItem &&item);
-    bool fetch(const std::string &object_id, const std::optional<time_type> &download_deadline);
+    bool fetch(const std::string &object_id, const std::optional<time_type> &download_deadline, bool force_recache,
+               bool keep_after_send, bool send_compressed);
 
     std::shared_ptr<Curl> curl() {return m_curl;};
     //static int client_notify_cb(int status, ogs_sbi_response_t *response, void *data);

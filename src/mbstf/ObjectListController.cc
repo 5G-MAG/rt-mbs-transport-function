@@ -62,7 +62,7 @@ ObjectListController::ObjectListController(DistributionSession &distributionSess
         throw std::runtime_error("Invalid Distribution Session");
     }
 
-    subscribeToService(objectStore());
+    subscribeToService(*objectStore());
     subscribeTo({PullObjectIngester::ObjectPullQueueExhaustedEvent::event_name}, *this);
 }
 
@@ -71,16 +71,19 @@ ObjectListController::~ObjectListController()
 }
 
 void ObjectListController::setObjectPackager() {
-    auto ssm_port = distributionSession().getSsmPort();
-    std::optional<std::string> tunnel_addr = distributionSession().getTunnelAddr();
-    uint32_t rate_limit = distributionSession().getRateLimit();
-    in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
-    unsigned short mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port, GET_MTU_ETHERNET_PAYLOAD) - GTP_HEADER_SIZE;
-    const auto &obj_list = objectStore().getObjects();
-    packager(new ObjectListPackager(objectStore(), *this, ssm_port, rate_limit, mtu, tunnel_addr, tunnel_port));
-    // Send all objects that are in the ObjectStore
-    for (const auto &[obj_id, object] : obj_list) {
-        sendToPackager(object);
+    auto object_store = objectStore();
+    if (object_store) {
+        auto ssm_port = distributionSession().getSsmPort();
+        std::optional<std::string> tunnel_addr = distributionSession().getTunnelAddr();
+        uint32_t rate_limit = distributionSession().getRateLimit();
+        in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
+        unsigned short mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port, GET_MTU_ETHERNET_PAYLOAD) - GTP_HEADER_SIZE;
+        const auto &obj_list = object_store->getObjects();
+        packager(new ObjectListPackager(object_store, *this, ssm_port, rate_limit, mtu, tunnel_addr, tunnel_port));
+        // Send all objects that are in the ObjectStore
+        for (const auto &[obj_id, object] : obj_list) {
+            sendToPackager(object);
+        }
     }
 }
 
@@ -91,10 +94,6 @@ void ObjectListController::sendToPackager(const std::shared_ptr<ObjectStore::Obj
         ObjectListPackager::PackageItem item(object);
         packager->add(item);
     }
-}
-
-void ObjectListController::unsetObjectPackager() {
-    packager(nullptr);
 }
 
 void ObjectListController::activateObjectPackager() {
@@ -120,7 +119,7 @@ void ObjectListController::processEvent(Event &event, SubscriptionService &event
         std::string object_id = obj_changed_event.objectId();
         ogs_info("%s with ID: %s", event.eventName().c_str(), object_id.c_str());
 
-        sendToPackager(objectStore()[object_id]);
+        sendToPackager((*objectStore())[object_id]);
     } else if (event.eventName() == "ObjectPushStart") {
         PushObjectIngester::ObjectPushEvent &obj_push_event = dynamic_cast<PushObjectIngester::ObjectPushEvent&>(event);
         const PushObjectIngester::Request &request(obj_push_event.request());
@@ -189,7 +188,7 @@ void ObjectListController::initPullObjectIngesters()
 
                 }
 
-                const auto *metadata = objectStore().findMetadataByURL(obj_ingest_url);
+                const auto *metadata = objectStore()->findMetadataByURL(obj_ingest_url);
                 if (metadata) {
                     /* refetch existing object */
                     urls.emplace_back(*metadata);

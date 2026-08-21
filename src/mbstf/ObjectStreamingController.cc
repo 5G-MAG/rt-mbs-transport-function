@@ -50,14 +50,12 @@ using fiveg_mag_reftools::ProblemCause;
 MBSTF_NAMESPACE_START
 
 static void validate_distribution_session(DistributionSession &distributionSession);
-static bool check_if_object_added_is_manifest(const std::string &object_id, ObjectStore &object_store,
-                                              const std::string &manifest_url);
 
 ObjectStreamingController::ObjectStreamingController(DistributionSession &distributionSession)
     :ObjectManifestController(distributionSession)
 {
     validate_distribution_session(distributionSession);
-    subscribeToService(objectStore());
+    subscribeToService(*objectStore());
     //setObjectListPackager();
     //startWorker();
 }
@@ -78,15 +76,13 @@ void ObjectStreamingController::setObjectPackager()
     auto pkgr = getObjectListPackager();
     subscribeToService(*pkgr);
     startWorker();
-    const auto &obj_list = objectStore().getObjects();
-    for (const auto &[obj_id, object] : obj_list) {
-        sendToPackager(object);
+    auto object_store = objectStore();
+    if (object_store) {
+        const auto &obj_list = object_store->getObjects();
+        for (const auto &[obj_id, object] : obj_list) {
+            sendToPackager(object);
+        }
     }
-}
-
-void ObjectStreamingController::unsetObjectPackager()
-{
-    packager(nullptr);
 }
 
 void ObjectStreamingController::activateObjectPackager() {
@@ -103,44 +99,6 @@ void ObjectStreamingController::deactivateObjectPackager() {
 std::shared_ptr<ObjectListPackager> ObjectStreamingController::getObjectListPackager() const
 {
     return std::dynamic_pointer_cast<ObjectListPackager>(packager());
-}
-
-void ObjectStreamingController::processEvent(Event &event, SubscriptionService &event_service)
-{
-    if (event.eventName() == ObjectStore::ObjectAddedEvent::event_name ||
-        event.eventName() == ObjectStore::ObjectUpdatedEvent::event_name) {
-        ObjectStore::ObjectChangedEvent &obj_changed_event = dynamic_cast<ObjectStore::ObjectChangedEvent&>(event);
-        const std::string &object_id = obj_changed_event.objectId();
-        ogs_info("%s with ID: %s", event.eventName().c_str(), object_id.c_str());
-        const std::shared_ptr<ObjectStore::Object> &object = objectStore()[object_id];
-        if(check_if_object_added_is_manifest(object_id, objectStore(), getManifestUrl())) {
-            if(manifestHandler()) {
-                try {
-                    if(!manifestHandler()->update(object)) {
-                        ogs_error("Failed to update Manifest");
-                        unsetObjectListPackager();
-                        event.stopProcessing();
-                        return;
-                    }
-                    startWorker();
-                    sendToPackager(object);
-                } catch (std::exception &ex) {
-                    ogs_error("Invalid Manifest update: %s", ex.what());
-                    unsetObjectListPackager();
-                    event.stopProcessing();
-                    return;
-                }
-
-            } else {
-                std::unique_ptr<ManifestHandler> manifest_handler(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL"));
-                manifestHandler(std::move(manifest_handler));
-                sendToPackager(object);
-            }
-        } else {
-            sendToPackager(object);
-        }
-    }
-    ObjectManifestController::processEvent(event, event_service);
 }
 
 void ObjectStreamingController::sendToPackager(const std::shared_ptr<ObjectStore::Object> &object)
@@ -187,17 +145,6 @@ static void validate_distribution_session(DistributionSession &distribution_sess
         throw std::logic_error("Expected objDistributionOperatingMode to be set to STREAMING.");
     }
     ObjectController::validateDistributionSession(distribution_session);
-}
-
-static bool check_if_object_added_is_manifest(const std::string &object_id, ObjectStore &object_store,
-                                              const std::string &manifest_url) {
-    ObjectStore::Metadata &metadata = object_store.getMetadata(object_id);
-    if(metadata.getOriginalUrl() == manifest_url || metadata.getFetchedUrl() == manifest_url) {
-        metadata.keepAfterSend(true);
-        return true;
-    }
-    return false;
-
 }
 
 MBSTF_NAMESPACE_STOP

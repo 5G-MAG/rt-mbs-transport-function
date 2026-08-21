@@ -42,7 +42,7 @@ public:
         ,m_packager()
         ,m_nextId(1)
         ,m_consecutiveIngestFailures(0)
-    { subscribeTo({"ObjectAdded"}, objectStore()); };
+    { subscribeTo({"ObjectAdded"}, *objectStore()); };
     ObjectController(const ObjectController &) = delete;
     ObjectController(ObjectController &&) = delete;
 
@@ -57,8 +57,8 @@ public:
     ObjectController &operator=(const ObjectController &) = delete;
     ObjectController &operator=(ObjectController &&) = delete;
 
-    const ObjectStore &objectStore() const { return *m_objectStore.get(); };
-    ObjectStore &objectStore() { return *m_objectStore.get(); };
+    const std::shared_ptr<ObjectStore> &objectStore() const { return m_objectStore; };
+    std::shared_ptr<ObjectStore> &objectStore() { return m_objectStore; };
 
     const std::list<std::shared_ptr<PullObjectIngester>> &getPullObjectIngesters() const {return m_pullIngesters;};
 
@@ -101,7 +101,7 @@ protected:
     virtual void initPushObjectIngester() = 0;
     virtual void initPullObjectIngesters() = 0;
     virtual void setObjectPackager() = 0;
-    virtual void unsetObjectPackager() = 0;
+    virtual void unsetObjectPackager() { m_packager.reset(); };
     virtual void activateObjectPackager() = 0;
     virtual void deactivateObjectPackager() = 0;
 

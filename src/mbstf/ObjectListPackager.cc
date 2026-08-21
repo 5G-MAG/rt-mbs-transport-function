@@ -80,7 +80,7 @@ ObjectListPackager::PackageItem &ObjectListPackager::PackageItem::operator=(Pack
 
 // ObjectListPackager
 
-ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectController &controller,
+ObjectListPackager::ObjectListPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
                                        const std::list<PackageItem> &object_to_package, const SsmPort &ssm_port,
                                        uint32_t rateLimit, unsigned short mtu, const std::optional<std::string> &tunnel_address,
                                        in_port_t tunnel_port)
@@ -96,7 +96,7 @@ ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectControll
     startWorker();
 }
 
-ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectController &controller,
+ObjectListPackager::ObjectListPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
                                        std::list<PackageItem> &&object_to_package, const SsmPort &ssm_port, uint32_t rateLimit,
                                        unsigned short mtu, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
     :ObjectPackager(object_store, controller, ssm_port, rateLimit, mtu, tunnel_address, tunnel_port)
@@ -111,7 +111,7 @@ ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectControll
     startWorker();
 }
 
-ObjectListPackager::ObjectListPackager(ObjectStore &object_store, ObjectController &controller,
+ObjectListPackager::ObjectListPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
                                        const SsmPort &ssm_port, uint32_t rateLimit, unsigned short mtu,
                                        const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
     :ObjectPackager(object_store, controller, ssm_port, rateLimit, mtu, tunnel_address, tunnel_port)
@@ -220,6 +220,7 @@ void ObjectListPackager::doObjectPackage() {
                         }
                         if (m_queuedToi == toi) {
                             m_queued = false;
+                            m_currentObject->second.lastSentNow();
                             m_currentObject.reset();
                             objectSendCompletion(m_queuedObjectId, queue_empty);
                             ogs_info("Transmitted: Object with TOI: %d", toi);
@@ -286,6 +287,12 @@ void ObjectListPackager::doObjectPackage() {
                     file_desc->set_content(objData);
                     ogs_debug("Set FileDescription object data");
                 }
+            }
+
+            if (metadata.compressedSend()) {
+                file_desc->set_compression(LibFlute::Transmitter::FileDescription::CompressionAlgorithm::COMPRESSION_GZIP);
+            } else {
+                file_desc->set_compression(LibFlute::Transmitter::FileDescription::CompressionAlgorithm::COMPRESSION_NONE);
             }
 
             m_queued = true;

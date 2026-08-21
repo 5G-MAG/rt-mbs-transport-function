@@ -80,15 +80,16 @@ void ObjectController::processEvent(Event &event, SubscriptionService &event_ser
         std::string object_id = objSendEvent.objectId();
         ogs_info("Object [%s] sent", object_id.c_str());
 
-        const ObjectStore::Metadata &metadata = objectStore().getMetadata(object_id);
+        if (m_objectStore) {
+            const ObjectStore::Metadata &metadata = m_objectStore->getMetadata(object_id);
 
-        if(!metadata.keepAfterSend()) {
-
-            objectStore().deleteObject(object_id);
-        } else {
-            ogs_debug("Keeping object [%s] in object store after sending...", object_id.c_str());
+            if(!metadata.keepAfterSend()) {
+                ogs_debug("Removing object [%s] after sending...", object_id.c_str());
+                m_objectStore->deleteObject(object_id);
+            } else {
+                ogs_debug("Keeping object [%s] in object store after sending...", object_id.c_str());
+            }
         }
-
         if (objSendEvent.queueEmpty()) {
             distributionSession().haveEmptyQueue();
         }
@@ -138,8 +139,10 @@ const std::optional<std::string> &ObjectController::getObjectDistributionBaseUrl
 
 void ObjectController::reconfigureObjectStore()
 {
-    auto &dist_session = distributionSession();
-    m_objectStore->reconfigureMetadatas(dist_session.getObjectIngestBaseUrl(), dist_session.objectDistributionBaseUrl());
+    if (m_objectStore) {
+        auto &dist_session = distributionSession();
+        m_objectStore->reconfigureMetadatas(dist_session.getObjectIngestBaseUrl(), dist_session.objectDistributionBaseUrl());
+    }
 }
 
 void ObjectController::establishInactiveInputs()

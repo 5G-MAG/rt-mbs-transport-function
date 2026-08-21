@@ -65,14 +65,15 @@ public:
     };
 
     ObjectListPackager() = delete;
-    ObjectListPackager(ObjectStore &object_store, ObjectController &controller,
+    ObjectListPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
                        const std::list<PackageItem> &object_to_package, const SsmPort &ssm_port, uint32_t rateLimit,
                        unsigned short mtu, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
-    ObjectListPackager(ObjectStore &object_store, ObjectController &controller, std::list<PackageItem> &&object_to_package,
-                       const SsmPort &ssm_port, uint32_t rateLimit, unsigned short mtu,
+    ObjectListPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
+                       std::list<PackageItem> &&object_to_package, const SsmPort &ssm_port, uint32_t rateLimit, unsigned short mtu,
                        const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
-    ObjectListPackager(ObjectStore &object_store, ObjectController &controller, const SsmPort &ssm_port, uint32_t rateLimit,
-                       unsigned short mtu, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
+    ObjectListPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller, const SsmPort &ssm_port,
+                       uint32_t rateLimit, unsigned short mtu, const std::optional<std::string> &tunnel_address,
+                       in_port_t tunnel_port);
     virtual ~ObjectListPackager();
 
     bool add(const PackageItem &item);

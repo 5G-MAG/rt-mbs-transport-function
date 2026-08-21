@@ -49,9 +49,6 @@ public:
 
     static unsigned int factoryPriority() { return 50; };
 
-    // Subscriber virtual methods
-    virtual void processEvent(Event &event, SubscriptionService &event_service);
-
     // Optional: virtual void subscriberRemoved(SubscriptionService &event_service);
     std::string reprString() const {
                 std::ostringstream os;
@@ -59,24 +56,16 @@ public:
                 return os.str();
     }
 
-    void unsetObjectListPackager() {
-        // Reset the shared pointer to release ownership.
-        packager(nullptr);
-    };
-
     virtual void reconfigureObjectPackager();
 
 protected:
     virtual void setObjectPackager();
-    virtual void unsetObjectPackager();
     virtual void activateObjectPackager();
     virtual void deactivateObjectPackager();
+    virtual bool includeManifest() { return true; };
+    virtual void sendToPackager(const std::shared_ptr<ObjectStore::Object> &object);
 
 private:
-    void sendToPackager(const std::shared_ptr<ObjectStore::Object> &object);
-    //std::string generateUUID();
-    //std::shared_ptr<ObjectListPackager> m_objectListPackager;
-//    std::thread m_ingestSchedulingThread;
 };
 
 MBSTF_NAMESPACE_STOP

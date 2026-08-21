@@ -52,9 +52,6 @@ using fiveg_mag_reftools::ProblemCause;
 MBSTF_NAMESPACE_START
 
 static void validate_distribution_session(DistributionSession &distribution_session);
-static bool check_if_object_added_is_manifest(const std::shared_ptr<ObjectStore::Object> &object, std::string &manifest_url);
-static bool check_if_object_is_active_in_manifest(const std::shared_ptr<ObjectStore::Object> &object, const std::shared_ptr<ManifestHandler> &manifest_handler);
-static void finish_request_in_manifest_handler(const std::shared_ptr<ObjectStore::Object> &object, const std::shared_ptr<ManifestHandler> &manifest_handler);
 
 ObjectCarouselController::ObjectCarouselController(DistributionSession &distribution_session)
     :ObjectManifestController(distribution_session)
@@ -62,7 +59,7 @@ ObjectCarouselController::ObjectCarouselController(DistributionSession &distribu
     ogs_debug("ObjectCarouselController validating DistributionSession");
     validate_distribution_session(distribution_session);
     ogs_debug("ObjectCarouselController subscribe to ObjectStore");
-    subscribeToService(objectStore());
+    subscribeToService(*objectStore());
     ogs_debug("ObjectCarouselController active");
 }
 
@@ -85,11 +82,6 @@ void ObjectCarouselController::setObjectPackager()
     updateCarousel();
 }
 
-void ObjectCarouselController::unsetObjectPackager()
-{
-    packager(nullptr);
-}
-
 void ObjectCarouselController::activateObjectPackager() {
     packager()->activate();
     startWorker();
@@ -106,58 +98,16 @@ std::shared_ptr<ObjectCarouselPackager> ObjectCarouselController::getObjectCarou
     return std::dynamic_pointer_cast<ObjectCarouselPackager>(packager());
 }
 
-void ObjectCarouselController::processEvent(Event &event, SubscriptionService &event_service)
+void ObjectCarouselController::objectAddOrUpdateEvent(const std::shared_ptr<ObjectStore::Object> &object)
 {
-    if (event.eventName() == ObjectStore::ObjectAddedEvent::event_name ||
-        event.eventName() == ObjectStore::ObjectUpdatedEvent::event_name) {
-
-        ObjectStore::ObjectChangedEvent &obj_added_event = dynamic_cast<ObjectStore::ObjectChangedEvent&>(event);
-        std::string object_id = obj_added_event.objectId();
-        ogs_debug("%s with ID: %s", event.eventName().c_str(), object_id.c_str());
-        try {
-            const std::shared_ptr<ObjectStore::Object> &object = objectStore()[object_id];
-            ogs_debug("Object location: %s", object->second.getFetchedUrl().c_str());
-            object->second.keepAfterSend(true); /* keep all objects, we'll manually remove if the carousel changes */
-            if (check_if_object_added_is_manifest(object, getManifestUrl())) {
-                if (manifestHandler()) {
-                    try {
-                        if (!manifestHandler()->update(object)) {
-                            ogs_error("Failed to update Manifest");
-                            unsetObjectListPackager();
-                            event.stopProcessing();
-                            return;
-                        }
-                        startWorker();
-                    } catch (std::exception &ex) {
-                        ogs_error("Invalid Manifest update: %s", ex.what());
-                        unsetObjectListPackager();
-                        event.stopProcessing();
-                        return;
-                    }
-                } else {
-                    std::shared_ptr<ManifestHandler> manifest_handler(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL"));
-                    if (!manifest_handler) {
-                        throw std::runtime_error("Could not find suitable manifest handler");
-                    }
-                    manifestHandler(std::move(manifest_handler));
-                }
-            } else if (check_if_object_is_active_in_manifest(object, manifestHandler())) {
-                finish_request_in_manifest_handler(object, manifestHandler());
-                sendToPackager(object_id);
-            }
-        } catch (std::out_of_range &ex) {
-            ogs_error("Object %s is not in the ObjectStore", object_id.c_str());
-        }
-    }
-    ObjectManifestController::processEvent(event, event_service);
+    object->second.keepAfterSend(true); /* keep all objects, we'll manually remove if the carousel changes */
 }
 
-void ObjectCarouselController::sendToPackager(const std::string &object_id)
+void ObjectCarouselController::sendToPackager(const std::shared_ptr<ObjectStore::Object> &object)
 {
     auto packager = getObjectCarouselPackager();
     if (packager) {
         auto manifest_manager = std::dynamic_pointer_cast<ObjectManifestHandler>(manifestHandler());
-        auto &object = objectStore()[object_id];
         ObjectCarouselPackager::PackageItem item(object, manifest_manager);
         packager->add(item);
     }
@@ -210,12 +160,16 @@ void ObjectCarouselController::updateCarousel()
                 }
             }
             if (!found) {
-                /* else (if the object is not added to the packager */
-                const auto &obj_metadata = objectStore().findMetadataByURL(obj.value()->getLocator());
-                if (obj_metadata) {
-                    /* if it is found in the ObjectStore, add it to the packager */
-                    packager->add(ObjectCarouselPackager::PackageItem(objectStore()[obj_metadata->objectId()],
+                /* else (if the object is not added to the packager) */
+                auto object_store = objectStore();
+                if (object_store) {
+                    auto &obj_store = *object_store;
+                    const auto &obj_metadata = obj_store.findMetadataByURL(obj.value()->getLocator());
+                    if (obj_metadata) {
+                        /* if it is found in the ObjectStore, add it to the packager */
+                        packager->add(ObjectCarouselPackager::PackageItem(obj_store[obj_metadata->objectId()],
                                                                       object_manifest_hndlr));
+                    }
                 }
             }
         }
@@ -226,6 +180,21 @@ void ObjectCarouselController::updateCarousel()
         /* this object is no longer in the carousel, so remove it */
         packager->remove(pkg_item);
     }
+}
+
+bool ObjectCarouselController::checkObjectActiveInManifest(const std::shared_ptr<ObjectStore::Object> &object)
+{
+    const auto object_manifest_hndlr = std::dynamic_pointer_cast<const ObjectManifestHandler>(manifestHandler());
+    if (object_manifest_hndlr) {
+        return object_manifest_hndlr->isObjectURLActive(object->second.getOriginalUrl());
+    }
+    return false;
+}
+
+void ObjectCarouselController::finishRequestInManifestHandler(const std::shared_ptr<ObjectStore::Object> &object)
+{
+    auto object_manifest_hndlr = std::dynamic_pointer_cast<ObjectManifestHandler>(manifestHandler());
+    if (object_manifest_hndlr) object_manifest_hndlr->finishRequest(object->second.getOriginalUrl());
 }
 
 namespace {
@@ -242,24 +211,6 @@ static void validate_distribution_session(DistributionSession &distribution_sess
         throw std::logic_error("Expected objDistributionOperatingMode to be set to CAROUSEL.");
     }
     ObjectController::validateDistributionSession(distribution_session);
-}
-
-static bool check_if_object_added_is_manifest(const std::shared_ptr<ObjectStore::Object> &object, std::string &manifest_url)
-{
-    auto &metadata = object->second;
-    return (metadata.getOriginalUrl() == manifest_url || metadata.getFetchedUrl() == manifest_url);
-}
-
-static bool check_if_object_is_active_in_manifest(const std::shared_ptr<ObjectStore::Object> &object, const std::shared_ptr<ManifestHandler> &manifest_handler)
-{
-    const auto object_manifest_hndlr = std::dynamic_pointer_cast<const ObjectManifestHandler>(manifest_handler);
-    return object_manifest_hndlr->isObjectURLActive(object->second.getOriginalUrl());
-}
-
-static void finish_request_in_manifest_handler(const std::shared_ptr<ObjectStore::Object> &object, const std::shared_ptr<ManifestHandler> &manifest_handler)
-{
-    auto object_manifest_hndlr = std::dynamic_pointer_cast<ObjectManifestHandler>(manifest_handler);
-    object_manifest_hndlr->finishRequest(object->second.getOriginalUrl());
 }
 
 MBSTF_NAMESPACE_STOP

@@ -113,6 +113,8 @@ libmbstf_dist_sources = files('''
     MBSTFEventHandler.cc
     MBSTFEventHandler.hh
     MBSTFNetworkFunction.hh
+    MimeContentType.cc
+    MimeContentType.hh
     NfServer.cc
     NfServer.hh
     ObjectCarouselController.cc

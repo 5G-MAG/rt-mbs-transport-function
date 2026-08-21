@@ -21,6 +21,7 @@
 #include "Event.hh"
 #include "ManifestHandler.hh"
 #include "ObjectStore.hh"
+#include "Open5GSYamlIter.hh"
 #include "PullObjectIngester.hh"
 #include "SubscriptionService.hh"
 #include "openapi/model/ObjectManifest.h"
@@ -70,6 +71,9 @@ public:
     double getRepetitionIntervalForUrl(const std::string &url) const;
     bool isObjectURLActive(const std::string &url) const;
     void finishRequest(const std::string &url);
+
+    static bool parseConfiguration(const std::string &section_name, Open5GSYamlIter &iter) { return false; };
+    static void tidyConfiguration() {};
 
 private:
     struct ObjectMetadataCache {

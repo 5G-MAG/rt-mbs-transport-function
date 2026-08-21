@@ -107,7 +107,7 @@ void ObjectCarouselPackager::PackageItem::startedTransmission(const ObjectCarous
 
 // ObjectCarouselPackager
 
-ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, ObjectController &controller,
+ObjectCarouselPackager::ObjectCarouselPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
                                        const std::list<ObjectCarouselPackager::PackageItem> &objects_to_package,
                                        const SsmPort &ssm_port, uint32_t rate_limit, unsigned short mtu,
                                        const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
@@ -130,7 +130,7 @@ ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, Object
     startScheduler();
 }
 
-ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, ObjectController &controller,
+ObjectCarouselPackager::ObjectCarouselPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
                                        std::list<PackageItem> &&objects_to_package, const SsmPort &ssm_port,
                                        uint32_t rate_limit, unsigned short mtu, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
     :ObjectPackager(object_store, controller, ssm_port, rate_limit, mtu, tunnel_address, tunnel_port)
@@ -152,7 +152,7 @@ ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, Object
     startScheduler();
 }
 
-ObjectCarouselPackager::ObjectCarouselPackager(ObjectStore &object_store, ObjectController &controller,
+ObjectCarouselPackager::ObjectCarouselPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
                                        const SsmPort &ssm_port, uint32_t rate_limit, unsigned short mtu,
                                        const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
     :ObjectPackager(object_store, controller, ssm_port, rate_limit, mtu, tunnel_address, tunnel_port)
@@ -326,6 +326,7 @@ void ObjectCarouselPackager::streamsRemoveToi(uint32_t toi)
     std::lock_guard<decltype(m_streamsMutex)::element_type> lock(*m_streamsMutex);
     auto it = m_streams.find(toi);
     if (it != m_streams.end()) {
+        it->second->second.lastSentNow();
         m_streams.erase(it);
         m_packagingUpdateCondVar.notify_all();
     }
@@ -451,7 +452,7 @@ void ObjectCarouselPackager::scheduleCarousel()
                     location = metadata.getFetchedUrl();
                 }
                 if (!file_desc) {
-                    pkg_item.object()->second.fluteFileDescription(new LibFlute::Transmitter::FileDescription(location, pkg_item.object()->first));
+                    metadata.fluteFileDescription(new LibFlute::Transmitter::FileDescription(location, pkg_item.object()->first));
                 } else {
                     /* reset file description information if it's changed */
                     if (file_desc->file_entry().content_location != location) {
@@ -461,6 +462,14 @@ void ObjectCarouselPackager::scheduleCarousel()
                         file_desc->set_content(pkg_item.object()->first);
                     }
                 }
+
+                /* set compression according to the object metadata */
+                if (metadata.compressedSend()) {
+                    file_desc->set_compression(LibFlute::Transmitter::FileDescription::CompressionAlgorithm::COMPRESSION_GZIP);
+                } else {
+                    file_desc->set_compression(LibFlute::Transmitter::FileDescription::CompressionAlgorithm::COMPRESSION_NONE);
+                }
+
                 /* update Cache expiry time */
                 LibFlute::Transmitter::FileDescription::date_time_type default_expiry(LibFlute::Transmitter::FileDescription::date_time_type::clock::now() + 60s);
                 file_desc->set_expiry_time(pkg_item.object()->second.cacheExpires().value_or(std::move(default_expiry)));

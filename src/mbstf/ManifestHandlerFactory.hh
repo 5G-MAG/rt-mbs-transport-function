@@ -14,6 +14,7 @@
 
 #include "common.hh"
 #include "ObjectStore.hh"
+#include "Open5GSYamlIter.hh"
 
 MBSTF_NAMESPACE_START
 
@@ -25,6 +26,8 @@ public:
     virtual unsigned int priority() = 0;
     virtual ManifestHandler *makeManifestHandler(const std::shared_ptr<ObjectStore::Object> &object, ObjectController *controller,
                                                  bool pull_distribution) = 0;
+    virtual bool parseConfiguration(const std::string &section_name, Open5GSYamlIter &iter) = 0;
+    virtual void tidyConfiguration() = 0;
 };
 
 template <class H>
@@ -37,6 +40,12 @@ public:
                                                  bool pull_distribution) {
         return new manifest_handler(object, controller, pull_distribution);
     }
+    virtual bool parseConfiguration(const std::string &section_name, Open5GSYamlIter &iter) {
+        return H::parseConfiguration(section_name, iter);
+    }
+    virtual void tidyConfiguration() {
+        H::tidyConfiguration();
+    }
 };
 
 class ManifestHandlerFactory {
@@ -44,6 +53,8 @@ public:
     static bool registerManifestHandler(const std::string &content_type, ManifestHandlerConstructor *manifest_handler_constructor);
     static ManifestHandler *makeManifestHandler(const std::shared_ptr<ObjectStore::Object> &object, ObjectController *controller,
                                                 bool pull_distribution);
+    static bool parseConfiguration(const std::string &section_name, Open5GSYamlIter &iter);
+    static void tidyConfigurations();
 };
 
 MBSTF_NAMESPACE_STOP

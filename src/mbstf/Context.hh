@@ -19,8 +19,10 @@
  * under the License.
  */
 
+#include <chrono>
 #include <map>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "ogs-sbi.h"
@@ -70,12 +72,33 @@ public:
         unsigned int distMaxAge;
         unsigned int defaultObjectMaxAge; // Use if not given by push/pull resource Cache-Control.
     } cacheControl;
-    int totalMaxBitRateSoftLimit; // total maximum bit rate this MBSTF ought to asked to handle
-    int consecutiveIngestFailuresBeforeDeactivate; // The number of consecutive ingest failures allowed before the session aborts
-    size_t packetModeSchedulingQueueSize; // The maximum queue size for packet mode scheduling per DistSession
+    int totalMaxBitRateSoftLimit; //< total maximum bit rate this MBSTF ought to asked to handle
+    int consecutiveIngestFailuresBeforeDeactivate; //< The number of consecutive ingest failures allowed before the session aborts
+    size_t packetModeSchedulingQueueSize; //< The maximum queue size for packet mode scheduling per DistSession
+    struct {
+        /** The maximum time allowed before the manifest will be transmitted again
+         *
+         * This may be overridden my ManifestHandler specific class configuration.
+         */
+        std::optional<std::chrono::milliseconds> manifestRepetitionRate = std::nullopt;
+    } manifestGlobals; //< ManifestHandler global configuration (can be overridden by ManifestHandler implement specific config)
+
+    /** Parse a configuration time duration string
+     *
+     * Format:
+     *     <INTEGER>[<UNITS>]
+     *     Where INTEGER is any positive whole number in decimal and UNITS is optional and either "w", "d", "h", "m", "s" or "ms"
+     *     for weeks, days, hours, minutes, seconds or milliseconds respectively. UNITS will be assumed to be seconds if not given.
+     *
+     * @param duration_string The duration in the format described.
+     * @return The duration in milliseconds.
+     * @throw std::out_of_range If the duration string cannnot be parsed into a duration.
+     */
+    static std::chrono::milliseconds parseDuration(const std::string &duration_string);
 
 private:
     void parseCacheControl(Open5GSYamlIter &iter);
+    void parseManifestHandlerGlobals(const std::string &pc_key, Open5GSYamlIter &iter);
     void parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter);
     int checkForAddr(ogs_socknode_t *node);
     void updateNFLoad();

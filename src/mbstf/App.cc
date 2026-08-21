@@ -24,6 +24,7 @@
 
 #include "common.hh"
 #include "Context.hh"
+#include "ManifestHandlerFactory.hh"
 #include "MBSTFEventHandler.hh"
 #include "MBSTFNetworkFunction.hh"
 #include "Open5GSFSM.hh"
@@ -130,6 +131,7 @@ App::~App()
 {
     m_context.reset();
     m_app.reset();
+    ManifestHandlerFactory::tidyConfigurations();
 }
 
 const App &App::self()

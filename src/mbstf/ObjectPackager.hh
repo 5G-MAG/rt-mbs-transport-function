@@ -126,7 +126,7 @@ public:
     ObjectPackager(ObjectPackager &&) = delete;
     ObjectPackager(const ObjectPackager &) = delete;
 
-    ObjectPackager(ObjectStore &objectStore, ObjectController &controller, const SsmPort &ssm_port = SsmPort(), uint32_t rateLimit = 0, unsigned short mtu = 0, const std::optional<std::string> &tunnel_address = std::nullopt, in_port_t tunnel_port = 0 )
+    ObjectPackager(const std::shared_ptr<ObjectStore> &objectStore, ObjectController &controller, const SsmPort &ssm_port = SsmPort(), uint32_t rateLimit = 0, unsigned short mtu = 0, const std::optional<std::string> &tunnel_address = std::nullopt, in_port_t tunnel_port = 0 )
         :m_transmitterMutex(new decltype(m_transmitterMutex)::element_type)
         ,m_transmitter(nullptr), m_io(), m_queuedToi(0), m_queued(false), m_deactivating(false), m_queuedObjectId()
         ,m_objectStore(objectStore), m_controller(controller), m_ssmPort(ssm_port), m_rateLimit(rateLimit), m_mtu(mtu)
@@ -159,8 +159,8 @@ public:
     virtual void flushQueue() {};
 
 protected:
-    const ObjectStore &objectStore() const { return m_objectStore; };
-    ObjectStore &objectStore() { return m_objectStore; };
+    const std::shared_ptr<ObjectStore> &objectStore() const { return m_objectStore; };
+    std::shared_ptr<ObjectStore> &objectStore() { return m_objectStore; };
     const ObjectController &controller() const { return m_controller; };
     ObjectController &controller() { return m_controller; };
     const SsmPort &ssmPort() const { return m_ssmPort; };
@@ -182,7 +182,7 @@ protected:
 
 private:
     static void workerLoop(ObjectPackager*);
-    ObjectStore &m_objectStore;
+    std::shared_ptr<ObjectStore> m_objectStore;
     ObjectController &m_controller;
     SsmPort m_ssmPort;
     uint32_t m_rateLimit;

@@ -19,6 +19,7 @@
 #include "ObjectStore.hh"
 
 #include "ManifestHandlerFactory.hh"
+#include "MimeContentType.hh"
 
 MBSTF_NAMESPACE_START
 
@@ -30,16 +31,17 @@ namespace {
         };
     } g_factoryCompare;
 
-    static std::map<std::string, std::list<std::unique_ptr<ManifestHandlerConstructor> > > &constructorsByContentType()
+    static std::map<MimeContentType, std::list<std::unique_ptr<ManifestHandlerConstructor> > > &constructorsByContentType()
     {
-         static std::map<std::string, std::list<std::unique_ptr<ManifestHandlerConstructor> > > g_constructorsByContentType;
+         static std::map<MimeContentType, std::list<std::unique_ptr<ManifestHandlerConstructor> > > g_constructorsByContentType;
          return g_constructorsByContentType;
     }
 }
 
-bool ManifestHandlerFactory::registerManifestHandler(const std::string &content_type, ManifestHandlerConstructor *manifest_handler_constructor)
+bool ManifestHandlerFactory::registerManifestHandler(const std::string &content_type_str, ManifestHandlerConstructor *manifest_handler_constructor)
 {
     // Find the prioritised list for the content_type, make new list of one doesn't exist
+    MimeContentType content_type(content_type_str);
     std::list<std::unique_ptr<ManifestHandlerConstructor> > &list = constructorsByContentType()[content_type];
     // Make the value to store in the list (take ownership of manifest_handler_constructor)
     std::unique_ptr<ManifestHandlerConstructor> cc(manifest_handler_constructor);
@@ -51,8 +53,8 @@ bool ManifestHandlerFactory::registerManifestHandler(const std::string &content_
 
 ManifestHandler *ManifestHandlerFactory::makeManifestHandler(const std::shared_ptr<ObjectStore::Object> &object, ObjectController *controller, bool pull_distribution)
 {
-    std::string media_type = object->second.mediaType();
-    ogs_debug("Looking for manifest handler for \"%s\" media", media_type.c_str());
+    MimeContentType media_type(object->second.mediaType());
+    ogs_debug("%s", std::format("Looking for manifest handler for \"{}\" media", media_type).c_str());
     // Try manifest handlers for the media type of the object, fallback to any media type (empty string)
     while (true) {
         auto it = constructorsByContentType().find(media_type);
@@ -74,6 +76,25 @@ ManifestHandler *ManifestHandlerFactory::makeManifestHandler(const std::shared_p
         media_type.clear();
     }
     return nullptr;
+}
+
+bool ManifestHandlerFactory::parseConfiguration(const std::string &section_name, Open5GSYamlIter &iter)
+{
+    for (const auto &[mime_type, constructors] : constructorsByContentType()) {
+        for (const auto &constructor : constructors) {
+            if (constructor->parseConfiguration(section_name, iter)) return true;
+        }
+    }
+    return false;
+}
+
+void ManifestHandlerFactory::tidyConfigurations()
+{
+    for (const auto &[mime_type, constructors] : constructorsByContentType()) {
+        for (const auto &constructor : constructors) {
+            constructor->tidyConfiguration();
+        }
+    }
 }
 
 MBSTF_NAMESPACE_STOP
