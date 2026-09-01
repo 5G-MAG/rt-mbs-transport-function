@@ -728,11 +728,6 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
     /* New CreateReqData is valid, replace old one */
     m_createReqData = new_create_req_data;
 
-    /* Reconfigure the controller using the new CreateReqData */
-    //if (m_controller) {
-    //    m_controller->reconfigure();
-    //}
-
     /* Make sure we are in the right state */
     //const auto &old_state = old_dist_session->getDistSessionState();
     const auto &new_state = new_dist_session->getDistSessionState();
