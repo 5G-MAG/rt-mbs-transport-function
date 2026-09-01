@@ -75,7 +75,6 @@ void ObjectManifestController::processEvent(Event &event, SubscriptionService &e
                 const std::shared_ptr<ObjectStore::Object> &object = obj_store[object_id];
                 ogs_debug("Object location: %s", object->second.getFetchedUrl().c_str());
                 objectAddOrUpdateEvent(object);
-                object->second.keepAfterSend(true); /* keep all objects, we'll manually remove if the carousel changes */
                 std::shared_ptr<ManifestHandler> manifest_handler = manifestHandler();
                 if (check_if_object_added_is_manifest(object, getManifestUrl())) {
                     if (manifest_handler) {
