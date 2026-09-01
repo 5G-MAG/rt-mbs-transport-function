@@ -201,6 +201,7 @@ void PullObjectIngester::doObjectIngest() {
                 if (!item.forceRecache() && meta.hasExpiryTime() && meta.ExpiryTime() > ObjectStore::datetime_type::clock::now()) {
                     // Existing store item is still fresh
                     ogs_debug("Reusing cached object for %s instead of fetching again", item.url().c_str());
+                    // "Update" (using same metadata) in the ObjectStore to set last used timestamps and trigger update event
                     ObjectStore::Metadata metadata(meta);
                     try {
                         this->objectStore()->updateMetadata(meta.objectId(), std::move(metadata), true);
@@ -208,6 +209,7 @@ void PullObjectIngester::doObjectIngest() {
                         ogs_warn("While reusing cached object %s: %s", item.url().c_str(), ex.what());
                         emitObjectPullIngestFailedEvent(item, item.url(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
                     }
+                    m_ingestItemsMutex->lock(); // lock so that the lock_guard can release properly
                     return;
                 }
                 auto &file_desc = meta.fluteFileDescription();
