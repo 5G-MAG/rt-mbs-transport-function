@@ -83,7 +83,7 @@ public:
         std::optional<std::chrono::milliseconds> manifestRepetitionRate = std::nullopt;
     } manifestGlobals; //< ManifestHandler global configuration (can be overridden by ManifestHandler implement specific config)
     // TS 29.500 V18.10.0 cl.5.2.7.2/table 5.2.7.1-1: 413 (Payload Too Large) is mandatory for
-    // PATCH and POST. No clause, and no MBSTF documented default, names a byte limit (rule 12)
+    // PATCH and POST. No clause, and no MBSTF documented default, names a byte limit
     // -- unset means no limit is enforced, as before this option existed.
     std::optional<size_t> maxRequestBodySize;
 
