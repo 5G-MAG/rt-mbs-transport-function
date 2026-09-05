@@ -18,6 +18,8 @@
  */
 
 #include <chrono>
+#include <limits>
+#include <utility>
 #include <list>
 #include <memory>
 #include <string>
@@ -30,6 +32,10 @@
 #include "App.hh"
 #include "DistributionSession.hh"
 #include "DistributionSessionNotificationEvent.hh"
+#include "LocalEvents.hh"
+#include "Open5GSNetworkFunction.hh"
+#include "Open5GSTimer.hh"
+#include "TimerFunc.hh"
 #include "openapi/model/DistSessionSubscription.h"
 #include "openapi/model/DistSessionEventReport.h"
 #include "openapi/model/DistSessionEventReportList.h"
@@ -47,6 +53,48 @@ using fiveg_mag_reftools::CJson;
 using fiveg_mag_reftools::ModelException;
 
 MBSTF_NAMESPACE_START
+
+namespace {
+
+/* Fires once a DistributionSessionSubscription's expiryTime passes. Carries only plain string ids,
+ * not a pointer or reference to the DistributionSession or the subscription, so it depends on
+ * neither object's lifetime.
+ *
+ * trigger() does not call DistributionSession::removeSubscription() directly: this callback runs
+ * from the timer owned by the very DistributionSessionSubscription that would be erased, so
+ * removing it here would destroy this TimerFunc, and the Open5GSTimer executing it, while trigger()
+ * is still on the stack. It pushes a LocalEvents::SUBSCRIPTION_EXPIRED event instead and lets
+ * DistributionSession::processEvent() perform the removal off this call stack, the same deferred
+ * dispatch LocalEvents::SEND_NOTIFICATION and RELEASE_SUBSCRIPTION_SVC already use. */
+class SubscriptionExpiryTimerFunc : public TimerFunc {
+public:
+    SubscriptionExpiryTimerFunc(const std::string &dist_session_id, const std::string &subscription_id)
+        :TimerFunc(), distSessionId(dist_session_id), subscriptionId(subscription_id) {};
+    SubscriptionExpiryTimerFunc(SubscriptionExpiryTimerFunc &&) = delete;
+    SubscriptionExpiryTimerFunc(const SubscriptionExpiryTimerFunc &) = delete;
+    SubscriptionExpiryTimerFunc &operator=(SubscriptionExpiryTimerFunc &&) = delete;
+    SubscriptionExpiryTimerFunc &operator=(const SubscriptionExpiryTimerFunc &) = delete;
+    virtual ~SubscriptionExpiryTimerFunc() {};
+
+    virtual void trigger()
+    {
+        ogs_debug("Subscription %s expiry timer fired", subscriptionId.c_str());
+        std::shared_ptr<Open5GSEvent> event(new Open5GSEvent(new ogs_event_t));
+        event->ogsEvent()->id = LocalEvents::SUBSCRIPTION_EXPIRED;
+        event->setSbiData(new std::pair<std::string, std::string>(distSessionId, subscriptionId));
+        try {
+            App::self().ogsApp()->pushEvent(event);
+        } catch (std::exception &ex) {
+            ogs_error("Failed to push SUBSCRIPTION_EXPIRED event for subscription %s: %s",
+                      subscriptionId.c_str(), ex.what());
+        }
+    }
+
+    std::string distSessionId;
+    std::string subscriptionId;
+};
+
+}
 
 static int __notify_client_cb(int status, ogs_sbi_response_t *response, void *data);
 
@@ -71,6 +119,7 @@ DistributionSessionSubscription::DistributionSessionSubscription(const std::weak
     _setSubscriptionId();
     _setEventFlags();
     _setExpiryTime();
+    _scheduleExpiryTimer();
 }
 
 DistributionSessionSubscription::DistributionSessionSubscription(const std::weak_ptr<DistributionSession> &dist_session,
@@ -85,6 +134,7 @@ DistributionSessionSubscription::DistributionSessionSubscription(const std::weak
     _setSubscriptionId();
     _setEventFlags();
     _setExpiryTime();
+    _scheduleExpiryTimer();
 }
 
 DistributionSessionSubscription::DistributionSessionSubscription(DistributionSessionSubscription &&other)
@@ -92,6 +142,8 @@ DistributionSessionSubscription::DistributionSessionSubscription(DistributionSes
     ,m_subscriptionId(std::move(other.m_subscriptionId))
     ,m_eventTypes(std::move(other.m_eventTypes))
     ,m_distSessionSubscription(std::move(other.m_distSessionSubscription))
+    ,m_expiryTimer(std::move(other.m_expiryTimer))
+    ,m_expiryTimerFunc(std::move(other.m_expiryTimerFunc))
     ,m_expiryTime(std::move(other.m_expiryTime))
     ,m_cache(other.m_cache)
 {
@@ -106,10 +158,14 @@ DistributionSessionSubscription::DistributionSessionSubscription(const Distribut
     ,m_expiryTime(other.m_expiryTime)
     ,m_cache(new DistributionSessionSubscription::CacheType(*other.m_cache))
 {
+    /* A timer's callback is keyed to one subscription object, so the copy gets its own rather
+       than sharing other's. */
+    _scheduleExpiryTimer();
 }
 
 DistributionSessionSubscription::~DistributionSessionSubscription()
 {
+    _cancelExpiryTimer();
     if (m_cache) {
         delete m_cache;
         m_cache = nullptr;
@@ -119,11 +175,14 @@ DistributionSessionSubscription::~DistributionSessionSubscription()
 /* operators */
 DistributionSessionSubscription &DistributionSessionSubscription::operator=(DistributionSessionSubscription &&other)
 {
+    _cancelExpiryTimer();
     m_distributionSession = std::move(other.m_distributionSession);
     m_subscriptionId = std::move(other.m_subscriptionId);
     m_eventTypes = std::move(other.m_eventTypes);
     m_distSessionSubscription = std::move(other.m_distSessionSubscription);
     m_expiryTime = std::move(other.m_expiryTime);
+    m_expiryTimer = std::move(other.m_expiryTimer);
+    m_expiryTimerFunc = std::move(other.m_expiryTimerFunc);
     if (m_cache) delete m_cache;
     m_cache = other.m_cache;
     other.m_cache = nullptr;
@@ -132,12 +191,15 @@ DistributionSessionSubscription &DistributionSessionSubscription::operator=(Dist
 
 DistributionSessionSubscription &DistributionSessionSubscription::operator=(const DistributionSessionSubscription &other)
 {
+    _cancelExpiryTimer();
     m_distributionSession = other.m_distributionSession;
     m_subscriptionId = other.m_subscriptionId;
     m_eventTypes = other.m_eventTypes;
     m_distSessionSubscription = other.m_distSessionSubscription;
     m_expiryTime = other.m_expiryTime;
     *m_cache = *other.m_cache;
+    /* see the copy constructor: an independent timer, not a shared one */
+    _scheduleExpiryTimer();
     return *this;
 }
 
@@ -184,6 +246,7 @@ DistributionSessionSubscription &DistributionSessionSubscription::update(CJson &
     }
     _setEventFlags();
     _setExpiryTime();
+    _scheduleExpiryTimer();
     return *this;
 }
 
@@ -335,6 +398,41 @@ void DistributionSessionSubscription::_setExpiryTime()
         is >> std::chrono::parse("%FT%TZ", utc_exp_time);
         m_expiryTime = std::chrono::utc_clock::to_sys(utc_exp_time);
     }
+}
+
+void DistributionSessionSubscription::_scheduleExpiryTimer()
+{
+    _cancelExpiryTimer();
+
+    if (!m_expiryTime) return; /* no expiryTime set, nothing to enforce */
+
+    std::shared_ptr<DistributionSession> dist_session(m_distributionSession.lock());
+    if (!dist_session) return; /* no parent DistributionSession to key the timer to */
+
+    const auto now = std::chrono::system_clock::now();
+    long long delay_ms = 0;
+    if (m_expiryTime.value() > now) {
+        delay_ms = std::chrono::duration_cast<std::chrono::milliseconds>(m_expiryTime.value() - now).count();
+    }
+    if (delay_ms > std::numeric_limits<int>::max()) delay_ms = std::numeric_limits<int>::max();
+
+    m_expiryTimerFunc.reset(new SubscriptionExpiryTimerFunc(dist_session->distributionSessionId(), m_subscriptionId));
+    m_expiryTimer = App::self().ogsApp()->addTimer(*m_expiryTimerFunc);
+    if (m_expiryTimer) {
+        m_expiryTimer->start(static_cast<int>(delay_ms));
+    } else {
+        ogs_error("Failed to create expiry timer for subscription %s", m_subscriptionId.c_str());
+        m_expiryTimerFunc.reset();
+    }
+}
+
+void DistributionSessionSubscription::_cancelExpiryTimer()
+{
+    if (m_expiryTimer) {
+        App::self().ogsApp()->removeTimer(m_expiryTimer);
+        m_expiryTimer.reset();
+    }
+    m_expiryTimerFunc.reset();
 }
 
 void DistributionSessionSubscription::_setSubscriptionId()

@@ -42,6 +42,8 @@ MBSTF_NAMESPACE_START
 
 class DistributionSession;
 class Open5GSEvent;
+class Open5GSTimer;
+class TimerFunc;
 
 class DistributionSessionSubscription {
 public:
@@ -95,6 +97,11 @@ public:
 private:
     void _setEventFlags();
     void _setExpiryTime();
+    /** (Re)schedule, or cancel when no expiryTime is set, the timer that removes this
+     * subscription once its expiryTime passes. Call after any change to m_expiryTime. */
+    void _scheduleExpiryTimer();
+    /** Cancel and release any currently scheduled expiry timer. */
+    void _cancelExpiryTimer();
     void _setSubscriptionId();
 
     std::weak_ptr<DistributionSession> m_distributionSession; /* Parent distribution session */
@@ -103,6 +110,11 @@ private:
     int m_eventTypes; /* ORed EventTypeBitMask */
     reftools::mbstf::DistSessionSubscription m_distSessionSubscription;
     std::optional<DateTime> m_expiryTime;
+    /* Timer that removes this subscription once m_expiryTime passes; absent when no expiryTime is
+       set. TS 29.581's DistSessionSubscription carries expiryTime, and without this the value is
+       parsed and stored but never acted on. */
+    std::shared_ptr<Open5GSTimer> m_expiryTimer;
+    std::unique_ptr<TimerFunc> m_expiryTimerFunc;
     std::optional<std::string> m_subscriptionLocation;
 
     struct CacheType {
