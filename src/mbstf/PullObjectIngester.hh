@@ -50,7 +50,9 @@ public:
                    const std::optional<std::string> &obj_ingest_base_url = std::nullopt,
                    const std::optional<std::string> &obj_distribution_base_url = std::nullopt,
                    const std::optional<time_type> &download_deadline = std::nullopt,
-                   bool force_recache = false, bool keep_after_send = false, bool compressed_send = false);
+                   bool force_recache = false, bool keep_after_send = false, bool compressed_send = false,
+                   const std::optional<time_type> &availability_start_time = std::nullopt,
+                   const std::optional<time_type> &availability_end_time = std::nullopt);
         IngestItem(const IngestItem &other);
         IngestItem(IngestItem &&other);
         virtual ~IngestItem() {};
@@ -88,6 +90,13 @@ public:
         bool markAsCompressedSend() const { return m_markAsCompressedSend; };
         IngestItem &markAsCompressedSend(bool compress_send) { m_markAsCompressedSend = compress_send; return *this; };
 
+        /** Availability start/end time for this ingest item (TS 26.517 clause 6.2.3.5).
+         * Carried through to ObjectStore::Metadata when the object is stored.
+         */
+        const std::optional<time_type> &availabilityStartTime() const { return m_availabilityStartTime; };
+        IngestItem &availabilityStartTime(const std::optional<time_type> &val) { m_availabilityStartTime = val; return *this; };
+        const std::optional<time_type> &availabilityEndTime() const { return m_availabilityEndTime; };
+        IngestItem &availabilityEndTime(const std::optional<time_type> &val) { m_availabilityEndTime = val; return *this; };
     private:
         std::string m_objectId;
         std::string m_url;
@@ -95,6 +104,8 @@ public:
         std::optional<std::string> m_objIngestBaseUrl;
         std::optional<std::string> m_objDistributionBaseUrl;
         std::optional<time_type> m_deadline;
+        std::optional<time_type> m_availabilityStartTime;
+        std::optional<time_type> m_availabilityEndTime;
         bool m_forceRecache;
         bool m_markAsKeepAfterSend;
         bool m_markAsCompressedSend;

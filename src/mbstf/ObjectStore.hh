@@ -197,6 +197,38 @@ public:
         Metadata &mediaType(const std::string &media_type) {m_mediaType = media_type; return *this;};
         Metadata &mediaType(std::string &&media_type) {m_mediaType = std::move(media_type); return *this;};
 
+
+
+        /** Latest availability start time of this object at the MBS Client.
+         *
+         * TS 26.517 V18.6.0 clause 6.2.3.5 requires this to be maintained per object in the object
+         * list: "The object's latest availability start time at the MBS Client. After this time,
+         * the MBS-Aware Application may request the full object from the MBSTF Client by using the
+         * URL of the object."
+         *
+         * Where the Application Service Entry Point document is a DASH MPD the clause takes it
+         * from there: "When the Application Service Entry Point document is a DASH MPD, the
+         * availability start time is signalled in this document." Otherwise it is the ingest time
+         * plus a configured distribution offset.
+         */
+        const std::optional<datetime_type> &availabilityStartTime() const { return m_availabilityStartTime; };
+        Metadata &availabilityStartTime(const datetime_type &val) { m_availabilityStartTime = val; return *this; };
+        Metadata &availabilityStartTime(const std::optional<datetime_type> &val) { m_availabilityStartTime = val; return *this; };
+
+
+        /** Availability end time of this object from the MBSTF Client.
+         *
+         * TS 26.517 V18.6.0 clause 6.2.3.5: "The object's availability end time from the MBSTF
+         * Client. After this time, the object may no longer be requested by the MBS-Aware
+         * Application."
+         *
+         * Distinct from cacheExpires(), which carries the origin server's HTTP Cache-Control
+         * max-age for the ingest fetch and is a property of the origin, not of this distribution
+         * session.
+         */
+        const std::optional<datetime_type> &availabilityEndTime() const { return m_availabilityEndTime; };
+        Metadata &availabilityEndTime(const datetime_type &val) { m_availabilityEndTime = val; return *this; };
+        Metadata &availabilityEndTime(const std::optional<datetime_type> &val) { m_availabilityEndTime = val; return *this; };
         bool hasExpiryTime() const { return m_cacheExpires.has_value(); };
         const datetime_type &ExpiryTime() const { return m_cacheExpires.value();};
         const std::optional<datetime_type>& cacheExpires() const { return m_cacheExpires;};
@@ -284,6 +316,8 @@ public:
         std::optional<std::string> m_objDistributionBaseUrl;
         std::optional<std::string> m_entityTag;
         std::optional<datetime_type> m_cacheExpires;
+        std::optional<datetime_type> m_availabilityStartTime;
+        std::optional<datetime_type> m_availabilityEndTime;
         datetime_type m_receivedTime;
         datetime_type m_created;
         datetime_type m_modified;
