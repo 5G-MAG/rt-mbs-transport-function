@@ -63,6 +63,13 @@ test_source_object_list_packager = test_source_object_store + files('''
   ObjectListPackager.hh
   '''.split())
 
+test_source_fec_oti_helper = files('''
+    FecOtiHelper.cc
+    FecOtiHelper.hh
+    openapi/model/FECConfig.cc
+    openapi/model/FECConfig.h
+    '''.split())
+
 test_source_pull_object_ingester = test_source_object_store + files('''
   PullObjectIngester.cc
   PullObjectIngester.hh
@@ -117,6 +124,8 @@ libmbstf_dist_sources = files('''
     MimeContentType.hh
     NfServer.cc
     NfServer.hh
+    FecOtiHelper.cc
+    FecOtiHelper.hh
     ObjectCarouselController.cc
     ObjectCarouselController.hh
     ObjectCarouselPackager.cc

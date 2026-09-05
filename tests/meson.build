@@ -26,6 +26,10 @@ test('test_pull_object_ingester',
     executable('testPullObjectIngester', 'test_PullObjectIngester.cc', test_source_pull_object_ingester, install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
     ,verbose: true, timeout: 600, protocol: 'exitcode')
 
+test('test_fec_oti_helper',
+    executable('testFecOtiHelper', 'test_FecOtiHelper.cc', test_source_fec_oti_helper, install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep, boost_dep, rt_libflute_dep, libuuid_dep])
+   ,verbose: true, timeout: 600, protocol: 'exitcode')
+
 test('test_object_list_packager',
     executable('testObjectListPackager', 'test_ObjectListPackager.cc', test_source_object_list_packager, install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep, boost_dep, rt_libflute_dep, libuuid_dep])
    ,verbose: true, timeout: 600, protocol: 'exitcode')
