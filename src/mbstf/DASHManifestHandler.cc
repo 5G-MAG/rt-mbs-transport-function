@@ -123,7 +123,11 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
     static const std::string empty;
     auto current_time = std::chrono::system_clock::now();
     std::optional<std::chrono::system_clock::time_point> time_to_update;
-    std::string manifest_url;
+    /* The manifest's own URL, so the two comparisons below can recognise the MPD-refresh entry
+       addMPDRefreshToExtraPullObjects() adds to m_extraPullObjects from the same value. Left empty,
+       both comparisons test against "" and m_refreshMpd is never set, so a re-fetched MPD is
+       ingested without the handler being told its own manifest changed. */
+    const std::string manifest_url(m_manifest ? m_manifest->second.getFetchedUrl() : std::string());
     time_type fetch_time;
 
     std::list<SegmentEntry> media_segments;

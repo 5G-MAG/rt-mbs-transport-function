@@ -124,14 +124,16 @@ libmbstf_dist_sources = files('''
     MimeContentType.hh
     NfServer.cc
     NfServer.hh
-    FecOtiHelper.cc
-    FecOtiHelper.hh
     ObjectCarouselController.cc
     ObjectCarouselController.hh
     ObjectCarouselPackager.cc
     ObjectCarouselPackager.hh
+    FecOtiHelper.cc
+    FecOtiHelper.hh
+    ObjectCollectionController.cc
+    ObjectCollectionController.hh
     ObjectController.cc
-    ObjectController.cc
+    ObjectController.hh
     ObjectListController.cc
     ObjectListController.hh
     ObjectManifestController.cc
