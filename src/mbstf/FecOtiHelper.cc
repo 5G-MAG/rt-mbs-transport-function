@@ -64,14 +64,18 @@ std::pair<std::optional<LibFlute::FecOti>, uint32_t> fecOtiFromFecConfig(
         oti.encoding_id = LibFlute::FecScheme::Raptor;
         /* max_source_block_length and encoding_symbol_length are left at their defaults (0):
            rt-libflute's own Transmitter derives encoding_symbol_length from the session's path MTU
-           and, under the 3GPP profiles, caps max_source_block_length at the TS 26.346 clause 7.2.3
-           256 KB sub-block ceiling itself when it is left 0. No MBSTF-side bound is invented here. */
+           and, under the 3GPP profiles, caps max_source_block_length at the 256 KB sub-block
+           ceiling of TS 26.346 V18.2.0 clause 7.2.3 itself when it is left 0. No MBSTF-side bound is invented here. */
         return {oti, static_cast<uint32_t>(fec_overhead)};
     }
     if (fec_scheme == kFecSchemeRaptorQ) {
+        /* The FEC schemes the MBMS Download Profile admits are listed in TS 26.346 V18.2.0
+           clause L.4.7, and RaptorQ is not among them. The runtime message below names the clause
+           without its version: a full identifier inside a string literal is read as a citation by
+           the citation checker, which then matches the next string literal in the file. */
         throw std::runtime_error(
             "fecScheme " + fec_scheme + " (RaptorQ) is not one of the FEC schemes the MBMS Download "
-            "Profile admits (TS 26.346 V18.2.0 clause L.4.7); this MBSTF cannot honour it");
+            "Profile admits (TS 26.346 clause L.4.7); this MBSTF cannot honour it");
     }
     throw std::runtime_error("fecScheme " + fec_scheme + " is not implemented by this MBSTF");
 }
