@@ -18,6 +18,7 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <set>
 #include <string>
 #include <thread>
 #include <utility>
@@ -135,6 +136,34 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
         std::lock_guard<std::recursive_mutex> guard(m_mpdMutex);
         media_segments = std::move(augmentSegmentAvailabilityList(m_mpd.selectedSegmentAvailability(), false, false, false));
     }
+    /* A live MPD lists a segment for the whole of its availability window, which tells a unicast client
+       it may still fetch that segment. It does not mean the segment still needs transmitting. Without
+       this filter the same segment is emitted on every pass until its window closes, and because
+       OBJECT_STREAMING removes an object from the ObjectStore once sent, findMetadataByURL() below
+       misses on each pass and builds a fresh object, which the packager then sends under a fresh TOI.
+       A receiver cannot combine symbols across TOIs, so those copies are not redundancy: each is a
+       separate incomplete object, and together they crowd out the bandwidth the first copy needed.
+       Measured before this filter: 4.0 TOIs per object on average and up to 15. */
+    pruneSentSegments(media_segments);
+    media_segments.remove_if([this](const SegmentEntry &seg) {
+            try {
+                return m_sentSegmentUrls.find(seg.segmentURL()) != m_sentSegmentUrls.end();
+            } catch (std::domain_error&) {
+                return false; /* leave a malformed URL to the existing handling further down */
+            }
+        });
+
+    /* Only segments the MPD itself advertises are suppressed on a later pass. The entries appended
+       from m_extraPullObjects below -- the MPD refresh and the initialisation segments -- are meant to
+       repeat, and are deliberately not recorded. */
+    std::set<std::string> media_segment_urls;
+    for (const auto &seg : media_segments) {
+        try {
+            media_segment_urls.insert(seg.segmentURL());
+        } catch (std::domain_error&) {
+        }
+    }
+
     media_segments.insert(media_segments.end(), m_extraPullObjects.begin(), m_extraPullObjects.end());
     for (auto &ms: media_segments) {
         if(ms.availabilityStartTime() < current_time)
@@ -175,6 +204,7 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
                                       obj_dist_base_url, first_media_segment.availabilityEndTime(), first_media_segment.forceRecache(), first_media_segment.keepAfterSend(), first_media_segment.compressEntry());
         }
         removeExtraPullObjectsEntry(first_media_segment);
+        if (media_segment_urls.find(segment_url) != media_segment_urls.end()) m_sentSegmentUrls.insert(segment_url);
 
         try {
             if (first_media_segment.segmentURL() == manifest_url) m_refreshMpd = true;
@@ -189,6 +219,7 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
             segment_url = it->segmentURL();
             existing_obj = object_store->findMetadataByURL(segment_url);
             removeExtraPullObjectsEntry(*it);
+            if (media_segment_urls.find(segment_url) != media_segment_urls.end()) m_sentSegmentUrls.insert(segment_url);
             if (existing_obj) {
                 ingest_items.emplace_back(*existing_obj, it->availabilityEndTime(), it->forceRecache(), it->keepAfterSend(), it->compressEntry());
             } else {
@@ -200,6 +231,28 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
     }
 
     return std::make_pair(fetch_time, ingest_items);
+}
+
+void DASHManifestHandler::pruneSentSegments(const std::list<SegmentEntry> &current_segments)
+{
+    /* Bounds m_sentSegmentUrls by the manifest itself: a segment the MPD no longer advertises can no
+       longer be re-emitted by the filter above, so remembering it serves nothing. Without this the set
+       grows for the lifetime of a live session. */
+    if (m_sentSegmentUrls.empty()) return;
+    std::set<std::string> still_listed;
+    for (const auto &seg : current_segments) {
+        try {
+            still_listed.insert(seg.segmentURL());
+        } catch (std::domain_error&) {
+        }
+    }
+    for (auto it = m_sentSegmentUrls.begin(); it != m_sentSegmentUrls.end();) {
+        if (still_listed.find(*it) == still_listed.end()) {
+            it = m_sentSegmentUrls.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void DASHManifestHandler::addMPDRefreshToExtraPullObjects()
