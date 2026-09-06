@@ -134,7 +134,9 @@ bool PullObjectIngester::fetch(const std::string &object_id, const std::optional
 
     // otherwise we need a new fetch based on the ObjectStore entry
     if (it == m_fetchList.end()) {
-        m_fetchList.emplace_back(objectStore()->getMetadata(object_id).keepAfterSend(keep_after_send).compressedSend(compress_send), download_deadline, force_recache);
+        // Copied under the store's own lock: see ObjectStore::takeMetadataForIngest().
+        m_fetchList.emplace_back(objectStore()->takeMetadataForIngest(object_id, keep_after_send, compress_send),
+                                 download_deadline, force_recache);
     }
 
     sortListByPolicy();

@@ -341,6 +341,21 @@ public:
     void updateError(const std::string& object_id, int response_code, const std::string &url, bool synchronous_event = false);
     const ObjectData& getObjectData(const std::string& object_id) const;
     ObjectData& getObjectData(const std::string& object_id);
+    /** Take a copy of an object's metadata, and mark it, without releasing the store lock in between.
+     *
+     * getMetadata() returns a reference and drops the lock as it returns, so anything the caller then
+     * reads through that reference races with any thread updating the same entry. Metadata holds
+     * std::strings, and ObjectStore::updateMetadata() move-assigns them: a reader copying a string while
+     * its data pointer and length are being reassigned gets a string built from two different states of
+     * the same object. ThreadSanitizer reports exactly that between updateMetadata() and
+     * PullObjectIngester::IngestItem's constructor.
+     *
+     * The keep-after-send and compressed-send marks are applied here rather than by the caller for the
+     * same reason: chaining setters onto a reference returned by getMetadata() mutates the live entry
+     * with no lock held.
+     */
+    Metadata takeMetadataForIngest(const std::string& object_id, bool keep_after_send, bool compress_send);
+
     const Metadata& getMetadata(const std::string& object_id) const;
     Metadata& getMetadata(const std::string& object_id);
     void deleteObject(const std::string& object_id);

@@ -267,6 +267,14 @@ ObjectStore::ObjectData& ObjectStore::getObjectData(const std::string& object_id
     return m_store.at(object_id)->first;
 }
 
+ObjectStore::Metadata ObjectStore::takeMetadataForIngest(const std::string& object_id, bool keep_after_send,
+                                                          bool compress_send) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    Metadata &metadata = m_store.at(object_id)->second;
+    metadata.keepAfterSend(keep_after_send).compressedSend(compress_send);
+    return metadata;   // copied while the lock is still held
+}
+
 const ObjectStore::Metadata& ObjectStore::getMetadata(const std::string& object_id) const {
    std::lock_guard<std::recursive_mutex> lock(m_mutex);
    return m_store.at(object_id)->second;
