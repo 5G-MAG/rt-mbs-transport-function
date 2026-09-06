@@ -37,6 +37,8 @@
 #include "utilities.hh"
 #include "openapi/model/DistSessionState.h"
 
+#include "App.hh"
+#include "Context.hh"
 #include "ObjectManifestController.hh"
 
 using reftools::mbstf::DistSessionState;
@@ -140,8 +142,35 @@ void ObjectManifestController::processEvent(Event &event, SubscriptionService &e
                 if (!ingesters.empty()) {
                     auto &ingester = ingesters.front();
                     auto &item = pull_ingest_failed_event.item();
-                    item.forceRecache(true); // Force refetch on error
-                    ingester->fetch(item);
+
+                    // TS 26.517 V18.6.0 clause 6.1.2, object manifest parameter latestFetchTime:
+                    // "The MBSTF shall fetch the object no later than this UTC timestamp." Once that
+                    // time has passed the object must not be fetched again, however many attempts have
+                    // been made, so a retry past it is refused rather than issued and failed.
+                    const bool past_latest_fetch_time =
+                        item.hasDeadline() && std::chrono::system_clock::now() > item.getDeadline();
+
+                    // An object with no latestFetchTime may, by the same clause, be fetched "at a time
+                    // of its choosing", so no clause bounds its retries and the operator's own
+                    // consecutiveIngestFailuresBeforeDeactivate is applied per object instead. The
+                    // session-wide counter in ObjectController cannot serve here: any other object's
+                    // successful fetch resets it, so one permanently unfetchable object would be
+                    // retried without limit while the rest of the session proceeds normally.
+                    const int  max_failures  = App::self().context()->consecutiveIngestFailuresBeforeDeactivate;
+                    const unsigned failures  = item.recordFetchFailure();
+                    const bool out_of_tries  = max_failures != 0 && failures >= static_cast<unsigned>(max_failures);
+
+                    if (past_latest_fetch_time) {
+                        ogs_info("Not refetching %s: its latest fetch time has passed after %u attempt(s)",
+                                 item.objectId().c_str(), failures);
+                    } else if (out_of_tries) {
+                        ogs_warn("Not refetching %s: %u consecutive fetch failures reached the configured "
+                                 "consecutiveIngestFailuresBeforeDeactivate limit of %d",
+                                 item.objectId().c_str(), failures, max_failures);
+                    } else {
+                        item.forceRecache(true); // Force refetch on error
+                        ingester->fetch(item);
+                    }
                 }
             } catch (std::bad_cast &ex) {
                 // Should never happen, but just incase

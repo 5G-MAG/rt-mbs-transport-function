@@ -49,6 +49,7 @@ PullObjectIngester::IngestItem::IngestItem(const ObjectStore::Metadata &object_m
     ,m_forceRecache(force_recache)
     ,m_markAsKeepAfterSend(keep_after_send)
     ,m_markAsCompressedSend(compress_send)
+    ,m_fetchFailures(0)
 {
 }
 
@@ -62,6 +63,7 @@ PullObjectIngester::IngestItem::IngestItem(const std::string &object_id, const s
     ,m_forceRecache(force_recache)
     ,m_markAsKeepAfterSend(keep_after_send)
     ,m_markAsCompressedSend(compress_send)
+    ,m_fetchFailures(0)
     ,m_availabilityStartTime(availability_start_time)
     ,m_availabilityEndTime(availability_end_time)
 {
@@ -77,6 +79,7 @@ PullObjectIngester::IngestItem::IngestItem(const IngestItem &other)
     ,m_forceRecache(other.m_forceRecache)
     ,m_markAsKeepAfterSend(other.m_markAsKeepAfterSend)
     ,m_markAsCompressedSend(other.m_markAsCompressedSend)
+    ,m_fetchFailures(other.m_fetchFailures)
     ,m_availabilityStartTime(other.m_availabilityStartTime)
     ,m_availabilityEndTime(other.m_availabilityEndTime)
 {
@@ -92,6 +95,7 @@ PullObjectIngester::IngestItem::IngestItem(IngestItem &&other)
     ,m_forceRecache(other.m_forceRecache)
     ,m_markAsKeepAfterSend(other.m_markAsKeepAfterSend)
     ,m_markAsCompressedSend(other.m_markAsCompressedSend)
+    ,m_fetchFailures(other.m_fetchFailures)
     ,m_availabilityStartTime(std::move(other.m_availabilityStartTime))
     ,m_availabilityEndTime(std::move(other.m_availabilityEndTime))
 {

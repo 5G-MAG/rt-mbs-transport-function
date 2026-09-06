@@ -158,8 +158,49 @@ static void testCopyPreservesEverything()
           "testCopyPreservesEverything times");
 }
 
-MBSTF_NAMESPACE_STOP
 
+/* The failure count decides whether an object is retried, so it has to survive being copied and
+   moved: items are copied into and out of the ingest list on every queueing path. */
+static void testFetchFailureCountSurvivesCopyAndMove()
+{
+    PullObjectIngester::IngestItem original("obj6", "http://127.0.0.1/seg6.m4s", "acq6");
+
+    check(original.fetchFailures() == 0, "testFetchFailureCount starts at zero");
+    check(original.recordFetchFailure() == 1, "testFetchFailureCount first failure returns 1");
+    original.recordFetchFailure();
+    check(original.fetchFailures() == 2, "testFetchFailureCount accumulates");
+
+    PullObjectIngester::IngestItem copied(original);
+    check(copied.fetchFailures() == 2, "testFetchFailureCount survives copy");
+
+    PullObjectIngester::IngestItem moved(std::move(copied));
+    check(moved.fetchFailures() == 2, "testFetchFailureCount survives move");
+}
+
+/* TS 26.517 V18.6.0 clause 6.1.2, latestFetchTime: "The MBSTF shall fetch the object no later than
+   this UTC timestamp." The refetch decision reads hasDeadline()/getDeadline() to enforce that, so an
+   item whose deadline has passed must report one, and report it as being in the past. */
+static void testDeadlineDistinguishesPastFromFuture()
+{
+    auto now = std::chrono::system_clock::now();
+
+    PullObjectIngester::IngestItem expired("obj7", "http://127.0.0.1/seg7.m4s", "acq7",
+                                           std::nullopt, std::nullopt, time_type(now - 60s));
+    check(expired.hasDeadline() && expired.getDeadline() < now,
+          "testDeadline expired item is past its latest fetch time");
+
+    PullObjectIngester::IngestItem live("obj8", "http://127.0.0.1/seg8.m4s", "acq8",
+                                        std::nullopt, std::nullopt, time_type(now + 60s));
+    check(live.hasDeadline() && live.getDeadline() > now,
+          "testDeadline live item is not past its latest fetch time");
+
+    /* No latestFetchTime: the same clause then lets the MBSTF fetch "at a time of its choosing", so
+       no deadline bounds the retries and the configured per-object limit is what applies. */
+    PullObjectIngester::IngestItem undated("obj9", "http://127.0.0.1/seg9.m4s", "acq9");
+    check(!undated.hasDeadline(), "testDeadline absent when no latest fetch time was given");
+}
+
+MBSTF_NAMESPACE_STOP
 MBSTF_NAMESPACE_USING;
 
 int main()
@@ -171,6 +212,8 @@ int main()
     testAvailabilityTimesIndependentOfDeadline();
     testTimesSettableAfterConstruction();
     testCopyPreservesEverything();
+    testFetchFailureCountSurvivesCopyAndMove();
+    testDeadlineDistinguishesPastFromFuture();
 
     std::cout << "Test: PullObjectIngester Pass: " << pass << " Fail: " << fail << std::endl;
     std::cout << "### PullObjectIngester: Test finish ####" << std::endl;

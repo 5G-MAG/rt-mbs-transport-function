@@ -97,6 +97,17 @@ public:
         IngestItem &availabilityStartTime(const std::optional<time_type> &val) { m_availabilityStartTime = val; return *this; };
         const std::optional<time_type> &availabilityEndTime() const { return m_availabilityEndTime; };
         IngestItem &availabilityEndTime(const std::optional<time_type> &val) { m_availabilityEndTime = val; return *this; };
+
+        /** Consecutive failed fetch attempts for this object.
+         *
+         * Held per item, not per Distribution Session: a session that is ingesting many objects sees
+         * a successful fetch of any one of them, which is what resets the session-wide counter in
+         * ObjectController. A single object that can never be fetched therefore never accumulates a
+         * session-wide run of failures, and would be retried without limit.
+         */
+        unsigned fetchFailures() const { return m_fetchFailures; };
+        IngestItem &fetchFailures(unsigned n) { m_fetchFailures = n; return *this; };
+        unsigned recordFetchFailure() { return ++m_fetchFailures; };
     private:
         std::string m_objectId;
         std::string m_url;
@@ -106,6 +117,7 @@ public:
         std::optional<time_type> m_deadline;
         std::optional<time_type> m_availabilityStartTime;
         std::optional<time_type> m_availabilityEndTime;
+        unsigned m_fetchFailures;
         bool m_forceRecache;
         bool m_markAsKeepAfterSend;
         bool m_markAsCompressedSend;
