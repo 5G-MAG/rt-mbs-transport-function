@@ -48,6 +48,7 @@ Context::Context()
     ,servers()
     ,cacheControl({60, 60})
     ,totalMaxBitRateSoftLimit(100)
+    ,pathMtu(kDefaultPathMtu)
     ,consecutiveIngestFailuresBeforeDeactivate(5)
     ,packetModeSchedulingQueueSize(128*1024) // 128KB queue for rate smoothing
     ,manifestGlobals()
@@ -118,6 +119,18 @@ bool Context::parseConfig()
                         }
                     } else {
                         throw std::out_of_range("Bad configuration node at mbstf.totalMaxBitRateSoftLimit");
+                    }
+                } else if (mbstf_key == "pathMtu") {
+                    Open5GSYamlIter mtu_iter(mbstf_iter);
+                    if (mtu_iter.type() == YAML_SCALAR_NODE) {
+                        std::string num_val(mtu_iter.value());
+                        size_t idx = 0;
+                        pathMtu = std::stoi(num_val, &idx);
+                        if (idx != num_val.size() || pathMtu <= 0) {
+                            throw std::out_of_range("Bad configuration value at mbstf.pathMtu");
+                        }
+                    } else {
+                        throw std::out_of_range("Bad configuration node at mbstf.pathMtu");
                     }
                 } else if (mbstf_key == "consecutiveIngestFailuresBeforeDeactivate") {
                     Open5GSYamlIter failures_iter(mbstf_iter);

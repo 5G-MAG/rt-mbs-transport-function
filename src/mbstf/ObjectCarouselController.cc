@@ -74,7 +74,12 @@ void ObjectCarouselController::setObjectPackager()
     const std::optional<std::string> &tunnel_addr = distributionSession().getTunnelAddr();
     uint32_t rate_limit = distributionSession().getRateLimit();
     in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
-    unsigned short mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port, GET_MTU_ETHERNET_PAYLOAD) - GTP_HEADER_SIZE;
+    bool mtu_via_loopback = false;
+    /* Sequenced, not nested: the order arguments are evaluated in is unspecified, so reading
+       mtu_via_loopback in the same call that fills it would read it before it is set. */
+    const int discovered_mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port,
+                                                     GET_MTU_ETHERNET_PAYLOAD, &mtu_via_loopback);
+    unsigned short mtu = flute_path_mtu(discovered_mtu, mtu_via_loopback) - GTP_HEADER_SIZE;
     packager(new ObjectCarouselPackager(objectStore(), *this, ssm_port, rate_limit, mtu, tunnel_addr, tunnel_port,
                                         distributionSession().getFecInformation()));
     auto pkgr = getObjectCarouselPackager();
