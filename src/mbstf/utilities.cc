@@ -34,6 +34,10 @@
 #include "common.hh"
 #include "SsmPort.hh"
 
+#include "App.hh"
+#include "Context.hh"
+#include <ifaddrs.h>
+
 #include "utilities.hh"
 
 MBSTF_NAMESPACE_START
@@ -91,8 +95,33 @@ std::chrono::system_clock::time_point http_datetime_str_to_time_point(const std:
     return retval;
 }
 
-int get_path_mtu(const ogs_sockaddr_t &sock_addr, int minus_level_hdrs)
+/** Whether an address belongs to an interface on this host.
+ *
+ * Traffic to such an address does not reach a network: the kernel routes it over the loopback
+ * interface, whatever the address looks like.
+ */
+static bool address_is_local(const ogs_sockaddr_t &sock_addr)
 {
+    struct ifaddrs *ifaddr = nullptr;
+    if (getifaddrs(&ifaddr) != 0) return false;
+    bool found = false;
+    for (const struct ifaddrs *ifa = ifaddr; ifa != nullptr && !found; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != sock_addr.ogs_sa_family) continue;
+        if (sock_addr.ogs_sa_family == AF_INET) {
+            const auto *a = reinterpret_cast<const struct sockaddr_in*>(ifa->ifa_addr);
+            found = (a->sin_addr.s_addr == sock_addr.sin.sin_addr.s_addr);
+        } else if (sock_addr.ogs_sa_family == AF_INET6) {
+            const auto *a = reinterpret_cast<const struct sockaddr_in6*>(ifa->ifa_addr);
+            found = (memcmp(&a->sin6_addr, &sock_addr.sin6.sin6_addr, sizeof(struct in6_addr)) == 0);
+        }
+    }
+    freeifaddrs(ifaddr);
+    return found;
+}
+
+int get_path_mtu(const ogs_sockaddr_t &sock_addr, int minus_level_hdrs, bool *via_loopback)
+{
+    if (via_loopback) *via_loopback = false;
     ogs_sock_t *sock = ogs_sock_socket(sock_addr.ogs_sa_family, SOCK_DGRAM, 0);
     ogs_sock_connect(sock, const_cast<ogs_sockaddr_t*>(&sock_addr));
     int mtu = 1500;
@@ -104,25 +133,56 @@ int get_path_mtu(const ogs_sockaddr_t &sock_addr, int minus_level_hdrs)
         getsockopt(sock->fd, IPPROTO_IPV6, IPV6_MTU, &mtu, &mtu_size);
         if (minus_level_hdrs >= GET_MTU_IP_PAYLOAD) mtu -= sizeof(ip6_hdr);
     }
+    /* Whether this destination is one of the host's own addresses decides whether the datagram
+       leaves the host at all, and so whether the MTU just read describes a path to a receiver.
+       Where it is, the kernel routes it over the loopback interface and answers with the loopback
+       MTU however the destination address is written.
+       Testing the destination against the host's own addresses rather than for the 127/8 prefix:
+       a co-located MB-UPF is commonly reached on the address of a real interface (a veth, say),
+       which loops back without ever looking like a loopback address. */
+    if (via_loopback) *via_loopback = address_is_local(sock_addr);
     ogs_sock_destroy(sock);
     return mtu;
 }
 
-int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port, int minus_level_hdrs)
+int flute_path_mtu(int discovered_mtu, bool discovered_via_loopback)
+{
+    /* A measurement of a route that leaves the host is a real bound and is used as it stands,
+       including where an operator has raised it: a deployment running jumbo frames between the
+       MB-UPF and the gNB is configured through the interface MTUs, and second-guessing that here
+       would cap it for no reason.
+
+       A loopback route is not a path. Where the MBSTF and the ingress point are co-located the
+       kernel answers with the loopback MTU, 65536, and symbols sized for that leave as datagrams
+       nothing downstream carries. There is nothing to measure in that case, so the configured
+       path MTU is used, which mbstf.pathMtu sets and which is documented in mbstf.yaml. */
+    if (!discovered_via_loopback && discovered_mtu > 0) return discovered_mtu;
+
+    const int path_mtu = App::self().context()->pathMtu;
+    if (discovered_via_loopback) {
+        ogs_info("The route to this session's ingress is loopback, so its %d byte MTU is not the "
+                 "path to a receiver; sizing FLUTE symbols for the configured %d byte path MTU "
+                 "instead (mbstf.pathMtu)", discovered_mtu, path_mtu);
+    }
+    return path_mtu;
+}
+
+int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port, int minus_level_hdrs, bool *via_loopback)
 {
     int mtu = 1500; // default to 1500 if no MTU can be found.
+    if (via_loopback) *via_loopback = false;
 
     if (tunnel_ip) { // Use MTU of tunnel if provided
         ogs_sockaddr_t *sa = nullptr;
         if (ogs_addaddrinfo(&sa, AF_UNSPEC, tunnel_ip.value().c_str(), tunnel_port, AI_NUMERICSERV) == OGS_OK) {
-            mtu = get_path_mtu(*sa, minus_level_hdrs);
+            mtu = get_path_mtu(*sa, minus_level_hdrs, via_loopback);
             ogs_freeaddrinfo(sa);
         } // else error already reported
     } else { // No tunnel provided so try MTU of direct destination
         if (ssm_port) {
             ogs_sockaddr_t *sa = nullptr;
             if (ogs_addaddrinfo(&sa, AF_UNSPEC, ssm_port.destinationAddress().c_str(), ssm_port.port(), AI_NUMERICSERV) == OGS_OK) {
-                mtu = get_path_mtu(*sa, minus_level_hdrs);
+                mtu = get_path_mtu(*sa, minus_level_hdrs, via_loopback);
                 ogs_freeaddrinfo(sa);
             }
         }

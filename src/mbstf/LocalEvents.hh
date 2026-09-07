@@ -29,13 +29,15 @@ class LocalEvents {
 public:
     typedef enum {
         SEND_NOTIFICATION = OGS_MAX_NUM_OF_PROTO_EVENT+1000,
-        RELEASE_SUBSCRIPTION_SVC
+        RELEASE_SUBSCRIPTION_SVC,
+        SUBSCRIPTION_EXPIRED
     } LocalEventIds;
 
     static const char *getEventName(Open5GSEvent &event) {
         if (event.id() < OGS_MAX_NUM_OF_PROTO_EVENT) return ogs_event_get_name(event.ogsEvent());
         if (event.id() == SEND_NOTIFICATION) return "SEND_NOTIFICATION";
         if (event.id() == RELEASE_SUBSCRIPTION_SVC) return "RELEASE_SUBSCRIPTION_SVC";
+        if (event.id() == SUBSCRIPTION_EXPIRED) return "SUBSCRIPTION_EXPIRED";
         return "Unknown event";
     };
 };

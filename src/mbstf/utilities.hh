@@ -44,9 +44,22 @@ enum GetMTULevels {
     GET_MTU_IP_PAYLOAD = 1
 };
 
-int get_path_mtu(const ogs_sockaddr_t &sock_addr, int minus_level_hdrs = GET_MTU_ETHERNET_PAYLOAD);
-int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port, int minus_level_hdrs = GET_MTU_ETHERNET_PAYLOAD);
+int get_path_mtu(const ogs_sockaddr_t &sock_addr, int minus_level_hdrs = GET_MTU_ETHERNET_PAYLOAD,
+                 bool *via_loopback = nullptr);
+int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port,
+                           int minus_level_hdrs = GET_MTU_ETHERNET_PAYLOAD, bool *via_loopback = nullptr);
 
+
+/** The MTU to size a distribution session's FLUTE symbols with.
+ *
+ * A discovered MTU for a route that leaves the host is used as it stands, so a deployment running
+ * jumbo frames between the MB-UPF and the gNB gets the frames it configured its interfaces for.
+ *
+ * Where the route is loopback, which is what get_path_mtu() reports through via_loopback, there is
+ * no path to measure: the MBSTF and the ingress point are co-located and the kernel answers with
+ * the loopback MTU. Context::pathMtu is used instead, set by mbstf.pathMtu.
+ */
+int flute_path_mtu(int discovered_mtu, bool discovered_via_loopback);
 std::shared_ptr<struct sockaddr> make_shared_sockaddr(int family_hint, const std::string &hostname, in_port_t port);
 
 MBSTF_NAMESPACE_STOP

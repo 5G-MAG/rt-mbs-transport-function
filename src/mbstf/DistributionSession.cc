@@ -90,6 +90,7 @@ using reftools::mbstf::StatusSubscribeReqData;
 using reftools::mbstf::StatusSubscribeRspData;
 using reftools::mbstf::TunnelAddress;
 using reftools::mbstf::UpTrafficFlowInfo;
+using reftools::mbstf::FECConfig;
 
 MBSTF_NAMESPACE_START
 
@@ -107,6 +108,9 @@ static void send_model_params_error(const ModelParamsException &err, Open5GSSBIS
                                     const std::optional<NfServer::InterfaceMetadata> &api, const std::string &no_cause_reason,
                                     const std::string &log_prefix);
 static void _validate(const std::shared_ptr<DistSession> &dist_session);
+static bool request_too_large(Open5GSSBIRequest &request, Open5GSSBIStream &stream, int path_segments,
+                              Open5GSSBIMessage &message, const NfServer::AppMetadata &app_meta,
+                              const std::optional<NfServer::InterfaceMetadata> &api);
 
 /**** public: ****/
 
@@ -428,6 +432,26 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
             dist_event.releaseEventData();
             return true;
         }
+    case LocalEvents::SUBSCRIPTION_EXPIRED:
+        {
+            /* Pushed by a subscription's expiry timer (SubscriptionExpiryTimerFunc in
+             * DistributionSessionSubscription.cc): its own expiryTime has passed, so remove it.
+             * Handled here, off the timer's call stack, so the subscription and the timer that
+             * fired can both be destroyed safely as part of the removal. */
+            std::unique_ptr<std::pair<std::string, std::string> > expired(
+                    reinterpret_cast<std::pair<std::string, std::string>*>(event.sbiData()));
+            const auto &dist_session = App::self().context()->findDistributionSession(expired->first);
+            if (dist_session) {
+                try {
+                    dist_session->removeSubscription(expired->second);
+                    ogs_debug("Removed expired subscription %s from Distribution Session %s",
+                              expired->second.c_str(), expired->first.c_str());
+                } catch (std::range_error &ex) {
+                    /* already gone, e.g. deleted through the API before the timer fired */
+                }
+            }
+            return true;
+        }
     default:
         break;
     }
@@ -557,6 +581,13 @@ std::optional<BitRate> DistributionSession::getMbr() const
         return BitRate(mbr.value());
     }
     return std::nullopt;
+}
+
+std::optional<std::shared_ptr<FECConfig>> DistributionSession::getFecInformation() const
+{
+    std::shared_ptr<CreateReqData> create_req_data = distributionSessionReqData();
+    std::shared_ptr<DistSession> dist_session = create_req_data->getDistSession();
+    return dist_session->getFecInformation();
 }
 
 const std::optional<std::string> &DistributionSession::getObjectIngestBaseUrl() const
@@ -982,10 +1013,15 @@ void DistributionSession::_apiSessionCreate(Open5GSSBIStream &stream, Open5GSSBI
 {
     /* static method */
     if (request.headerValue(OGS_SBI_CONTENT_TYPE, std::string()) != "application/json") {
-        ogs_assert(true == NfServer::sendError(stream, ProblemCause::INVALID_MSG_FORMAT, 1, message, app_meta, api,
+        /* TS 29.500 V18.10.0 table 5.2.7.1-1 marks 415 mandatory for POST. Its table 5.2.7.2-1
+           defines no named cause for 415, so the numeric status is constructed directly here,
+           the same pattern this file already uses for 405 and 501; ProblemCause::INVALID_MSG_FORMAT
+           would answer 400, which is a different condition. */
+        ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE, 1, message, app_meta, api,
                                                 "Unsupported Media Type", "Expected content type: application/json"));
         return;
     }
+    if (request_too_large(request, stream, 1, message, app_meta, api)) return;
 
     CJson distSession(CJson::Null);
     try {
@@ -1118,13 +1154,17 @@ void DistributionSession::_apiSessionPatch(Open5GSSBIStream &stream, Open5GSSBIM
 {
     std::string content_type(message.contentType());
     if (content_type != OGS_SBI_CONTENT_PATCH_TYPE) {
+        /* TS 29.500 V18.10.0 table 5.2.7.1-1 marks 415 mandatory for PATCH. This resource's
+           expected type is the merge-patch type, not the plain application/json the POST handlers
+           check, so the comparison differs from theirs while the status does not. */
         std::ostringstream err;
         err << "Content-Type [" << message.contentType() << "] unknown for PATCH method, expecting " OGS_SBI_CONTENT_PATCH_TYPE;
         ogs_error("%s", err.str().c_str());
-        ogs_assert(true == NfServer::sendError(stream, ProblemCause::INVALID_MSG_FORMAT, 2, message, app_meta, api,
-                                                "MBSTF Distribution Session patch bad MIME type", err.str()));
+        ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE, 2, message, app_meta, api,
+                                                "Unsupported Media Type", err.str()));
         return;
     }
+    if (request_too_large(request, stream, 2, message, app_meta, api)) return;
 
     /* parse body */
     CJson patch_json(CJson::newNull());
@@ -1136,11 +1176,21 @@ void DistributionSession::_apiSessionPatch(Open5GSSBIStream &stream, Open5GSSBIM
         return;
     }
 
-    /* Apply patch */
-    auto old_dist_sess = distributionSessionReqData();
+    /* Apply patch.
+
+       The JSON Pointers in the patch address this resource's own representation, which
+       TS 29.581 V18.6.0 (TS29581_Nmbstf_DistSession.yaml) gives as DistSession for both the
+       PATCH and the GET on /dist-sessions/{distSessionRef}; CreateReqData is the request body
+       of the collection POST only.  So a peer sends "/distSessionState", not
+       "/distSession/distSessionState", and the patch is applied to the DistSession that
+       CreateReqData holds rather than to CreateReqData itself.  The enclosing CreateReqData is
+       then rebuilt around the patched DistSession, since that is what this object stores. */
+    auto old_req_data = distributionSessionReqData();
     std::shared_ptr<reftools::mbstf::CreateReqData> new_dist_sess{};
     try {
-        new_dist_sess.reset(old_dist_sess->newWithJSONPatches(patch_json));
+        std::shared_ptr<DistSession> patched_sess(old_req_data->getDistSession()->newWithJSONPatches(patch_json));
+        new_dist_sess.reset(new reftools::mbstf::CreateReqData(*old_req_data));
+        new_dist_sess->setDistSession(patched_sess);
     } catch (ModelException &err) {
         send_model_error(err, stream, 2, message, app_meta, api, "Unable to apply JSON Patch",
                             "MBSTF Distribution Session patch failed to apply");
@@ -1175,8 +1225,19 @@ void DistributionSession::_apiSessionGet(Open5GSSBIStream &stream, Open5GSSBIMes
                         const std::optional<NfServer::InterfaceMetadata> &api,
                         const NfServer::AppMetadata &app_meta)
 {
-    CJson createdRspData_json(json(false));
-    std::string body(createdRspData_json.serialise());
+    /* TS 29.500 V18.10.0 table 5.2.7.1-1 marks 406 mandatory for GET. This response is always
+       application/json, so a client whose Accept header cannot take that is answered 406 rather
+       than sent a body it did not ask for. */
+    std::optional<std::string> accept_hdr;
+    if (message.accept()) accept_hdr = message.accept();
+    if (!NfServer::acceptsMediaType(accept_hdr, "application/json")) {
+        ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_NOT_ACCEPTABLE, 1, message, app_meta, api,
+                                                "Not Acceptable", "This resource is only available as application/json"));
+        return;
+    }
+
+    CJson dist_session_json(json());
+    std::string body(dist_session_json.serialise());
     ogs_debug("Generated JSON: %s", body.c_str());
     std::optional<std::string> content_type;
     if (!body.empty()) {
@@ -1195,10 +1256,15 @@ void DistributionSession::_apiSubscriptionCreate(Open5GSSBIStream &stream, Open5
                                 const NfServer::AppMetadata &app_meta)
 {
     if (request.headerValue(OGS_SBI_CONTENT_TYPE, std::string()) != "application/json") {
-        ogs_assert(true == NfServer::sendError(stream, ProblemCause::INVALID_MSG_FORMAT, 1, message, app_meta, api,
+        /* TS 29.500 V18.10.0 table 5.2.7.1-1 marks 415 mandatory for POST. Its table 5.2.7.2-1
+           defines no named cause for 415, so the numeric status is constructed directly here,
+           the same pattern this file already uses for 405 and 501; ProblemCause::INVALID_MSG_FORMAT
+           would answer 400, which is a different condition. */
+        ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE, 1, message, app_meta, api,
                                                 "Unsupported Media Type", "Expected content type: application/json"));
         return;
     }
+    if (request_too_large(request, stream, 1, message, app_meta, api)) return;
 
     CJson dist_session_subsc_json(CJson::Null);
     std::string subsc_id;
@@ -1266,6 +1332,21 @@ void DistributionSession::_apiSubscriptionPatch(const DistributionSessionSubscri
                                const std::optional<NfServer::InterfaceMetadata> &api,
                                const NfServer::AppMetadata &app_meta)
 {
+    /* TS 29.581 (TS29581_Nmbstf_DistSession.yaml, the
+       /dist-sessions/{distSessionRef}/subscriptions/{subscriptionId} PATCH operation) requires
+       application/json-patch+json for this resource. Both PATCH operations in that document
+       request this type, not application/merge-patch+json. */
+    std::string content_type(message.contentType());
+    if (content_type != OGS_SBI_CONTENT_PATCH_TYPE) {
+        std::ostringstream err;
+        err << "Content-Type [" << content_type << "] unknown for PATCH method, expecting " OGS_SBI_CONTENT_PATCH_TYPE;
+        ogs_error("%s", err.str().c_str());
+        ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE, 4, message, app_meta, api,
+                                                "Unsupported Media Type", err.str()));
+        return;
+    }
+    if (request_too_large(request, stream, 4, message, app_meta, api)) return;
+
     CJson req_json(CJson::Null);
     try {
         req_json = CJson::parse(request.content());
@@ -1307,6 +1388,22 @@ static std::shared_ptr<ObjDistributionData> get_object_distribution_data(const D
         return nullptr;
     }
 
+}
+
+static bool request_too_large(Open5GSSBIRequest &request, Open5GSSBIStream &stream, int path_segments,
+                              Open5GSSBIMessage &message, const NfServer::AppMetadata &app_meta,
+                              const std::optional<NfServer::InterfaceMetadata> &api)
+{
+    const auto &max_size = App::self().context()->maxRequestBodySize;
+    if (!max_size || request.contentLength() <= *max_size) return false;
+
+    std::ostringstream err;
+    err << "Request body of " << request.contentLength() << " bytes exceeds the configured maximum of "
+        << *max_size << " bytes";
+    ogs_error("%s", err.str().c_str());
+    ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_PAYLOAD_TOO_LARGE, path_segments, message,
+                                            app_meta, api, "Payload Too Large", err.str()));
+    return true;
 }
 
 static void send_model_error(const ModelException &err, Open5GSSBIStream &stream, int path_segments, Open5GSSBIMessage &message,
@@ -1437,6 +1534,7 @@ static void _validate(const std::shared_ptr<DistSession> &dist_session)
         }
     }
 }
+
 
 MBSTF_NAMESPACE_STOP
 

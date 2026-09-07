@@ -89,7 +89,10 @@ ObjectStore::Metadata::Metadata(const Metadata &other)
     ,m_compressedSend(other.m_compressedSend)
     ,m_objIngestBaseUrl(other.m_objIngestBaseUrl)
     ,m_objDistributionBaseUrl(other.m_objDistributionBaseUrl)
+    ,m_entityTag(other.m_entityTag)
     ,m_cacheExpires(other.m_cacheExpires)
+    ,m_availabilityStartTime(other.m_availabilityStartTime)
+    ,m_availabilityEndTime(other.m_availabilityEndTime)
     ,m_receivedTime(other.m_receivedTime)
     ,m_created(other.m_created)
     ,m_modified(other.m_modified)
@@ -108,7 +111,10 @@ ObjectStore::Metadata::Metadata(Metadata &&other)
     ,m_compressedSend(other.m_compressedSend)
     ,m_objIngestBaseUrl(std::move(other.m_objIngestBaseUrl))
     ,m_objDistributionBaseUrl(std::move(other.m_objDistributionBaseUrl))
+    ,m_entityTag(std::move(other.m_entityTag))
     ,m_cacheExpires(std::move(other.m_cacheExpires))
+    ,m_availabilityStartTime(std::move(other.m_availabilityStartTime))
+    ,m_availabilityEndTime(std::move(other.m_availabilityEndTime))
     ,m_receivedTime(std::move(other.m_receivedTime))
     ,m_created(std::move(other.m_created))
     ,m_modified(std::move(other.m_modified))
@@ -128,7 +134,10 @@ ObjectStore::Metadata &ObjectStore::Metadata::operator=(const ObjectStore::Metad
     m_compressedSend = other.m_compressedSend;
     m_objIngestBaseUrl = other.m_objIngestBaseUrl;
     m_objDistributionBaseUrl = other.m_objDistributionBaseUrl;
+    m_entityTag = other.m_entityTag;
     m_cacheExpires = other.m_cacheExpires;
+    m_availabilityStartTime = other.m_availabilityStartTime;
+    m_availabilityEndTime = other.m_availabilityEndTime;
     m_receivedTime = other.m_receivedTime;
     m_created = other.m_created;
     m_modified = other.m_modified;
@@ -149,7 +158,10 @@ ObjectStore::Metadata &ObjectStore::Metadata::operator=(ObjectStore::Metadata &&
     m_compressedSend = other.m_compressedSend;
     m_objIngestBaseUrl = std::move(other.m_objIngestBaseUrl);
     m_objDistributionBaseUrl = std::move(other.m_objDistributionBaseUrl);
+    m_entityTag = std::move(other.m_entityTag);
     m_cacheExpires = std::move(other.m_cacheExpires);
+    m_availabilityStartTime = std::move(other.m_availabilityStartTime);
+    m_availabilityEndTime = std::move(other.m_availabilityEndTime);
     m_receivedTime = std::move(other.m_receivedTime);
     m_created = std::move(other.m_created);
     m_modified = std::move(other.m_modified);
@@ -253,6 +265,14 @@ const ObjectStore::ObjectData& ObjectStore::getObjectData(const std::string& obj
 ObjectStore::ObjectData& ObjectStore::getObjectData(const std::string& object_id) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     return m_store.at(object_id)->first;
+}
+
+ObjectStore::Metadata ObjectStore::takeMetadataForIngest(const std::string& object_id, bool keep_after_send,
+                                                          bool compress_send) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    Metadata &metadata = m_store.at(object_id)->second;
+    metadata.keepAfterSend(keep_after_send).compressedSend(compress_send);
+    return metadata;   // copied while the lock is still held
 }
 
 const ObjectStore::Metadata& ObjectStore::getMetadata(const std::string& object_id) const {

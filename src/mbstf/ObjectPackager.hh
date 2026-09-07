@@ -28,6 +28,10 @@
 #include "SsmPort.hh"
 #include "SubscriptionService.hh"
 
+namespace reftools::mbstf {
+    class FECConfig;
+}
+
 namespace LibFlute{
     class Transmitter;
 }
@@ -126,12 +130,12 @@ public:
     ObjectPackager(ObjectPackager &&) = delete;
     ObjectPackager(const ObjectPackager &) = delete;
 
-    ObjectPackager(const std::shared_ptr<ObjectStore> &objectStore, ObjectController &controller, const SsmPort &ssm_port = SsmPort(), uint32_t rateLimit = 0, unsigned short mtu = 0, const std::optional<std::string> &tunnel_address = std::nullopt, in_port_t tunnel_port = 0 )
+    ObjectPackager(const std::shared_ptr<ObjectStore> &objectStore, ObjectController &controller, const SsmPort &ssm_port = SsmPort(), uint32_t rateLimit = 0, unsigned short mtu = 0, const std::optional<std::string> &tunnel_address = std::nullopt, in_port_t tunnel_port = 0 , const std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> &fec_information = std::nullopt)
         :m_transmitterMutex(new decltype(m_transmitterMutex)::element_type)
         ,m_transmitter(nullptr), m_io(), m_queuedToi(0), m_queued(false), m_deactivating(false), m_queuedObjectId()
         ,m_objectStore(objectStore), m_controller(controller), m_ssmPort(ssm_port), m_rateLimit(rateLimit), m_mtu(mtu)
         ,m_workerThread(), m_workerCancel(false), m_workerRunning(false)
-        ,m_tunnelAddress(tunnel_address), m_tunnelPort(tunnel_port)
+        ,m_tunnelAddress(tunnel_address), m_tunnelPort(tunnel_port), m_fecInformation(fec_information)
     {
     };
 
@@ -170,6 +174,11 @@ protected:
     uint64_t tsi() const;
     in_port_t tunnelPort() const { return m_tunnelPort; };
 
+    /** The MBS Distribution Session's own requested AL-FEC configuration (TS 29.580 V18.8.0
+     *  clause 6.2.6.2.14 FECConfig, carried as DistSession.fecInformation), or unset when the
+     *  session did not request FEC. Absent for every packager until a caller passes one. */
+    const std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> &fecInformation() const { return m_fecInformation; };
+
     virtual void doObjectPackage() = 0;
 
     std::shared_ptr<std::recursive_mutex> m_transmitterMutex;
@@ -192,6 +201,7 @@ private:
     std::atomic_bool m_workerRunning;
     std::optional<std::string> m_tunnelAddress;
     in_port_t m_tunnelPort;
+    std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> m_fecInformation;
 };
 
 MBSTF_NAMESPACE_STOP

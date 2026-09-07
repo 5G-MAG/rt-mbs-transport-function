@@ -20,6 +20,8 @@
 #include "ogs-sbi.h"
 
 #include <format>
+#include <cctype>
+#include <algorithm>
 #include <map>
 #include <sstream>
 #include <string>
@@ -363,6 +365,40 @@ static char *build_json(Open5GSSBIMessage &message)
     }
 
     return content;
+}
+
+std::string to_lower(std::string s)
+{
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+    return s;
+}
+
+std::string trim(const std::string &s)
+{
+    size_t start = s.find_first_not_of(" \t");
+    if (start == std::string::npos) return std::string();
+    size_t end = s.find_last_not_of(" \t");
+    return s.substr(start, end - start + 1);
+}
+
+bool NfServer::acceptsMediaType(const std::optional<std::string> &accept_header, const std::string &media_type)
+{
+    if (!accept_header.has_value() || accept_header->empty()) return true;
+
+    const std::string wanted = to_lower(media_type);
+    const std::string wanted_type = wanted.substr(0, wanted.find('/'));
+
+    std::istringstream ranges(*accept_header);
+    std::string range;
+    while (std::getline(ranges, range, ',')) {
+        std::string media_range = trim(range.substr(0, range.find(';')));
+        media_range = to_lower(media_range);
+        if (media_range == "*/*" || media_range == wanted ||
+            media_range == wanted_type + "/*") {
+            return true;
+        }
+    }
+    return false;
 }
 
 MBSTF_NAMESPACE_STOP

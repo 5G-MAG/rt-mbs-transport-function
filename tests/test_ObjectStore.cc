@@ -145,6 +145,87 @@ void testGetStaleObjects(ObjectStore& store) {
 
 MBSTF_NAMESPACE_STOP
 MBSTF_NAMESPACE_USING;
+/* TS 26.517 V18.6.0 clause 6.2.3.5 requires the object's latest availability start time and its
+   availability end time to be maintained per object in the object list, separately from the HTTP
+   cache expiry of the ingest fetch. Check they are held, are independent of cacheExpires(), and
+   survive copy and assignment. */
+void testAvailabilityTimes() {
+    auto now = std::chrono::system_clock::now();
+    auto start = now + std::chrono::seconds(30);
+    auto end = now + std::chrono::seconds(300);
+    auto cache = now + std::chrono::seconds(90);
+
+    ObjectStore::Metadata meta("availObj", "type", "url", "fetched_url", "acquisition", now);
+
+    if (!meta.availabilityStartTime().has_value() && !meta.availabilityEndTime().has_value()) {
+        pass++;
+        std::cout<<"INFO: testAvailabilityTimes default-absent passed."<<std::endl;
+    } else {
+        fail++;
+        std::cout<<"ERROR: testAvailabilityTimes default-absent failed."<<std::endl;
+    }
+
+    meta.availabilityStartTime(start).availabilityEndTime(end);
+    meta.cacheExpires(cache);
+
+    if (meta.availabilityStartTime().value() == start && meta.availabilityEndTime().value() == end &&
+        meta.cacheExpires().value() == cache && meta.availabilityEndTime().value() != cache) {
+        pass++;
+        std::cout<<"INFO: testAvailabilityTimes independent of cacheExpires passed."<<std::endl;
+    } else {
+        fail++;
+        std::cout<<"ERROR: testAvailabilityTimes independent of cacheExpires failed."<<std::endl;
+    }
+
+    ObjectStore::Metadata copied(meta);
+    ObjectStore::Metadata assigned;
+    assigned = meta;
+    if (copied.availabilityStartTime().value() == start && copied.availabilityEndTime().value() == end &&
+        assigned.availabilityStartTime().value() == start && assigned.availabilityEndTime().value() == end &&
+        copied == meta) {
+        pass++;
+        std::cout<<"INFO: testAvailabilityTimes copy and assign passed."<<std::endl;
+    } else {
+        fail++;
+        std::cout<<"ERROR: testAvailabilityTimes copy and assign failed."<<std::endl;
+    }
+}
+
+/* The entity tag is the HTTP ETag of the ingested object. PullObjectIngester.cc:240 passes it to the
+   conditional re-fetch (a lost tag turns an If-None-Match into an unconditional GET, re-downloading
+   unchanged segments) and ObjectCarouselPackager.cc:481 copies it into the FLUTE file description.
+   Metadata is copied and moved on every path out of the store, so all four must carry it.
+   code-derived, no spec claim. */
+void testEntityTagSurvivesCopyAndMove() {
+    auto now = std::chrono::system_clock::now();
+    const std::string etag("\"3f8a-61c0d2\"");
+
+    ObjectStore::Metadata meta("etagObj", "type", "url", "fetched_url", "acquisition", now);
+    meta.entityTag(etag);
+
+    ObjectStore::Metadata copied(meta);
+    ObjectStore::Metadata moved{ObjectStore::Metadata(meta)};
+    ObjectStore::Metadata copy_assigned;
+    copy_assigned = meta;
+    ObjectStore::Metadata move_assigned;
+    move_assigned = ObjectStore::Metadata(meta);
+
+    if (copied.entityTag().value_or(std::string{}) == etag &&
+        moved.entityTag().value_or(std::string{}) == etag &&
+        copy_assigned.entityTag().value_or(std::string{}) == etag &&
+        move_assigned.entityTag().value_or(std::string{}) == etag) {
+        pass++;
+        std::cout<<"INFO: testEntityTagSurvivesCopyAndMove passed."<<std::endl;
+    } else {
+        fail++;
+        std::cout<<"ERROR: testEntityTagSurvivesCopyAndMove failed: copy=["
+                 <<copied.entityTag().value_or(std::string{})<<"] move=["
+                 <<moved.entityTag().value_or(std::string{})<<"] copy-assign=["
+                 <<copy_assigned.entityTag().value_or(std::string{})<<"] move-assign=["
+                 <<move_assigned.entityTag().value_or(std::string{})<<"]"<<std::endl;
+    }
+}
+
 int main() {
     
     ObjectController objectController;
@@ -161,6 +242,8 @@ int main() {
     testAddObject(*store);
     std::this_thread::sleep_for(10s);
     testGetStaleObjects(*store);
+    testAvailabilityTimes();
+    testEntityTagSurvivesCopyAndMove();
     std::cout<<"Test: ObjectStore "<<"Pass: "<<pass<<" Fail: "<<fail<<std::endl;
     std::cout<<"### ObjectStore: Test finish #### "<<std::endl;
     store.reset();

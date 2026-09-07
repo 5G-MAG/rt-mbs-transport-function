@@ -1,5 +1,5 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Traffic Function: Testing MBSTF Object store
+ * 5G-MAG Reference Tools: MBS Transport Function: ObjectListPackager tests
  ******************************************************************************
  * Copyright: (C)2024 British Broadcasting Corporation
  * License: 5G-MAG Public License v1
@@ -10,158 +10,142 @@
  * https://drive.google.com/file/d/1cinCiA778IErENZ3JN52VFW-1ffHpx7Z/view
  */
 
+/* Covers the transmission ordering the segment streaming operating mode requires.
+ *
+ * TS 26.517 V18.6.0 clause 6.2.3.5: "The MBSTF shall transmit each object in the object list such
+ * that the last packet of the delivered FLUTE transmission object (including any FEC recovery
+ * packets, when configured) is available at the MBSTF Client no later than its availability start
+ * time."
+ *
+ * The packaging queue is ordered by each item's deadline, which for OBJECT_STREAMING is that
+ * availability start time. Only the ordering is exercised here: constructing an ObjectListPackager
+ * brings up a FLUTE transmitter and its sockets, which is not a unit test, so the predicate is
+ * tested directly.
+ */
 
-#include <memory>
-#include <stdexcept>
-#include <utility>
 #include <chrono>
-#include <thread>
-#include <mutex>
 #include <iostream>
+#include <list>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
-#include <map>
-#include <list>
 
-#include <netinet/in.h>
-
-#include "common.hh"
-#include "NfServer.hh"
 #include "ObjectStore.hh"
 #include "ObjectListPackager.hh"
-#include "Open5GSYamlDocument.hh"
 
 MBSTF_NAMESPACE_START
 using namespace std::literals;
 
-class App {
-public:
-    static const App &self();
-    const NfServer::AppMetadata &mbstfAppMetadata() const;
-    Open5GSYamlDocument configDocument() const;
-};
-
-const App &App::self()
-{
-    static const App instance;
-    return instance;
-}
-
-const NfServer::AppMetadata &App::mbstfAppMetadata() const
-{
-    static const NfServer::AppMetadata app_metadata("testObjectListPackager", "0.0.1", "test-host");
-    return app_metadata;
-}
-
-Open5GSYamlDocument App::configDocument() const
-{
-    return Open5GSYamlDocument(nullptr);
-}
-
-class ObjectController {};
-class ObjectListController: public ObjectController {};
-
-int pass= 0;
+int pass = 0;
 int fail = 0;
 
-std::string firstObject = "obj1";
-std::string secondObject = "obj2";
-
-void testAddObject(ObjectStore& store) {
-	
-    ObjectStore::ObjectData firstObjectData = {0x31, 0x32};
-    ObjectStore::ObjectData secondObjectData = {0x50, 0x51, 0x52};
-    	
-    ObjectStore::Metadata firstObjectMetadata("type1", "url1", "fetched_url1", "acquisition1", std::chrono::system_clock::now());
-    ObjectStore::Metadata secondObjectMetadata("type2", "url2", "fetched_url2", "acquisition2", std::chrono::system_clock::now() + std::chrono::minutes(1));
-
-    firstObjectMetadata.entityTag("etag1");
-    firstObjectMetadata.cacheExpires(std::chrono::system_clock::now() + 5s);
-
-    secondObjectMetadata.entityTag("etag2");
-    secondObjectMetadata.cacheExpires(std::chrono::system_clock::now() + 5s);
-    store.addObject(firstObject, std::move(firstObjectData), std::move(firstObjectMetadata));
-    store.addObject(secondObject, std::move(secondObjectData), std::move(secondObjectMetadata));
-    
-    if (store.getObjectData(firstObject) == ObjectStore::ObjectData{0x31, 0x32}) {
-	    std::cout<<"INFO: testAddObject for firstObject passed."<<std::endl;
-	    pass++;
-    } else {
-	    std::cout<<"ERROR: testAddObject for firstObject failed."<<std::endl;
-	    fail++;
-    }
-
-    if (store.getObjectData(secondObject) == ObjectStore::ObjectData{0x50, 0x51, 0x52}) {
-        std::cout<<"INFO: testAddObject for secondObject passed."<<std::endl;
-    } else {
-        std::cout<<"ERROR: testAddObject for secondObject failed."<<std::endl;
-    }
-}
-
-void testDeleteFirstObject(ObjectStore& store) {
-    store.deleteObject(firstObject);
-
-    try {
-        store.getObjectData(firstObject);
-        std::cout<<"ERROR: testDeleteObject for firstObject failed."<<std::endl;
-        fail++;
-    } catch (const std::out_of_range& e) {
-        std::cout<<"INFO: testDeleteObject for firstObject passed."<<std::endl;
+static void check(bool condition, const std::string &what)
+{
+    if (condition) {
         pass++;
-    }
-
-}
-
-void testDeleteSecondObject(ObjectStore& store) {
-    store.deleteObject(secondObject);
-
-    try {
-        store.getObjectData(secondObject);
-        std::cout<<"ERROR: testDeleteObject for secondObject failed."<<std::endl;
+        std::cout << "INFO: " << what << " passed." << std::endl;
+    } else {
         fail++;
-    } catch (const std::out_of_range& e) {
-        std::cout<<"INFO: testDeleteObject for secondObject passed."<<std::endl;
-        pass++;
+        std::cout << "ERROR: " << what << " failed." << std::endl;
     }
-
 }
 
+using time_type = ObjectListPackager::time_type;
 
-void testObjectListPackager(ObjectStore &store, ObjectListController &controller) {
+static std::shared_ptr<ObjectStore::Object> makeObject(const std::string &object_id)
+{
+    ObjectStore::ObjectData data = {0x31, 0x32};
+    ObjectStore::Metadata metadata(object_id, "application/octet-stream", "url-" + object_id,
+                                   "fetched-" + object_id, "acquisition-" + object_id,
+                                   std::chrono::system_clock::now());
+    return std::make_shared<ObjectStore::Object>(std::move(data), std::move(metadata));
+}
 
-    std::optional<std::string> address = std::string("127.0.0.1");
-    uint32_t rateLimit = 1000;
-    unsigned short mtu = 1500;
-    in_port_t port = 8080;
+/* An object whose availability start time is earlier must be transmitted first. */
+static void testEarlierDeadlineSortsFirst()
+{
+    auto now = std::chrono::system_clock::now();
+    ObjectListPackager::PackageItem early(makeObject("early"), time_type(now + 10s));
+    ObjectListPackager::PackageItem late(makeObject("late"), time_type(now + 60s));
 
-    ObjectListPackager packager(store, controller, address, rateLimit, mtu, port, std::nullopt, 0);
-    packager.startWorker();
-    // Add a PackageItem to ObjectPackager
-    ObjectListPackager::PackageItem item("obj1");
-    packager.add(item);
-    std::this_thread::sleep_for(10s);
-    // Verification
-    std::cout << "Test completed successfully." << std::endl;
+    check(ObjectListPackager::PackageItem::earlierDeadlineFirst(early, late),
+          "testEarlierDeadlineSortsFirst early before late");
+    check(!ObjectListPackager::PackageItem::earlierDeadlineFirst(late, early),
+          "testEarlierDeadlineSortsFirst late not before early");
+}
+
+/* An object with no known availability start time must not displace one that has a stated time. */
+static void testItemWithoutDeadlineSortsLast()
+{
+    auto now = std::chrono::system_clock::now();
+    ObjectListPackager::PackageItem dated(makeObject("dated"), time_type(now + 30s));
+    ObjectListPackager::PackageItem undated(makeObject("undated"));
+
+    check(ObjectListPackager::PackageItem::earlierDeadlineFirst(dated, undated),
+          "testItemWithoutDeadlineSortsLast dated before undated");
+    check(!ObjectListPackager::PackageItem::earlierDeadlineFirst(undated, dated),
+          "testItemWithoutDeadlineSortsLast undated not before dated");
+    check(!ObjectListPackager::PackageItem::earlierDeadlineFirst(undated, undated),
+          "testItemWithoutDeadlineSortsLast undated not before itself");
+}
+
+/* The whole queue, sorted, must come out in availability start time order with the undated last.
+ * This is the property the clause actually depends on, rather than any single comparison. */
+static void testQueueSortsIntoAvailabilityOrder()
+{
+    auto now = std::chrono::system_clock::now();
+    std::list<ObjectListPackager::PackageItem> queue;
+    queue.emplace_back(makeObject("third"), time_type(now + 90s));
+    queue.emplace_back(makeObject("undated"));
+    queue.emplace_back(makeObject("first"), time_type(now + 10s));
+    queue.emplace_back(makeObject("second"), time_type(now + 50s));
+
+    queue.sort(ObjectListPackager::PackageItem::earlierDeadlineFirst);
+
+    std::vector<std::string> order;
+    for (auto &item : queue) {
+        order.push_back(item.object()->second.objectId());
+    }
+
+    check(order.size() == 4 && order[0] == "first" && order[1] == "second" &&
+          order[2] == "third" && order[3] == "undated",
+          "testQueueSortsIntoAvailabilityOrder");
+    if (fail) {
+        std::cout << "       order was:";
+        for (const auto &id : order) std::cout << " " << id;
+        std::cout << std::endl;
+    }
+}
+
+/* An object already past its availability start time must still sort ahead of later ones, so a
+ * late arrival is sent next rather than being starved by objects due further out. */
+static void testOverdueObjectSortsFirst()
+{
+    auto now = std::chrono::system_clock::now();
+    ObjectListPackager::PackageItem overdue(makeObject("overdue"), time_type(now - 30s));
+    ObjectListPackager::PackageItem upcoming(makeObject("upcoming"), time_type(now + 30s));
+
+    check(ObjectListPackager::PackageItem::earlierDeadlineFirst(overdue, upcoming),
+          "testOverdueObjectSortsFirst");
 }
 
 MBSTF_NAMESPACE_STOP
 
 MBSTF_NAMESPACE_USING;
 
-int main() {
-    
-    ObjectListController objectListController;
-    ObjectStore store(objectListController);
+int main()
+{
+    std::cout << "### ObjectListPackager: Test start ####" << std::endl;
 
-    std::cout << "### ObjectStore: Test start #### " << std::endl;
-    
-    testAddObject(store);
-    testObjectListPackager(store, objectListController);
-    testDeleteFirstObject(store);
-    testDeleteSecondObject(store);
+    testEarlierDeadlineSortsFirst();
+    testItemWithoutDeadlineSortsLast();
+    testQueueSortsIntoAvailabilityOrder();
+    testOverdueObjectSortsFirst();
 
-    return 0;
+    std::cout << "Test: ObjectListPackager Pass: " << pass << " Fail: " << fail << std::endl;
+    std::cout << "### ObjectListPackager: Test finish ####" << std::endl;
+    return fail ? 1 : 0;
 }
 
 /* vim:ts=8:sts=4:sw=4:expandtab:

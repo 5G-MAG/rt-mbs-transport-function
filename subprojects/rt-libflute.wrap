@@ -1,6 +1,18 @@
+# Pinned to a commit on 5G-MAG's own feature/raptor-raptorq-fec (pull request #61, which is based on
+# #62). That branch carries the MBS-compliance work this repository's FLUTE-layer obligations depend
+# on: the TS 26.346 annex L.6 profiled FDT schema, the scheme-specific FEC OTI, suppression of
+# Transfer-Length under the MBMS Download Profile, the split expiry setter, and the RFC 5053 Raptor
+# scheme. None of it is in a release tag yet.
+#
+# Repoint this at a tag once #62 and #61 have merged and a release carries them.
+#
+# The revision below is a real, fetchable commit on 5G-MAG. Nothing here is patched locally: if
+# subprojects/rt-libflute exists as a checkout it must be detached at exactly this commit, because
+# meson's subproject directory precedence means an existing checkout silently wins over this file.
+# `git -C subprojects/rt-libflute rev-parse HEAD` should print the revision below and nothing else.
 [wrap-git]
 url = https://github.com/5G-MAG/rt-libflute.git
-revision = rt-libflute-0.12.3
+revision = 45ac74c14e02d58a4c9cef96f28d99fc598ac06d
 method = cmake
 
 #diff_files = rt-libflute/IpSec-xfrm_algo.patch

@@ -59,6 +59,28 @@ public:
         PackageItem &deadline(const time_type &deadline) { m_deadline = deadline; return *this; }
         PackageItem &deadline(time_type &&deadline) { m_deadline = std::move(deadline); return *this; }
 
+
+        /** Transmission order for the packaging queue.
+         *
+         * TS 26.517 V18.6.0 clause 6.2.3.5: "The MBSTF shall transmit each object in the object
+         * list such that the last packet of the delivered FLUTE transmission object (including any
+         * FEC recovery packets, when configured) is available at the MBSTF Client no later than its
+         * availability start time."
+         *
+         * The deadline carried by a PackageItem is that availability start time, so ordering the
+         * queue by it is what implements the clause. An item with no deadline sorts after every
+         * item that has one: nothing is known about when it must arrive, so it cannot be allowed to
+         * displace an object that does have a stated time.
+         *
+         * A named predicate rather than an inline comparator so that the ordering can be tested
+         * directly, the queue itself being private and fed only through a live packager.
+         */
+        static bool earlierDeadlineFirst(const PackageItem &a, const PackageItem &b) {
+            if (a.m_deadline.has_value() && b.m_deadline.has_value()) {
+                return a.m_deadline < b.m_deadline;
+            }
+            return a.m_deadline.has_value();
+        };
     private:
         std::shared_ptr<ObjectStore::Object> m_object;
         std::optional<time_type> m_deadline;
@@ -73,7 +95,8 @@ public:
                        const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
     ObjectListPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller, const SsmPort &ssm_port,
                        uint32_t rateLimit, unsigned short mtu, const std::optional<std::string> &tunnel_address,
-                       in_port_t tunnel_port);
+                       in_port_t tunnel_port,
+                       const std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> &fec_information = std::nullopt);
     virtual ~ObjectListPackager();
 
     bool add(const PackageItem &item);

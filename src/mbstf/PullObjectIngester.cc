@@ -49,10 +49,11 @@ PullObjectIngester::IngestItem::IngestItem(const ObjectStore::Metadata &object_m
     ,m_forceRecache(force_recache)
     ,m_markAsKeepAfterSend(keep_after_send)
     ,m_markAsCompressedSend(compress_send)
+    ,m_fetchFailures(0)
 {
 }
 
-PullObjectIngester::IngestItem::IngestItem(const std::string &object_id, const std::string &url, const std::string &acquisition_id, const std::optional<std::string> &obj_ingest_base_url,  const std::optional<std::string> &obj_distribution_base_url, const std::optional<time_type> &download_deadline, bool force_recache, bool keep_after_send, bool compress_send)
+PullObjectIngester::IngestItem::IngestItem(const std::string &object_id, const std::string &url, const std::string &acquisition_id, const std::optional<std::string> &obj_ingest_base_url,  const std::optional<std::string> &obj_distribution_base_url, const std::optional<time_type> &download_deadline, bool force_recache, bool keep_after_send, bool compress_send, const std::optional<time_type> &availability_start_time, const std::optional<time_type> &availability_end_time)
     :m_objectId(object_id)
     ,m_url(url)
     ,m_acquisitionId(acquisition_id)
@@ -62,6 +63,9 @@ PullObjectIngester::IngestItem::IngestItem(const std::string &object_id, const s
     ,m_forceRecache(force_recache)
     ,m_markAsKeepAfterSend(keep_after_send)
     ,m_markAsCompressedSend(compress_send)
+    ,m_fetchFailures(0)
+    ,m_availabilityStartTime(availability_start_time)
+    ,m_availabilityEndTime(availability_end_time)
 {
 }
 
@@ -75,6 +79,9 @@ PullObjectIngester::IngestItem::IngestItem(const IngestItem &other)
     ,m_forceRecache(other.m_forceRecache)
     ,m_markAsKeepAfterSend(other.m_markAsKeepAfterSend)
     ,m_markAsCompressedSend(other.m_markAsCompressedSend)
+    ,m_fetchFailures(other.m_fetchFailures)
+    ,m_availabilityStartTime(other.m_availabilityStartTime)
+    ,m_availabilityEndTime(other.m_availabilityEndTime)
 {
 }
 
@@ -88,6 +95,9 @@ PullObjectIngester::IngestItem::IngestItem(IngestItem &&other)
     ,m_forceRecache(other.m_forceRecache)
     ,m_markAsKeepAfterSend(other.m_markAsKeepAfterSend)
     ,m_markAsCompressedSend(other.m_markAsCompressedSend)
+    ,m_fetchFailures(other.m_fetchFailures)
+    ,m_availabilityStartTime(std::move(other.m_availabilityStartTime))
+    ,m_availabilityEndTime(std::move(other.m_availabilityEndTime))
 {
 }
 
@@ -124,7 +134,9 @@ bool PullObjectIngester::fetch(const std::string &object_id, const std::optional
 
     // otherwise we need a new fetch based on the ObjectStore entry
     if (it == m_fetchList.end()) {
-        m_fetchList.emplace_back(objectStore()->getMetadata(object_id).keepAfterSend(keep_after_send).compressedSend(compress_send), download_deadline, force_recache);
+        // Copied under the store's own lock: see ObjectStore::takeMetadataForIngest().
+        m_fetchList.emplace_back(objectStore()->takeMetadataForIngest(object_id, keep_after_send, compress_send),
+                                 download_deadline, force_recache);
     }
 
     sortListByPolicy();

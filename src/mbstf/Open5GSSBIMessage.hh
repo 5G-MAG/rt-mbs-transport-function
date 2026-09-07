@@ -61,6 +61,7 @@ public:
     const OpenAPI_nf_profile_t *nfProfile() const { return m_message?(m_message->NFProfile):nullptr; };
     int resStatus() const { return m_message?(m_message->res_status):0; };
     const char *contentType() const { return m_message?(m_message->http.content_type):nullptr; };
+    const char *accept() const { return m_message?(m_message->http.accept):nullptr; };
     OpenAPI_problem_details_t *problemDetails() { return m_message?(m_message->ProblemDetails):nullptr; };
     const OpenAPI_problem_details_t *problemDetails() const { return m_message?(m_message->ProblemDetails):nullptr; };
 
