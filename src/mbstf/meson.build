@@ -113,6 +113,8 @@ libmbstf_dist_sources = files('''
     MBSTFEventHandler.cc
     MBSTFEventHandler.hh
     MBSTFNetworkFunction.hh
+    MediaTypeInference.cc
+    MediaTypeInference.hh
     MimeContentType.cc
     MimeContentType.hh
     NfServer.cc

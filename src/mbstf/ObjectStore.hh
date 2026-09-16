@@ -194,24 +194,8 @@ public:
         Metadata &acquisitionId(const std::string &acquistion_id) { m_acquisitionId = acquistion_id; return *this;};
 
         const std::string &mediaType() const {return m_mediaType;};
-        /* An origin that sends no Content-Type leaves this empty, and the object then cannot be
-           described conformantly: TS 26.517 clause 6.2.1 binds the MBSTF to the MBMS Download
-           Profile, whose clause L.4.2 requires Content-Type in the FDT. The MBSTF is the recipient
-           of the ingested object, and RFC 9110 clause 8.3 gives a recipient that choice: "If a
-           Content-Type header field is not present, the recipient MAY either assume a media type of
-           "application/octet-stream" ([RFC2046], Section 4.5.1) or examine the data to determine its
-           type." Assumed rather than sniffed, sniffing being what that clause's own note says user
-           agents do inconsistently. See 5G-MAG/rt-mbs-transport-function#74. */
-        static const std::string &defaultMediaType() {
-            static const std::string kDefault("application/octet-stream");
-            return kDefault;
-        };
-        Metadata &mediaType(const std::string &media_type) {
-            m_mediaType = media_type.empty() ? defaultMediaType() : media_type; return *this;};
-        Metadata &mediaType(std::string &&media_type) {
-            if (media_type.empty()) { m_mediaType = defaultMediaType(); }
-            else { m_mediaType = std::move(media_type); }
-            return *this;};
+        Metadata &mediaType(const std::string &media_type) {m_mediaType = media_type; return *this;};
+        Metadata &mediaType(std::string &&media_type) {m_mediaType = std::move(media_type); return *this;};
 
 
 

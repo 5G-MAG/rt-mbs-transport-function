@@ -27,6 +27,7 @@
 #include "PullObjectIngester.hh"
 #include "hash.hh"
 #include "Curl.hh"
+#include "MediaTypeInference.hh"
 #include "ObjectStore.hh"
 
 LIBMPDPP_NAMESPACE_USING(BaseURL);
@@ -257,7 +258,35 @@ void PullObjectIngester::doObjectIngest() {
                 ogs_debug("Received %ld bytes of data", bytesReceived);
                 std::string fetched_url = URI(m_curl->getPermanentRedirectUrl()).resolveUsingBaseURLs(std::list<BaseURL>{BaseURL(item.url())}).str();
                 if (fetched_url.empty()) fetched_url = item.url();
-                ObjectStore::Metadata metadata(item.objectId(), m_curl->getContentType(), item.url(), fetched_url, item.acquisitionId(), m_curl->getLastModified(), item.objIngestBaseUrl(), item.objDistributionBaseUrl());
+
+                /* An object with no media type cannot be described conformantly: TS 26.517 V18.6.0
+                   clause 6.2.1 binds the MBSTF to the MBMS Download Profile, and TS 26.346 V18.2.0
+                   clause L.4.2 lists Content-Type first among the attributes that "shall be carried
+                   in the FDT sent by the FLUTE sender".
+
+                   Where the origin sent none, the type is inferred from the object's filename
+                   extension. Where that fails the ingest fails, rather than the MBSTF asserting a
+                   media type nobody established: a wrong Content-Type on the wire is worse than a
+                   refused object, because a receiver has no way to tell it is wrong. */
+                std::string media_type = m_curl->getContentType();
+                if (media_type.empty()) {
+                    auto inferred = inferMediaTypeFromUrl(item.url());
+                    if (!inferred) {
+                        ogs_warn("Ingest of [%s] failed: the origin sent no Content-Type and none "
+                                 "could be inferred from the object name; an object with no media "
+                                 "type cannot be carried in a conformant FDT",
+                                 item.url().c_str());
+                        emitObjectPullIngestFailedEvent(item, item.url(),
+                                                        ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
+                        m_ingestItemsMutex->lock(); // lock so that the lock_guard can release properly
+                        return;
+                    }
+                    ogs_info("Ingest of [%s]: origin sent no Content-Type, inferred [%s] from the "
+                             "object name", item.url().c_str(), inferred->c_str());
+                    media_type = *inferred;
+                }
+
+                ObjectStore::Metadata metadata(item.objectId(), media_type, item.url(), fetched_url, item.acquisitionId(), m_curl->getLastModified(), item.objIngestBaseUrl(), item.objDistributionBaseUrl());
                 /* re-get metadata from ObjectStore as it may have changed */
                 try {
                     auto &meta = objectStore()->getMetadata(item.objectId());

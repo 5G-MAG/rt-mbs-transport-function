@@ -38,8 +38,7 @@ MBSTF_NAMESPACE_START
 
 ObjectStore::Metadata::Metadata()
     :m_objectId()
-    // An object with no stated media type is octet-stream, not typeless: see mediaType().
-    ,m_mediaType(Metadata::defaultMediaType())
+    ,m_mediaType()
     ,m_originalUrl()
     ,m_fetchedUrl()
     ,m_acquisitionId()
@@ -63,7 +62,7 @@ ObjectStore::Metadata::Metadata(const std::string &object_id, const std::string 
                  std::optional<std::string> obj_distribution_base_url,
                  const std::optional<std::chrono::system_clock::time_point> &cache_expires)
     :m_objectId(object_id)
-    ,m_mediaType(media_type.empty() ? Metadata::defaultMediaType() : media_type)
+    ,m_mediaType(media_type)
     ,m_originalUrl(url)
     ,m_fetchedUrl(fetched_url)
     ,m_acquisitionId(acquisition_id)
