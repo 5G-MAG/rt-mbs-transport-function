@@ -177,6 +177,31 @@ static void testFileExpiryWithoutAvailabilityStart()
           "testFileExpiryTime clamps the fallback to the availability start time when only that is known");
 }
 
+/* The queue orders by deadline, so an item constructed without one cannot participate in that
+ * ordering at all. Guards the wiring in ObjectStreamingController::sendToPackager(), which passes
+ * the object's availability start time: before it, every segment-streaming item was undated and
+ * sorted as though it had no availability constraint.
+ */
+static void testItemCarriesTheAvailabilityStartTimeAsItsDeadline()
+{
+    const auto now = time_type::clock::now();
+    auto object = makeObject("with-availability");
+    object->second.availabilityStartTime(now + 30s);
+
+    ObjectListPackager::PackageItem item(object, object->second.availabilityStartTime());
+    check(item.deadline().has_value(),
+          "testItemCarriesTheAvailabilityStartTimeAsItsDeadline sets a deadline");
+    check(item.deadline().value() == now + 30s,
+          "testItemCarriesTheAvailabilityStartTimeAsItsDeadline uses the availability start time");
+
+    auto undated = makeObject("without-availability");
+    ObjectListPackager::PackageItem undated_item(undated, undated->second.availabilityStartTime());
+    check(!undated_item.deadline().has_value(),
+          "testItemCarriesTheAvailabilityStartTimeAsItsDeadline leaves an object without one undated");
+    check(ObjectListPackager::PackageItem::earlierDeadlineFirst(item, undated_item),
+          "testItemCarriesTheAvailabilityStartTimeAsItsDeadline sorts the dated item first");
+}
+
 int main()
 {
     std::cout << "### ObjectListPackager: Test start ####" << std::endl;
@@ -188,6 +213,7 @@ int main()
     testFileExpiryBoundedByAvailabilityStart();
     testFileExpiryKeepsEarlierCacheControl();
     testFileExpiryWithoutAvailabilityStart();
+    testItemCarriesTheAvailabilityStartTimeAsItsDeadline();
 
     std::cout << "Test: ObjectListPackager Pass: " << pass << " Fail: " << fail << std::endl;
     std::cout << "### ObjectListPackager: Test finish ####" << std::endl;

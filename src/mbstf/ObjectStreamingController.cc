@@ -111,7 +111,14 @@ void ObjectStreamingController::sendToPackager(const std::shared_ptr<ObjectStore
 {
     auto packager = getObjectListPackager();
     if (packager) {
-        ObjectListPackager::PackageItem item(object);
+        // TS 26.517 V18.6.0 clause 6.2.3.5: "The MBSTF shall transmit each object in the object list
+        // such that the last packet of the delivered FLUTE transmission object (including any FEC
+        // recovery packets, when configured) is available at the MBSTF Client no later than its
+        // availability start time." The packaging queue is ordered by each item's deadline for that
+        // purpose, so for this operating mode the deadline is that availability start time. Passing
+        // no deadline leaves every item undated, and the ordering predicate then has nothing to
+        // order by.
+        ObjectListPackager::PackageItem item(object, object->second.availabilityStartTime());
         packager->add(item);
     }
 }
