@@ -86,6 +86,31 @@ public:
         std::optional<time_type> m_deadline;
     };
 
+    /** The File@Expires value for an object, per TS 26.517 V18.6.0 clause 6.2.3.5.
+     *
+     * The clause makes the object's latest availability start time a ceiling, not another
+     * candidate: "-The File@Expires attribute for each object shall be set such that it is equal to
+     * or earlier than its latest availability start time." An ingest response's Cache-Control can
+     * sit either side of it, so the earlier of the two is taken whenever both are known.
+     *
+     * A named rule rather than inline arithmetic so that it can be tested directly; the call site
+     * sits inside the send path, which needs a live FLUTE transmitter and its sockets.
+     *
+     * \param cache_expires      Expiry derived from the ingest response, if any.
+     * \param availability_start The object's latest availability start time, if known.
+     * \param fallback           Used when the ingest response carried no expiry.
+     * \return the File@Expires value to write.
+     */
+    static time_type fileExpiryTime(const std::optional<time_type> &cache_expires,
+                                    const std::optional<time_type> &availability_start,
+                                    const time_type &fallback) {
+        time_type expires_at = cache_expires.value_or(fallback);
+        if (availability_start && *availability_start < expires_at) {
+            expires_at = *availability_start;
+        }
+        return expires_at;
+    };
+
     ObjectListPackager() = delete;
     ObjectListPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
                        const std::list<PackageItem> &object_to_package, const SsmPort &ssm_port, uint32_t rateLimit,

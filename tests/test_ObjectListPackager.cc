@@ -134,6 +134,49 @@ MBSTF_NAMESPACE_STOP
 
 MBSTF_NAMESPACE_USING;
 
+/* TS 26.517 V18.6.0 clause 6.2.3.5 makes the availability start time a ceiling on File@Expires, so
+ * an ingest Cache-Control that would put it later must not win.
+ */
+static void testFileExpiryBoundedByAvailabilityStart()
+{
+    const auto now = time_type::clock::now();
+    const auto availability_start = now + 10s;
+    const auto cache_expires = now + 60s;   // later than the ceiling
+    const auto fallback = now + 3600s;
+
+    check(ObjectListPackager::fileExpiryTime(cache_expires, availability_start, fallback) == availability_start,
+          "testFileExpiryTime clamps a later Cache-Control down to the availability start time");
+}
+
+/* Equally, the clause says "equal to or earlier than", so an earlier Cache-Control is kept as is. */
+static void testFileExpiryKeepsEarlierCacheControl()
+{
+    const auto now = time_type::clock::now();
+    const auto availability_start = now + 60s;
+    const auto cache_expires = now + 10s;   // earlier than the ceiling
+    const auto fallback = now + 3600s;
+
+    check(ObjectListPackager::fileExpiryTime(cache_expires, availability_start, fallback) == cache_expires,
+          "testFileExpiryTime keeps a Cache-Control that is already earlier than the availability start time");
+}
+
+/* With no availability start time known the ceiling does not apply, and with no Cache-Control the
+ * caller's fallback is used. Both are the pre-existing behaviour and must be unchanged.
+ */
+static void testFileExpiryWithoutAvailabilityStart()
+{
+    const auto now = time_type::clock::now();
+    const auto cache_expires = now + 60s;
+    const auto fallback = now + 3600s;
+
+    check(ObjectListPackager::fileExpiryTime(cache_expires, std::nullopt, fallback) == cache_expires,
+          "testFileExpiryTime uses Cache-Control unchanged when no availability start time is known");
+    check(ObjectListPackager::fileExpiryTime(std::nullopt, std::nullopt, fallback) == fallback,
+          "testFileExpiryTime falls back when neither is known");
+    check(ObjectListPackager::fileExpiryTime(std::nullopt, now + 10s, fallback) == now + 10s,
+          "testFileExpiryTime clamps the fallback to the availability start time when only that is known");
+}
+
 int main()
 {
     std::cout << "### ObjectListPackager: Test start ####" << std::endl;
@@ -142,6 +185,9 @@ int main()
     testItemWithoutDeadlineSortsLast();
     testQueueSortsIntoAvailabilityOrder();
     testOverdueObjectSortsFirst();
+    testFileExpiryBoundedByAvailabilityStart();
+    testFileExpiryKeepsEarlierCacheControl();
+    testFileExpiryWithoutAvailabilityStart();
 
     std::cout << "Test: ObjectListPackager Pass: " << pass << " Fail: " << fail << std::endl;
     std::cout << "### ObjectListPackager: Test finish ####" << std::endl;

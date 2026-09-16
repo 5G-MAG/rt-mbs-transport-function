@@ -51,6 +51,8 @@ PullObjectIngester::IngestItem::IngestItem(const ObjectStore::Metadata &object_m
     ,m_markAsKeepAfterSend(keep_after_send)
     ,m_markAsCompressedSend(compress_send)
     ,m_fetchFailures(0)
+    ,m_availabilityStartTime(object_meta.availabilityStartTime())
+    ,m_availabilityEndTime(object_meta.availabilityEndTime())
 {
 }
 
@@ -300,6 +302,13 @@ void PullObjectIngester::doObjectIngest() {
                 } else {
                     metadata.keepAfterSend(item.markAsKeepAfterSend());
                 }
+                // TS 26.517 V18.6.0 clause 6.2.3.5 requires the object's availability start and end
+                // times to be maintained per object in the object list. They reach the ingester on the
+                // IngestItem and are stored here so ObjectListPackager can set File@Expires and
+                // Cache-Control@Expires from them.
+                metadata.availabilityStartTime(item.availabilityStartTime());
+                metadata.availabilityEndTime(item.availabilityEndTime());
+
                 unsigned long max_age = m_curl->getCacheControlMaxAge();
                 unsigned long current_age = m_curl->getAge();
                 metadata.cacheExpires(max_age ? std::chrono::system_clock::now() + std::chrono::seconds(max_age) - std::chrono::seconds(current_age) : std::chrono::system_clock::now() + std::chrono::seconds(ObjectStore::Metadata::cacheExpiry()));

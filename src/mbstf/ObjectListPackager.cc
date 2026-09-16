@@ -316,14 +316,22 @@ void ObjectListPackager::doObjectPackage() {
             }
 
             m_queued = true;
-            LibFlute::Transmitter::FileDescription::date_time_type expires_at;
-            const auto &cache_expires = metadata.cacheExpires();
-            if (cache_expires) {
-                expires_at = cache_expires.value();
-            } else {
-                expires_at = LibFlute::Transmitter::FileDescription::date_time_type::clock::now() + 60s;
-            }
+
+            // File@Expires is bounded by the object's availability start time; see fileExpiryTime()
+            // for the clause. The 60s fallback is the pre-existing behaviour for an object whose
+            // ingest response carried no expiry, and rests on no clause.
+            const auto expires_at = fileExpiryTime(metadata.cacheExpires(), metadata.availabilityStartTime(),
+                                                   time_type::clock::now() + 60s);
             file_desc->set_expiry_time(expires_at);
+
+            // TS 26.517 V18.6.0 clause 6.2.3.5: "-The Cache-Control@Expires attribute shall be used to
+            // indicate the availability end time of the object." Left unset when the object has no
+            // availability end time, which emits no Cache-Control element at all; the profiled schema
+            // makes the element minOccurs="0", so its absence is valid and says nothing false.
+            const auto &availability_end = metadata.availabilityEndTime();
+            if (availability_end) {
+                file_desc->set_cache_expiry_time(*availability_end);
+            }
 
             file_desc->set_content_type(metadata.mediaType());
 

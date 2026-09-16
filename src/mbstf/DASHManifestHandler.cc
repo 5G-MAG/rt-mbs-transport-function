@@ -203,6 +203,11 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
             ingest_items.emplace_back(nextObjectId(), first_media_segment.segmentURL(), empty, obj_ingest_base_url,
                                       obj_dist_base_url, first_media_segment.availabilityEndTime(), first_media_segment.forceRecache(), first_media_segment.keepAfterSend(), first_media_segment.compressEntry());
         }
+        // TS 26.517 V18.6.0 clause 6.2.3.5 requires these two to be maintained per object. The
+        // manifest is the only place they are known, and the availability end time is separately the
+        // item's fetch deadline above, so it is passed twice for two different purposes.
+        ingest_items.back().availabilityStartTime(first_media_segment.availabilityStartTime())
+                           .availabilityEndTime(first_media_segment.availabilityEndTime());
         removeExtraPullObjectsEntry(first_media_segment);
         if (media_segment_urls.find(segment_url) != media_segment_urls.end()) m_sentSegmentUrls.insert(segment_url);
 
@@ -226,6 +231,8 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
                 ingest_items.emplace_back(nextObjectId(), segment_url, empty, obj_ingest_base_url, obj_dist_base_url,
                                           it->availabilityEndTime(), it->forceRecache(), it->keepAfterSend(), it->compressEntry());
             }
+            ingest_items.back().availabilityStartTime(it->availabilityStartTime())
+                               .availabilityEndTime(it->availabilityEndTime());
             if (it->segmentURL() == manifest_url) m_refreshMpd = true;
         }
     }
