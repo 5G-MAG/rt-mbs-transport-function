@@ -18,7 +18,8 @@ namespace {
 
 /* Enough to describe what an MBS service actually carries when the origin says nothing: DASH and
    HLS manifests, ISOBMFF and MPEG-2 TS segments, WebVTT and TTML subtitles, and the still images a
-   service announcement refers to. Consulted only when /etc/mime.types is absent or silent. */
+   service announcement refers to. This table is consulted first, ahead of /etc/mime.types; see
+   inferMediaTypeFromUrl() below for why that order matters. */
 const std::map<std::string, std::string> &builtinTypes()
 {
     static const std::map<std::string, std::string> types{
