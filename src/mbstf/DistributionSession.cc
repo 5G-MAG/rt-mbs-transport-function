@@ -321,7 +321,9 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                                                 ogs_error("%s", err.str().c_str());
                                                 ogs_assert(true == NfServer::sendError(stream,
                                                                         OGS_SBI_HTTP_STATUS_MEHTOD_NOT_ALLOWED,
-                                                                        4, message, app_meta, api, std::nullopt, err.str()));
+                                                                        4, message, app_meta, api, std::nullopt, err.str(),
+                                                                        std::nullopt, std::nullopt, std::nullopt,
+                                                                        OGS_SBI_HTTP_METHOD_PATCH ", " OGS_SBI_HTTP_METHOD_DELETE ", " OGS_SBI_HTTP_METHOD_OPTIONS));
                                             }
                                         }
                                     } else {
@@ -342,7 +344,9 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                                             ogs_error("%s", err.str().c_str());
                                             ogs_assert(true == NfServer::sendError(stream,
                                                                         OGS_SBI_HTTP_STATUS_MEHTOD_NOT_ALLOWED,
-                                                                        3, message, app_meta, api, std::nullopt, err.str()));
+                                                                        3, message, app_meta, api, std::nullopt, err.str(),
+                                                                        std::nullopt, std::nullopt, std::nullopt,
+                                                                        OGS_SBI_HTTP_METHOD_POST ", " OGS_SBI_HTTP_METHOD_OPTIONS));
                                         }
                                     }
                                 } else {
@@ -375,7 +379,9 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                                         << "] is not allowed for a Distribution Session";
                                     ogs_error("%s", err.str().c_str());
                                     ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_MEHTOD_NOT_ALLOWED,
-                                                                        2, message, app_meta, api, std::nullopt, err.str()));
+                                                                        2, message, app_meta, api, std::nullopt, err.str(),
+                                                                        std::nullopt, std::nullopt, std::nullopt,
+                                                                        OGS_SBI_HTTP_METHOD_GET ", " OGS_SBI_HTTP_METHOD_PATCH ", " OGS_SBI_HTTP_METHOD_DELETE ", " OGS_SBI_HTTP_METHOD_OPTIONS));
                                 }
                             }
                         } else {
@@ -395,7 +401,9 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                                 err << "Distribution Sessions method [" << method << "] is not allowed for a Distribution Session";
                                 ogs_error("%s", err.str().c_str());
                                 ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_MEHTOD_NOT_ALLOWED,
-                                                                          2, message, app_meta, api, std::nullopt, err.str()));
+                                                                          2, message, app_meta, api, std::nullopt, err.str(),
+                                                                          std::nullopt, std::nullopt, std::nullopt,
+                                                                          OGS_SBI_HTTP_METHOD_POST ", " OGS_SBI_HTTP_METHOD_OPTIONS));
                             }
                         }
                     } else {
