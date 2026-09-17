@@ -262,7 +262,10 @@ static void testFindMetadataByUrlReturnsAnIndependentValue(ObjectStore &store) {
 
     check(found->getOriginalUrl() == "url1",
           "a value taken before an update is unaffected by it, so it was a copy and not a reference");
-    check(store.findMetadataByURL("fetched_url1")->getOriginalUrl() == "url1-changed",
+
+    auto after = store.findMetadataByURL("fetched_url1");
+    check(after.has_value(), "the object is still findable by its fetched URL after an update");
+    check(after.has_value() && after->getOriginalUrl() == "url1-changed",
           "a value taken after the update reflects it");
 }
 
