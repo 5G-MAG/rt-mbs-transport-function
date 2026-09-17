@@ -25,6 +25,8 @@
 #include <optional>
 #include <map>
 #include <list>
+#include <atomic>
+#include <cstring>
 
 #include "common.hh"
 #include "ObjectStore.hh"
@@ -264,6 +266,57 @@ static void testFindMetadataByUrlReturnsAnIndependentValue(ObjectStore &store) {
           "a value taken after the update reflects it");
 }
 
+
+/* A reference handed out by getMetadata() is read with no lock held.
+ *
+ * getMetadata() takes the store lock under a lock_guard scoped to the function, so the lock is
+ * released as it returns and every access through the reference is unsynchronised.
+ * updateMetadata() holds the lock and move-assigns the whole entry, every std::string member
+ * included. This exercises that pair the way the ingest path does: one thread replacing an entry,
+ * another copying it through the reference.
+ *
+ * Under a normal build this is a no-op that reports how many operations it managed. Its purpose is
+ * to give ThreadSanitizer something to report, and to give a torn read somewhere to show up: a
+ * std::string whose size() and strlen() disagree has been copied out of two different states of the
+ * same object.
+ */
+static void testConcurrentUpdateAndIngestCopy(ObjectStore &store) {
+    const std::string id = firstObject;
+    std::atomic<bool> stop{false};
+    std::atomic<unsigned> reads{0}, writes{0}, torn{0};
+
+    std::thread writer([&]() {
+        unsigned n = 0;
+        while (!stop.load(std::memory_order_relaxed)) {
+            ObjectStore::Metadata replacement(id, "type", "url" + std::to_string(n),
+                                              "fetched_url_long_enough_to_live_on_the_heap_" + std::to_string(n),
+                                              "acq", std::chrono::system_clock::now());
+            try { store.updateMetadata(id, std::move(replacement)); } catch (const std::exception &) {}
+            writes++; n++;
+        }
+    });
+
+    std::thread reader([&]() {
+        while (!stop.load(std::memory_order_relaxed)) {
+            try {
+                ObjectStore::Metadata copy(store.getMetadata(id));
+                const std::string &u = copy.getFetchedUrl();
+                if (u.size() != std::strlen(u.c_str())) torn++;
+            } catch (const std::exception &) {}
+            reads++;
+        }
+    });
+
+    std::this_thread::sleep_for(2s);
+    stop.store(true, std::memory_order_relaxed);
+    writer.join();
+    reader.join();
+
+    std::cout << "INFO: concurrent update/copy: " << writes.load() << " updates, "
+              << reads.load() << " copies, " << torn.load() << " torn string(s) observed" << std::endl;
+    pass++;
+}
+
 int main() {
     
     ObjectController objectController;
@@ -283,6 +336,7 @@ int main() {
     testAvailabilityTimes();
     testEntityTagSurvivesCopyAndMove();
     testFindMetadataByUrlReturnsAnIndependentValue(*store);
+    testConcurrentUpdateAndIngestCopy(*store);
     std::cout<<"Test: ObjectStore "<<"Pass: "<<pass<<" Fail: "<<fail<<std::endl;
     std::cout<<"### ObjectStore: Test finish #### "<<std::endl;
     store.reset();
