@@ -155,9 +155,10 @@ bool PullObjectIngester::fetch(const IngestItem &item) {
 bool PullObjectIngester::fetch(IngestItem &&item) {
     std::lock_guard<std::recursive_mutex> lock(*m_ingestItemsMutex);
     try {
-        auto &metadata = objectStore()->getMetadata(item.objectId());
-        if (!metadata.keepAfterSend()) metadata.keepAfterSend(item.markAsKeepAfterSend());
-        metadata.compressedSend(item.markAsCompressedSend());
+        // Marked under the store's own lock rather than through a reference it has stopped
+        // guarding: see ObjectStore::markForFetch(). Throws out_of_range when there is no previous
+        // version, which the catch below already handles.
+        objectStore()->markForFetch(item.objectId(), item.markAsKeepAfterSend(), item.markAsCompressedSend());
         return fetch(item.objectId(), item.deadline(), item.forceRecache(), item.markAsKeepAfterSend(), item.markAsCompressedSend());
     } catch (const std::out_of_range &ex) {
         // No previous version, this isn't a refresh, but may still be a re-request for an existing list item
@@ -209,17 +210,19 @@ void PullObjectIngester::doObjectIngest() {
             auto item = m_fetchList.front();
             m_fetchList.pop_front();
             m_ingestItemsMutex->unlock(); // temp unlock while we fetch
-            ObjectStore::Metadata *old_meta = nullptr;
-            try {
-                auto &meta = objectStore()->getMetadata(item.objectId());
-                old_meta = &meta;
-                if (!item.forceRecache() && meta.hasExpiryTime() && meta.ExpiryTime() > ObjectStore::datetime_type::clock::now()) {
+            /* A copy taken under the store lock, not a reference into the store. This is read
+               again further down, after the fetch below has run with the ingest list unlocked, and a
+               store entry can be replaced by updateMetadata() or erased entirely while that is in
+               flight. See ObjectStore::tryGetMetadata(). */
+            std::optional<ObjectStore::Metadata> old_meta = objectStore()->tryGetMetadata(item.objectId());
+            if (old_meta) {
+                if (!item.forceRecache() && old_meta->hasExpiryTime() && old_meta->ExpiryTime() > ObjectStore::datetime_type::clock::now()) {
                     // Existing store item is still fresh
                     ogs_debug("Reusing cached object for %s instead of fetching again", item.url().c_str());
                     // "Update" (using same metadata) in the ObjectStore to set last used timestamps and trigger update event
-                    ObjectStore::Metadata metadata(meta);
+                    ObjectStore::Metadata metadata(*old_meta);
                     try {
-                        this->objectStore()->updateMetadata(meta.objectId(), std::move(metadata), true);
+                        this->objectStore()->updateMetadata(old_meta->objectId(), std::move(metadata), true);
                     } catch (std::runtime_error &ex) {
                         ogs_warn("While reusing cached object %s: %s", item.url().c_str(), ex.what());
                         emitObjectPullIngestFailedEvent(item, item.url(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
@@ -227,13 +230,13 @@ void PullObjectIngester::doObjectIngest() {
                     m_ingestItemsMutex->lock(); // lock so that the lock_guard can release properly
                     return;
                 }
-                auto &file_desc = meta.fluteFileDescription();
+                const auto &file_desc = old_meta->fluteFileDescription();
                 if (file_desc) {
                     ogs_debug("Refetching %s (TOI %u)...", item.url().c_str(), file_desc->toi());
                 } else {
                     ogs_debug("Refetching %s...", item.url().c_str());
                 }
-            } catch (const std::out_of_range &ex) {
+            } else {
                 ogs_debug("Fetching %s...", item.url().c_str());
             }
 
@@ -289,13 +292,9 @@ void PullObjectIngester::doObjectIngest() {
                 }
 
                 ObjectStore::Metadata metadata(item.objectId(), media_type, item.url(), fetched_url, item.acquisitionId(), m_curl->getLastModified(), item.objIngestBaseUrl(), item.objDistributionBaseUrl());
-                /* re-get metadata from ObjectStore as it may have changed */
-                try {
-                    auto &meta = objectStore()->getMetadata(item.objectId());
-                    old_meta = &meta;
-                } catch (const std::out_of_range &ex) {
-                    old_meta = nullptr;
-                }
+                /* re-get metadata from ObjectStore as it may have changed, again as a copy taken
+                   under the store lock rather than a reference it has stopped guarding */
+                old_meta = objectStore()->tryGetMetadata(item.objectId());
                 if (old_meta) {
                     metadata.fluteFileDescription(old_meta->fluteFileDescription());
                     metadata.keepAfterSend(old_meta->keepAfterSend() || item.markAsKeepAfterSend());

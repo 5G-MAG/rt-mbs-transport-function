@@ -299,9 +299,19 @@ static void testConcurrentUpdateAndIngestCopy(ObjectStore &store) {
     std::thread reader([&]() {
         while (!stop.load(std::memory_order_relaxed)) {
             try {
-                ObjectStore::Metadata copy(store.getMetadata(id));
-                const std::string &u = copy.getFetchedUrl();
-                if (u.size() != std::strlen(u.c_str())) torn++;
+                /* The accessor the ingest path now uses. A copy taken under the store lock cannot be
+                   reached by the writer, so a torn string here would mean the locking had been
+                   undone; that is what the check after this loop asserts.
+
+                   Swapping this for store.getMetadata(id), which returns a reference the store has
+                   stopped guarding, makes the same loop report thousands of torn strings and makes
+                   ThreadSanitizer report a race on every string member. That accessor now has no
+                   callers in src/. */
+                auto copy = store.tryGetMetadata(id);
+                if (copy) {
+                    const std::string &u = copy->getFetchedUrl();
+                    if (u.size() != std::strlen(u.c_str())) torn++;
+                }
             } catch (const std::exception &) {}
             reads++;
         }
@@ -313,8 +323,8 @@ static void testConcurrentUpdateAndIngestCopy(ObjectStore &store) {
     reader.join();
 
     std::cout << "INFO: concurrent update/copy: " << writes.load() << " updates, "
-              << reads.load() << " copies, " << torn.load() << " torn string(s) observed" << std::endl;
-    pass++;
+              << reads.load() << " copies" << std::endl;
+    check(torn.load() == 0, "a metadata copy taken under the store lock is never torn by a concurrent update");
 }
 
 int main() {

@@ -356,6 +356,29 @@ public:
      */
     Metadata takeMetadataForIngest(const std::string& object_id, bool keep_after_send, bool compress_send);
 
+    /** Take a copy of an object's metadata, or nothing if the store has no such object.
+     *
+     * The copy is made while the store lock is held, so unlike getMetadata() below the caller is not
+     * reading a live entry another thread may be move-assigning. Use this wherever a caller would
+     * otherwise hold a reference or pointer from getMetadata() beyond the call, and especially
+     * across anything that blocks: a store entry can be replaced or erased while a fetch is in
+     * flight, which leaves such a pointer dangling.
+     */
+    std::optional<Metadata> tryGetMetadata(const std::string& object_id) const;
+
+    /** Apply the marks an ingest is about to make, without releasing the store lock in between.
+     *
+     * keepAfterSend is only ever set, never cleared, so a mark already applied by another ingest of
+     * the same object survives. Throws std::out_of_range if the store has no such object, matching
+     * getMetadata() so a caller distinguishing "no previous version" keeps working.
+     */
+    void markForFetch(const std::string& object_id, bool keep_after_send, bool compress_send);
+
+    /** Delete an object unless it is marked to be kept after sending, deciding and acting under one
+     * lock. Returns true if it was deleted, false if it was kept or the store has no such object.
+     */
+    bool deleteUnlessKeptAfterSend(const std::string& object_id);
+
     const Metadata& getMetadata(const std::string& object_id) const;
     Metadata& getMetadata(const std::string& object_id);
     void deleteObject(const std::string& object_id);

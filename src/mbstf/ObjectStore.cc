@@ -275,6 +275,29 @@ ObjectStore::Metadata ObjectStore::takeMetadataForIngest(const std::string& obje
     return metadata;   // copied while the lock is still held
 }
 
+std::optional<ObjectStore::Metadata> ObjectStore::tryGetMetadata(const std::string& object_id) const {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_store.find(object_id);
+    if (it == m_store.end()) return std::nullopt;
+    return it->second->second;   // copied while the lock is still held
+}
+
+void ObjectStore::markForFetch(const std::string& object_id, bool keep_after_send, bool compress_send) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    Metadata &metadata = m_store.at(object_id)->second;   // throws out_of_range when absent
+    if (!metadata.keepAfterSend()) metadata.keepAfterSend(keep_after_send);
+    metadata.compressedSend(compress_send);
+}
+
+bool ObjectStore::deleteUnlessKeptAfterSend(const std::string& object_id) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_store.find(object_id);
+    if (it == m_store.end()) return false;
+    if (it->second->second.keepAfterSend()) return false;
+    deleteObject(object_id);   // m_mutex is recursive, so this re-locks harmlessly
+    return true;
+}
+
 const ObjectStore::Metadata& ObjectStore::getMetadata(const std::string& object_id) const {
    std::lock_guard<std::recursive_mutex> lock(m_mutex);
    return m_store.at(object_id)->second;
