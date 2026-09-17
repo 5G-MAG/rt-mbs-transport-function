@@ -29,11 +29,11 @@ MBSTF_NAMESPACE_START
 namespace {
 
 /* fecScheme is a URN naming an IANA "RMT FEC Encoding ID" (RFC 5052). TS 29.580 V18.8.0 clause
-   6.2.6.2.14, table 6.2.6.2.14-1, row fecScheme: "It shall be identified using a term from the
+   6.2.6.2.14, table 6.2.6.2.14-1, row fecScheme: “It shall be identified using a term from the
    IANA: "Reliable Multicast Transport (RMT) FEC Encoding IDs and FEC Instance IDs" [20] expressed
-   as a URN, e.g.: urn:ietf:rmt:fec:encoding:0". RFC 5053 clause 7 (IANA Considerations): "This
+   as a URN, e.g.: urn:ietf:rmt:fec:encoding:0”. RFC 5053 clause 7 (IANA Considerations): “This
    document assigns the Fully-Specified FEC Encoding ID 1 under the ietf:rmt:fec:encoding
-   name-space to "Raptor Code"." rt-libflute's own FecScheme enum (include/flute_types.h) fixes the
+   name-space to "Raptor Code".” rt-libflute's own FecScheme enum (include/flute_types.h) fixes the
    same numeric values on the wire (FEC-OTI-FEC-Encoding-ID): CompactNoCode=0, Raptor=1, RaptorQ=6. */
 const char * const kFecSchemeCompactNoCode = "urn:ietf:rmt:fec:encoding:0";
 const char * const kFecSchemeRaptor        = "urn:ietf:rmt:fec:encoding:1";
