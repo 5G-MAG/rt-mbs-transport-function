@@ -349,14 +349,15 @@ bool ObjectStore::removeObjects(const std::list<std::string>& object_ids) {
     return true;
 }
 
-const ObjectStore::Metadata *ObjectStore::findMetadataByURL(const std::string &url) const
+std::optional<ObjectStore::Metadata> ObjectStore::findMetadataByURL(const std::string &url) const
 {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     auto it = std::find_if(m_store.begin(), m_store.end(), [&url](const decltype(m_store)::value_type &obj){
             auto &metadata = obj.second->second;
             return metadata.getOriginalUrl() == url || metadata.getFetchedUrl() == url;
         });
-    if (it != m_store.end()) return &it->second->second;
-    return nullptr;
+    if (it != m_store.end()) return it->second->second;   // copied while the lock is still held
+    return std::nullopt;
 }
 
 void ObjectStore::reconfigureMetadatas(const std::optional<std::string> &ingest_base_url,

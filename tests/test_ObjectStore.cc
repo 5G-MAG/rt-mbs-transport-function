@@ -37,6 +37,17 @@ class ObjectController {};
 int pass= 0;
 int fail = 0;
 
+static void check(bool condition, const std::string &what)
+{
+    if (condition) {
+        std::cout << "INFO: " << what << " passed." << std::endl;
+        pass++;
+    } else {
+        std::cout << "ERROR: " << what << " failed." << std::endl;
+        fail++;
+    }
+}
+
 std::string firstObject = "obj1";
 std::string secondObject = "obj2";
 
@@ -226,6 +237,33 @@ void testEntityTagSurvivesCopyAndMove() {
     }
 }
 
+/* findMetadataByURL() hands out a value, not a window onto the live entry.
+ *
+ * It used to return a raw pointer into the store, taken without the lock held, and callers copied a
+ * Metadata through it. ObjectStore::updateMetadata() move-assigns every std::string of the entry a
+ * caller may be reading at that moment, which is the race ObjectStore.hh describes on
+ * takeMetadataForIngest(). A returned copy cannot be reached by that writer at all; this pins that it
+ * really is a copy, by updating the entry afterwards and checking what the caller holds is unchanged.
+ */
+static void testFindMetadataByUrlReturnsAnIndependentValue(ObjectStore &store) {
+    auto found = store.findMetadataByURL("fetched_url1");
+    check(found.has_value(), "findMetadataByURL finds an object by its fetched URL");
+    if (!found.has_value()) return;
+    check(found->objectId() == firstObject, "the value found carries the object it belongs to");
+
+    check(!store.findMetadataByURL("no-such-url").has_value(),
+          "findMetadataByURL yields nothing for a URL no object has");
+
+    ObjectStore::Metadata replacement(firstObject, "type1-changed", "url1-changed", "fetched_url1",
+                                      "acquisition1", std::chrono::system_clock::now());
+    store.updateMetadata(firstObject, std::move(replacement));
+
+    check(found->getOriginalUrl() == "url1",
+          "a value taken before an update is unaffected by it, so it was a copy and not a reference");
+    check(store.findMetadataByURL("fetched_url1")->getOriginalUrl() == "url1-changed",
+          "a value taken after the update reflects it");
+}
+
 int main() {
     
     ObjectController objectController;
@@ -244,6 +282,7 @@ int main() {
     testGetStaleObjects(*store);
     testAvailabilityTimes();
     testEntityTagSurvivesCopyAndMove();
+    testFindMetadataByUrlReturnsAnIndependentValue(*store);
     std::cout<<"Test: ObjectStore "<<"Pass: "<<pass<<" Fail: "<<fail<<std::endl;
     std::cout<<"### ObjectStore: Test finish #### "<<std::endl;
     store.reset();

@@ -288,7 +288,7 @@ std::list<PullObjectIngester::IngestItem> ObjectManifestController::getPullAcqui
                         }
                     }
 
-                    const auto *metadata = object_store->findMetadataByURL(obj_ingest_url);
+                    const auto metadata = object_store->findMetadataByURL(obj_ingest_url);
                     if (metadata) {
                         /* this is a refetch */
                         result.emplace_back(*metadata);

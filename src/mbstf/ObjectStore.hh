@@ -368,7 +368,14 @@ public:
     std::map<std::string, std::shared_ptr<Object>> getStale() const;
     const std::map<std::string, std::shared_ptr<Object> > &getObjects() const { return m_store; };
 
-    const Metadata *findMetadataByURL(const std::string &url) const;
+    /** Find an object's metadata by one of its URLs, as a copy taken under the store lock.
+     *
+     * Returns a copy rather than a pointer into the store, for the reason given on
+     * takeMetadataForIngest() above and one more: the search walks m_store, which another thread may
+     * be adding to or erasing from at the same time. A returned pointer would also outlive the lock,
+     * so every read through it would race with updateMetadata() move-assigning that same entry.
+     */
+    std::optional<Metadata> findMetadataByURL(const std::string &url) const;
 
     const ObjectController &objectController() const { return m_controller; };
 

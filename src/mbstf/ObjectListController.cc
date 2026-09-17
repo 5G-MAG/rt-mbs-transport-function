@@ -194,7 +194,7 @@ void ObjectListController::initPullObjectIngesters()
 
                 }
 
-                const auto *metadata = objectStore()->findMetadataByURL(obj_ingest_url);
+                const auto metadata = objectStore()->findMetadataByURL(obj_ingest_url);
                 if (metadata) {
                     /* refetch existing object */
                     urls.emplace_back(*metadata);
