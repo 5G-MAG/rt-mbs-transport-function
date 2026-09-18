@@ -269,21 +269,29 @@ bool PushObjectIngester::sharedPortConfigured()
     return ctx && !ctx->servers[Context::SERVER_OBJECT_PUSH].empty();
 }
 
+bool PushObjectIngester::splitSharedPath(const char *url, std::string &segment, std::string &object_path)
+{
+    if (!url || url[0] != '/') return false;
+    const std::string path(url + 1);                 /* drop the leading '/' */
+    const auto slash = path.find('/');
+    segment = path.substr(0, slash);
+    if (segment.empty()) return false;               /* "/" or "//..." routes to nothing */
+
+    /* What follows the discriminator keeps its leading '/', so a child sees exactly the path it
+       would have seen on a port of its own. A push straight to the discriminator with nothing after
+       it addresses the session's root, which is "/". */
+    object_path = (slash == std::string::npos) ? std::string("/") : path.substr(slash);
+    return true;
+}
+
 PushObjectIngester *PushObjectIngester::routeSharedRequest(const char *url, std::string &object_path)
 {
-    if (!url || url[0] != '/') return nullptr;
-    std::string path(url + 1);                       /* drop the leading '/' */
-    const auto slash = path.find('/');
-    const std::string segment(path.substr(0, slash));
-    if (segment.empty()) return nullptr;
+    std::string segment;
+    if (!splitSharedPath(url, segment, object_path)) return nullptr;
 
     std::lock_guard<std::recursive_mutex> lock(s_sharedMtx);
     auto it = s_sharedIngesters.find(segment);
     if (it == s_sharedIngesters.end()) return nullptr;
-
-    /* What is left after the discriminator is the object path, keeping its leading '/' so a child
-       sees exactly what it would have seen on its own port. */
-    object_path = (slash == std::string::npos) ? std::string("/") : path.substr(slash);
     return it->second;
 }
 

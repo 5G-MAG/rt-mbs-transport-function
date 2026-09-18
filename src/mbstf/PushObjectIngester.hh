@@ -169,6 +169,20 @@ public:
         std::shared_ptr<Request> m_request;
     };
 
+    /** Split a shared-daemon request path into its leading discriminator and the object path.
+     *
+     * Separated from the lookup so it can be tested without a registered ingester, which needs an
+     * ObjectStore and an ObjectController to exist.
+     *
+     * \param url         the request path, as libmicrohttpd gives it, beginning with '/'.
+     * \param segment     set to the leading path segment, the ingest session's discriminator.
+     * \param object_path set to what follows it, keeping a leading '/' so a child sees the same
+     *                    path it would have seen on a port of its own.
+     * \return false when there is no leading segment to route on, in which case neither output is
+     *         meaningful.
+     */
+    static bool splitSharedPath(const char *url, std::string &segment, std::string &object_path);
+
     /** Find the ingester a request path belongs to, and the object path within it.
      *
      * Static because the shared daemon's handler has no ingester of its own to be called on.

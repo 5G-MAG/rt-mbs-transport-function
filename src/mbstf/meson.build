@@ -63,6 +63,11 @@ test_source_object_list_packager = test_source_object_store + files('''
   ObjectListPackager.hh
   '''.split())
 
+test_source_push_object_ingester = test_source_object_store + files('''
+  PushObjectIngester.cc
+  PushObjectIngester.hh
+  '''.split())
+
 test_source_pull_object_ingester = test_source_object_store + files('''
   PullObjectIngester.cc
   PullObjectIngester.hh
