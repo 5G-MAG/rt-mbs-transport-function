@@ -27,6 +27,7 @@
 #include <string>
 
 #include "common.hh"
+#include "EntityTag.hh"
 #include "Open5GSSBIMessage.hh"
 #include "Open5GSSBIServer.hh"
 #include "Open5GSSBIStream.hh"
@@ -270,7 +271,7 @@ static Open5GSSBIResponse new_response(const NfServer::AppMetadata &app,
     }
 
     if (etag) {
-        ogs_sbi_header_set(response->http.headers, "ETag", etag->c_str());
+        ogs_sbi_header_set(response->http.headers, "ETag", entityTagQuoted(*etag).c_str());
     }
 
     if (cache_control_max_age > 0) {

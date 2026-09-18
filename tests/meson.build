@@ -40,3 +40,7 @@ test('test_object_list_packager',
 test('test_push_object_ingester',
     executable('testPushObjectIngester', 'test_PushObjectIngester.cc', test_source_push_object_ingester, install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep, boost_dep, rt_libflute_dep, libuuid_dep])
    ,verbose: true, timeout: 600, protocol: 'exitcode')
+
+test('test_entity_tag',
+    executable('testEntityTag', 'test_EntityTag.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
+   ,verbose: true, timeout: 600, protocol: 'exitcode')
