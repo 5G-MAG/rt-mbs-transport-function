@@ -129,6 +129,9 @@ private:
            temporary redirect must not change where later notifications go: repointing `client` would
            persist the move that 307 says is not permanent. A 308 updates `client` instead. */
         std::unique_ptr<Open5GSSBIClient> redirectClient;
+        /* How many times the events currently being offered have been answered 5xx. Reset once a
+           notification is accepted, so the budget applies per set of events rather than per session. */
+        int notifyAttempts = 0;
     } *m_cache;
 };
 

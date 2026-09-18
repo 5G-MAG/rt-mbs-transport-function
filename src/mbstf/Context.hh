@@ -105,6 +105,15 @@ public:
     static constexpr int kDefaultPathMtu = 1500;
 
     int consecutiveIngestFailuresBeforeDeactivate; //< The number of consecutive ingest failures allowed before the session aborts
+    /** How many times a StatusNotify answered 5xx may be re-offered before its events are dropped.
+     *
+     * RFC 9110 section 15 makes a 5xx a server-side failure of an apparently valid request, so the
+     * same notification may succeed later; a 4xx is never re-offered. No clause bounds the number of
+     * attempts, so this is an explicit default the operator can override (RULES.md rule 12), set to
+     * the same budget as consecutiveIngestFailuresBeforeDeactivate above for consistency within this
+     * component rather than from any measurement. Zero disables re-offering.
+     */
+    int notifyRetryAttempts;
     size_t packetModeSchedulingQueueSize; //< The maximum queue size for packet mode scheduling per DistSession
     struct {
         /** The maximum time allowed before the manifest will be transmitted again

@@ -108,6 +108,9 @@ namespace {
            about chasing a chain of them, so a second redirect is logged and dropped rather than
            bounded by a hop count this project would have to invent (RULES.md rule 12). */
         bool redirected = false;
+        /* What lastReportedEventTimes held before makeReportList() advanced it, so a 5xx can put the
+           events back rather than let a rejected notification take them with it. */
+        DistributionSessionEvents reportedBefore;
     };
 }
 
@@ -309,6 +312,8 @@ void DistributionSessionSubscription::sendNotifications() const
     const auto &notify_uri = m_distSessionSubscription.getNotifyUri();
     if (notify_uri) {
         //ogs_debug("DistributionSessionSubscription[%p]: notify URL = %s", this, notify_uri.value().c_str());
+        /* Taken before makeReportList(), which advances lastReportedEventTimes as it builds. */
+        const auto reported_before = m_cache->lastReportedEventTimes;
         auto report_list = makeReportList();
         const auto &reports = report_list->getEventReportList();
         if (!reports.empty()) {
@@ -327,7 +332,7 @@ void DistributionSessionSubscription::sendNotifications() const
             static const std::string api_version(std::format("{}/{}", StatusNotifyReqData::apiName, StatusNotifyReqData::apiVersion));
             std::shared_ptr<Open5GSSBIRequest> request(new Open5GSSBIRequest(post_method, notify_uri.value(), api_version,
                                                 body, OGS_SBI_CONTENT_JSON_TYPE));
-            RequestData *data = new RequestData{this, request, false};
+            RequestData *data = new RequestData{this, request, false, reported_before};
             m_cache->client->sendRequest(__notify_client_cb, request, data);
         }
     }
@@ -391,12 +396,30 @@ bool DistributionSessionSubscription::processClientResponse(const Open5GSEvent &
                     ogs_warn("Notification to %s rejected %i; not repeated", req_data->request->uri(), status);
                 } else if (status >= 500 && status <= 599) {
                     /* RFC 9110 section 15: “5xx (Server Error): The server failed to fulfill an apparently valid request”
-                       The request may therefore succeed later, so this is the one class worth retrying
-                       after a delay and up to a limit. Neither the delay nor the limit is implemented
-                       here: both are bounds needing an operator-set source (rule 12), and a retry needs
-                       a timer this class does not yet own. Logged so the loss is visible meanwhile. */
-                    ogs_warn("Notification to %s failed %i; not retried, see 5G-MAG/rt-mbs-transport-function#71",
-                             req_data->request->uri(), status);
+                       The same notification may therefore succeed later, so its events are put back
+                       rather than lost. makeReportList() marks each event reported while building the
+                       list, which happens before the POST, so restoring the timestamps it advanced
+                       leaves those events newer than what is recorded as reported and the next
+                       notification offers them again.
+
+                       Bounded by mbstf.notifyRetryAttempts so a consumer that keeps failing does not
+                       hold its events for ever. No timer is involved: they are re-offered on the next
+                       notification this subscription sends, not on a schedule of their own. */
+                    const int budget = App::self().context()->notifyRetryAttempts;
+                    if (m_cache->notifyAttempts < budget) {
+                        m_cache->notifyAttempts++;
+                        m_cache->lastReportedEventTimes = req_data->reportedBefore;
+                        ogs_warn("Notification to %s failed %i; its events will be offered again "
+                                 "(attempt %i of %i)", req_data->request->uri(), status,
+                                 m_cache->notifyAttempts, budget);
+                    } else {
+                        m_cache->notifyAttempts = 0;
+                        ogs_error("Notification to %s failed %i and the %i-attempt budget is spent; "
+                                  "its events are dropped", req_data->request->uri(), status, budget);
+                    }
+                } else if (status >= 200 && status <= 299) {
+                    /* Accepted, so the budget applies to the next set of events rather than these. */
+                    m_cache->notifyAttempts = 0;
                 }
             } else {
                 ogs_debug("Problem sending notification(s) to %s", req_data->request->uri());
