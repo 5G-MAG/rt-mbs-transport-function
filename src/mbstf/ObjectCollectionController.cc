@@ -168,7 +168,25 @@ void ObjectCollectionController::processEvent(Event &event, SubscriptionService 
         } catch (std::out_of_range &ex) {
             ogs_error("Object %s is not in the ObjectStore", object_id.c_str());
         }
+
+        /* Handled here, so the base class is not asked to handle it again.
+
+           ObjectManifestController::processEvent() does the same work for these two events: it
+           calls the manifest handler's update(), starts the scheduled pull worker and sends the
+           object to the packager. Falling through to it ran all of that a second time for every
+           ObjectAdded and ObjectUpdated, so a manifest was applied twice and an object already
+           ingested was queued and sent again under a new TOI. On a broadcast bearer that is
+           transmission capacity spent on data the receiver already has.
+
+           Nothing is lost by returning. The one thing the base does that this override does not is
+           call objectAddOrUpdateEvent(), which is an empty virtual here: only
+           ObjectCarouselController overrides it, and only to set keepAfterSend(true), which this
+           override already does above.
+
+           Raised by review on 5G-MAG/rt-mbs-transport-function#71. */
+        return;
     }
+
     ObjectManifestController::processEvent(event, event_service);
 }
 
