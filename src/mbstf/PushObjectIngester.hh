@@ -238,6 +238,9 @@ private:
      * operator's to set (RULES.md rule 12).
      */
     static bool sharedPortConfigured();
+    /** The port from a sockaddr_storage, or 0 if it carries none. Takes void* so the header need not
+     *  pull in the socket headers. */
+    static uint16_t sockaddrPort(const void *addr);
     /** Bind the shared daemon if it is not already bound, and register this ingester under a fresh
      *  UUID. Returns the UUID, or an empty string if the shared daemon could not be bound. */
     std::string joinSharedDaemon();

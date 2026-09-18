@@ -265,8 +265,31 @@ struct sockaddr_storage PushObjectIngester::s_sharedSockaddr = {};
 
 bool PushObjectIngester::sharedPortConfigured()
 {
+    /* A fixed port, not merely a configured address. mbstf.httpPushIngest with "port: 0" asks for an
+       ephemeral port, which is what the per-ingester daemons already give and is what the shipped
+       demo configuration sets; treating that as shared mode would move those deployments onto one
+       daemon while still not giving them a port they can publish, which is the whole point of the
+       option. So port zero keeps the previous behaviour. */
     auto ctx = App::self().context();
-    return ctx && !ctx->servers[Context::SERVER_OBJECT_PUSH].empty();
+    if (!ctx) return false;
+    const auto &servers = ctx->servers[Context::SERVER_OBJECT_PUSH];
+    if (servers.empty()) return false;
+    const ogs_sbi_server_t *srv = servers.front()->ogsSBIServer();
+    if (!srv) return false;
+    return sockaddrPort(&srv->node.addr) != 0;
+}
+
+uint16_t PushObjectIngester::sockaddrPort(const void *addr)
+{
+    const struct sockaddr_storage *ss = reinterpret_cast<const struct sockaddr_storage*>(addr);
+    if (!ss) return 0;
+    if (ss->ss_family == AF_INET) {
+        return ntohs(reinterpret_cast<const struct sockaddr_in*>(ss)->sin_port);
+    }
+    if (ss->ss_family == AF_INET6) {
+        return ntohs(reinterpret_cast<const struct sockaddr_in6*>(ss)->sin6_port);
+    }
+    return 0;
 }
 
 bool PushObjectIngester::splitSharedPath(const char *url, std::string &segment, std::string &object_path)
