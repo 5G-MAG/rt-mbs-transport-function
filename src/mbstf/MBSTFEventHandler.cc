@@ -58,7 +58,11 @@ void MBSTFEventHandler::dispatch(Open5GSFSM &fsm, Open5GSEvent &event)
 
     case OGS_EVENT_SBI_SERVER:
         {
-            auto request = event.sbiRequest(true);
+            /* Non-owning. The SBI server owns a received request for the lifetime of its
+               stream and frees it in stream_remove() (open5gs lib/sbi/nghttp2-server.c),
+               so taking ownership here double-frees it and talloc aborts the process.
+               There is no leak to close on this path. */
+            auto request = event.sbiRequest();
             Open5GSSBIStream stream(reinterpret_cast<ogs_sbi_stream_t*>(event.sbiData()));
 
             Open5GSSBIMessage message;
