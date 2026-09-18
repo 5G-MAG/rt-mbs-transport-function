@@ -92,6 +92,9 @@ public:
      */
     void sendNotifications() const;
 
+    /** Schedule a re-offer of the events a 5xx-rejected notification carried, after @p delay_seconds. */
+    void startRetryTimer(int delay_seconds);
+
     bool processClientResponse(const Open5GSEvent &event);
 
 private:
@@ -115,6 +118,10 @@ private:
        parsed and stored but never acted on. */
     std::shared_ptr<Open5GSTimer> m_expiryTimer;
     std::unique_ptr<TimerFunc> m_expiryTimerFunc;
+    /* Waits out mbstf.notifyRetryDelay before a 5xx-rejected notification is offered again. Its own
+       timer rather than the expiry one, which must keep running while a retry is pending. */
+    std::shared_ptr<Open5GSTimer> m_retryTimer;
+    std::unique_ptr<TimerFunc> m_retryTimerFunc;
     std::optional<std::string> m_subscriptionLocation;
 
     struct CacheType {

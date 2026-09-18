@@ -114,6 +114,15 @@ public:
      * component rather than from any measurement. Zero disables re-offering.
      */
     int notifyRetryAttempts;
+    /** How long to wait, in seconds, before re-offering a StatusNotify that was answered 5xx.
+     *
+     * A 5xx may clear, so the wait is what stops an overloaded consumer being hit again immediately.
+     * No clause gives a figure, so this is an explicit default the operator can override (rule 12).
+     * Five seconds is short enough that a retried notification is still timely and long enough that
+     * a consumer restarting is not struck mid-restart; raise it where a consumer is known to recover
+     * more slowly. Zero re-offers on the next notification instead of on a timer.
+     */
+    int notifyRetryDelay;
     size_t packetModeSchedulingQueueSize; //< The maximum queue size for packet mode scheduling per DistSession
     struct {
         /** The maximum time allowed before the manifest will be transmitted again

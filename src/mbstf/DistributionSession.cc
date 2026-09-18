@@ -440,6 +440,31 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
             dist_event.releaseEventData();
             return true;
         }
+    case LocalEvents::NOTIFICATION_RETRY:
+        {
+            /* Pushed by a subscription's retry timer (NotificationRetryTimerFunc in
+             * DistributionSessionSubscription.cc) once mbstf.notifyRetryDelay has elapsed after a
+             * StatusNotify was answered 5xx. The timestamps that notification advanced were already
+             * restored when the answer came in, so simply sending again offers the same events.
+             * Handled here, off the timer's call stack, for the reason given for SUBSCRIPTION_EXPIRED
+             * below. */
+            std::unique_ptr<std::pair<std::string, std::string> > retry(
+                    reinterpret_cast<std::pair<std::string, std::string>*>(event.sbiData()));
+            const auto &dist_session = App::self().context()->findDistributionSession(retry->first);
+            if (dist_session) {
+                try {
+                    dist_session->getSubscription(retry->second).sendNotifications();
+                    ogs_debug("Re-offered notification events for subscription %s", retry->second.c_str());
+                } catch (std::exception &ex) {
+                    /* The subscription has gone since the timer was set, which is not an error: its
+                       events went with it. */
+                    ogs_debug("No subscription %s to re-offer notification events to: %s",
+                              retry->second.c_str(), ex.what());
+                }
+            }
+        }
+        return true;
+
     case LocalEvents::SUBSCRIPTION_EXPIRED:
         {
             /* Pushed by a subscription's expiry timer (SubscriptionExpiryTimerFunc in

@@ -51,6 +51,7 @@ Context::Context()
     ,pathMtu(kDefaultPathMtu)
     ,consecutiveIngestFailuresBeforeDeactivate(5)
     ,notifyRetryAttempts(5)
+    ,notifyRetryDelay(5)
     ,packetModeSchedulingQueueSize(128*1024) // 128KB queue for rate smoothing
     ,manifestGlobals()
 {
@@ -132,6 +133,13 @@ bool Context::parseConfig()
                         }
                     } else {
                         throw std::out_of_range("Bad configuration node at mbstf.pathMtu");
+                    }
+                } else if (mbstf_key == "notifyRetryDelay") {
+                    std::string num_val(mbstf_iter.value());
+                    size_t idx = 0;
+                    notifyRetryDelay = std::stoi(num_val, &idx);
+                    if (idx != num_val.size()) {
+                        throw std::out_of_range("Bad configuration value at mbstf.notifyRetryDelay");
                     }
                 } else if (mbstf_key == "notifyRetryAttempts") {
                     std::string num_val(mbstf_iter.value());

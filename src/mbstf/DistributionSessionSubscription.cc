@@ -66,6 +66,41 @@ namespace {
  * is still on the stack. It pushes a LocalEvents::SUBSCRIPTION_EXPIRED event instead and lets
  * DistributionSession::processEvent() perform the removal off this call stack, the same deferred
  * dispatch LocalEvents::SEND_NOTIFICATION and RELEASE_SUBSCRIPTION_SVC already use. */
+/* Pushes LocalEvents::NOTIFICATION_RETRY when the wait after a 5xx has elapsed, so the events that
+ * notification carried are offered again.
+ *
+ * Holds the two identifiers by value for the same reason SubscriptionExpiryTimerFunc below does:
+ * neither object's lifetime is depended on. It pushes an event rather than calling
+ * sendNotifications() directly, so the send happens off this timer's call stack and the timer is not
+ * executing while the subscription that owns it is used. */
+class NotificationRetryTimerFunc : public TimerFunc {
+public:
+    NotificationRetryTimerFunc(const std::string &dist_session_id, const std::string &subscription_id)
+        :TimerFunc(), distSessionId(dist_session_id), subscriptionId(subscription_id) {};
+    NotificationRetryTimerFunc(NotificationRetryTimerFunc &&) = delete;
+    NotificationRetryTimerFunc(const NotificationRetryTimerFunc &) = delete;
+    NotificationRetryTimerFunc &operator=(NotificationRetryTimerFunc &&) = delete;
+    NotificationRetryTimerFunc &operator=(const NotificationRetryTimerFunc &) = delete;
+    virtual ~NotificationRetryTimerFunc() {};
+
+    virtual void trigger()
+    {
+        ogs_debug("Subscription %s notification retry timer fired", subscriptionId.c_str());
+        std::shared_ptr<Open5GSEvent> event(new Open5GSEvent(new ogs_event_t));
+        event->ogsEvent()->id = LocalEvents::NOTIFICATION_RETRY;
+        event->setSbiData(new std::pair<std::string, std::string>(distSessionId, subscriptionId));
+        try {
+            App::self().ogsApp()->pushEvent(event);
+        } catch (std::exception &ex) {
+            ogs_error("Failed to push NOTIFICATION_RETRY event for subscription %s: %s",
+                      subscriptionId.c_str(), ex.what());
+        }
+    }
+
+    std::string distSessionId;
+    std::string subscriptionId;
+};
+
 class SubscriptionExpiryTimerFunc : public TimerFunc {
 public:
     SubscriptionExpiryTimerFunc(const std::string &dist_session_id, const std::string &subscription_id)
@@ -298,6 +333,23 @@ std::shared_ptr<DistSessionEventReportList> DistributionSessionSubscription::mak
     return result;
 }
 
+void DistributionSessionSubscription::startRetryTimer(int delay_seconds)
+{
+    std::shared_ptr<DistributionSession> dist_session(m_distributionSession.lock());
+    if (!dist_session) return;  /* nothing to notify for */
+
+    /* Replaced rather than reused, because a TimerFunc is keyed to one subscription and one pending
+       retry; the previous one has fired by the time a further 5xx can arrive. */
+    m_retryTimerFunc.reset(new NotificationRetryTimerFunc(dist_session->distributionSessionId(), m_subscriptionId));
+    m_retryTimer = App::self().ogsApp()->addTimer(*m_retryTimerFunc);
+    if (m_retryTimer) {
+        m_retryTimer->start(static_cast<int>(delay_seconds) * 1000);
+    } else {
+        ogs_error("Could not schedule a notification retry for subscription %s; its events will be "
+                  "offered on the next notification instead", m_subscriptionId.c_str());
+    }
+}
+
 void DistributionSessionSubscription::pushNotificationsEvent() const
 {
     std::shared_ptr<Open5GSEvent> event(new DistributionSessionNotificationEvent(*this));
@@ -409,8 +461,11 @@ bool DistributionSessionSubscription::processClientResponse(const Open5GSEvent &
                     if (m_cache->notifyAttempts < budget) {
                         m_cache->notifyAttempts++;
                         m_cache->lastReportedEventTimes = req_data->reportedBefore;
+                        const int delay_s = App::self().context()->notifyRetryDelay;
+                        if (delay_s > 0) startRetryTimer(delay_s);
                         ogs_warn("Notification to %s failed %i; its events will be offered again "
-                                 "(attempt %i of %i)", req_data->request->uri(), status,
+                                 "%s (attempt %i of %i)", req_data->request->uri(), status,
+                                 delay_s > 0 ? "after the retry delay" : "on the next notification",
                                  m_cache->notifyAttempts, budget);
                     } else {
                         m_cache->notifyAttempts = 0;
