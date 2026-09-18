@@ -496,9 +496,14 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
                     if (controller->m_manifestHandler) {
                         controller->m_manifestHandler->startedFetch(ingest_item);
                     } else {
-                        // Manifest handler has disappeared, end scheduled pull
+                        /* Manifest handler has disappeared, end scheduled pull.
+                           return, not break: this sits inside the per-ingester for loop, so a break
+                           left the enclosing while running while the flag said no worker was running.
+                           The pull therefore did not end, and startWorker() was free to start a
+                           second worker alongside this one. Every other exit from this function
+                           clears the flag and returns; this was the one that did not. */
                         controller->m_scheduledPullRunning = false;
-                        break;
+                        return;
                     }
                 }
 
