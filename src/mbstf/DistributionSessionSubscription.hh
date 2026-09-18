@@ -125,6 +125,10 @@ private:
         CacheType &operator=(CacheType &&other) {lastReportedEventTimes = std::move(other.lastReportedEventTimes); client = std::move(other.client); return *this; };
         DistributionSessionEvents lastReportedEventTimes;
         std::unique_ptr<Open5GSSBIClient> client;
+        /* Holds the client for a 307 Temporary Redirect hop. Separate from `client` because a
+           temporary redirect must not change where later notifications go: repointing `client` would
+           persist the move that 307 says is not permanent. A 308 updates `client` instead. */
+        std::unique_ptr<Open5GSSBIClient> redirectClient;
     } *m_cache;
 };
 

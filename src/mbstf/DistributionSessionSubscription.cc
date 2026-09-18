@@ -103,6 +103,11 @@ namespace {
         ~RequestData() {};
         const DistributionSessionSubscription *subscription;
         std::shared_ptr<Open5GSSBIRequest> request;
+        /* True when this request is itself the result of following a redirect. One hop is followed and
+           no more: the clause asks that the request be reissued to the new URI, and licenses nothing
+           about chasing a chain of them, so a second redirect is logged and dropped rather than
+           bounded by a hop count this project would have to invent (RULES.md rule 12). */
+        bool redirected = false;
     };
 }
 
@@ -322,7 +327,7 @@ void DistributionSessionSubscription::sendNotifications() const
             static const std::string api_version(std::format("{}/{}", StatusNotifyReqData::apiName, StatusNotifyReqData::apiVersion));
             std::shared_ptr<Open5GSSBIRequest> request(new Open5GSSBIRequest(post_method, notify_uri.value(), api_version,
                                                 body, OGS_SBI_CONTENT_JSON_TYPE));
-            RequestData *data = new RequestData{this, request};
+            RequestData *data = new RequestData{this, request, false};
             m_cache->client->sendRequest(__notify_client_cb, request, data);
         }
     }
@@ -337,7 +342,62 @@ bool DistributionSessionSubscription::processClientResponse(const Open5GSEvent &
         if (req_data && req_data->subscription == this) {
             if (event.sbiState() == OGS_OK) {
                 auto resp = event.sbiResponse(true);
-                ogs_debug("Got %i response from notification(s) to %s", resp.status(), req_data->request->uri());
+                const int status = resp.status();
+                ogs_debug("Got %i response from notification(s) to %s", status, req_data->request->uri());
+
+                if (status == OGS_SBI_HTTP_STATUS_TEMPORARY_REDIRECT ||
+                    status == OGS_SBI_HTTP_STATUS_PERMANENT_REDIRECT) {
+                    /* Both say the notification is to be reissued elsewhere; they differ in whether the
+                       move is permanent, and so in whether the stored notification URI changes.
+
+                       RFC 9110 section 15.4: “Redirects that indicate this resource might be available at a different URI, as provided by the Location header field, as in the status codes 301 (Moved Permanently), 302 (Found), 307 (Temporary Redirect), and 308 (Permanent Redirect).”
+
+                       RFC 7538 section 3: “The 308 (Permanent Redirect) status code indicates that the target resource has been assigned a new permanent URI and any future references to this resource ought to use one of the enclosed URIs.”
+                       The next sentence is why the stored URI is rewritten rather than the hop merely followed.
+                       RFC 7538 section 3: “Clients with link editing capabilities ought to automatically re-link references to the effective request URI (Section 5.5 of [RFC7230]) to one or more of the new references sent by the server, where possible.”
+                       A 307 is therefore followed without touching what is stored. */
+                    const std::string location(resp.headerValue("Location", std::string()));
+                    if (location.empty()) {
+                        ogs_warn("Notification to %s answered %i with no Location header; dropped",
+                                 req_data->request->uri(), status);
+                    } else if (req_data->redirected) {
+                        ogs_warn("Notification redirected more than once, to %s; dropped",
+                                 location.c_str());
+                    } else {
+                        if (status == OGS_SBI_HTTP_STATUS_PERMANENT_REDIRECT) {
+                            ogs_info("Notification URI permanently moved to %s", location.c_str());
+                            m_distSessionSubscription.setNotifyUri(location);
+                            m_cache->client.reset(new Open5GSSBIClient(location));
+                        }
+                        static const std::string post_method(OGS_SBI_HTTP_METHOD_POST);
+                        static const std::string api_version(std::format("{}/{}", StatusNotifyReqData::apiName,
+                                                                          StatusNotifyReqData::apiVersion));
+                        std::string body(req_data->request->content() ? req_data->request->content() : "");
+                        std::shared_ptr<Open5GSSBIRequest> retry(new Open5GSSBIRequest(post_method, location,
+                                                            api_version, body, OGS_SBI_CONTENT_JSON_TYPE));
+                        RequestData *retry_data = new RequestData{this, retry, true};
+                        Open5GSSBIClient *client = nullptr;
+                        if (status == OGS_SBI_HTTP_STATUS_PERMANENT_REDIRECT) {
+                            client = m_cache->client.get();
+                        } else {
+                            m_cache->redirectClient.reset(new Open5GSSBIClient(location));
+                            client = m_cache->redirectClient.get();
+                        }
+                        if (client) client->sendRequest(__notify_client_cb, retry, retry_data);
+                    }
+                } else if (status >= 400 && status <= 499) {
+                    /* RFC 9110 section 15: “4xx (Client Error): The request contains bad syntax or cannot be fulfilled”
+                       Repeating it unchanged would fail the same way, so it is not repeated. */
+                    ogs_warn("Notification to %s rejected %i; not repeated", req_data->request->uri(), status);
+                } else if (status >= 500 && status <= 599) {
+                    /* RFC 9110 section 15: “5xx (Server Error): The server failed to fulfill an apparently valid request”
+                       The request may therefore succeed later, so this is the one class worth retrying
+                       after a delay and up to a limit. Neither the delay nor the limit is implemented
+                       here: both are bounds needing an operator-set source (rule 12), and a retry needs
+                       a timer this class does not yet own. Logged so the loss is visible meanwhile. */
+                    ogs_warn("Notification to %s failed %i; not retried, see 5G-MAG/rt-mbs-transport-function#71",
+                             req_data->request->uri(), status);
+                }
             } else {
                 ogs_debug("Problem sending notification(s) to %s", req_data->request->uri());
             }
