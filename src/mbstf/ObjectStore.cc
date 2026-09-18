@@ -205,17 +205,24 @@ ObjectStore::~ObjectStore()
 }
 
 void ObjectStore::addObject(const std::string& object_id, ObjectData &&object, Metadata &&metadata, bool synchronous_event) {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
-    try {
-        std::shared_ptr<Object> obj(new std::pair(std::move(object), std::move(metadata)));
-        m_store.insert_or_assign(object_id, obj);
-    } catch (const std::bad_alloc& e) {
-        ogs_error("memory allocation failed: %s", e.what());
+        try {
+            std::shared_ptr<Object> obj(new std::pair(std::move(object), std::move(metadata)));
+            m_store.insert_or_assign(object_id, obj);
+        } catch (const std::bad_alloc& e) {
+            ogs_error("memory allocation failed: %s", e.what());
 
+        }
     }
 
-    /* send event */
+    /* Dispatched with m_mutex released. sendEventSynchronous() runs each subscriber's
+       processEvent() inline, and a subscriber takes its own locks: ObjectManifestController
+       takes m_manifestHandlerMutex, which its scheduled-pull worker already holds while it
+       calls back into this store. Holding m_mutex across the callback closes that cycle and
+       deadlocks both threads. Nothing here needs the store locked: the event carries only the
+       object id, and every subscriber looks the object up through this class, which locks. */
     std::shared_ptr<Event> event(new ObjectStore::ObjectAddedEvent(object_id));
     if (synchronous_event) {
         sendEventSynchronous(*event);
@@ -226,16 +233,23 @@ void ObjectStore::addObject(const std::string& object_id, ObjectData &&object, M
 
 void ObjectStore::updateMetadata(const std::string& object_id, Metadata &&metadata, bool synchronous_event)
 {
-    std::lock_guard<decltype(m_mutex)> lock(m_mutex);
+    {
+        std::lock_guard<decltype(m_mutex)> lock(m_mutex);
 
-    auto it = m_store.find(object_id);
-    if (it == m_store.end()) {
-        throw std::out_of_range(std::format("Attempt to update Object {}, but it is not in the ObjectStore", object_id));
+        auto it = m_store.find(object_id);
+        if (it == m_store.end()) {
+            throw std::out_of_range(std::format("Attempt to update Object {}, but it is not in the ObjectStore", object_id));
+        }
+
+        it->second->second = std::move(metadata);
     }
 
-    it->second->second = std::move(metadata);
-
-    /* send event */
+    /* Dispatched with m_mutex released. sendEventSynchronous() runs each subscriber's
+       processEvent() inline, and a subscriber takes its own locks: ObjectManifestController
+       takes m_manifestHandlerMutex, which its scheduled-pull worker already holds while it
+       calls back into this store. Holding m_mutex across the callback closes that cycle and
+       deadlocks both threads. Nothing here needs the store locked: the event carries only the
+       object id, and every subscriber looks the object up through this class, which locks. */
     std::shared_ptr<Event> event(new ObjectStore::ObjectUpdatedEvent(object_id));
     if (synchronous_event) {
         sendEventSynchronous(*event);

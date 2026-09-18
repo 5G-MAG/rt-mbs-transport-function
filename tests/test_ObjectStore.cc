@@ -27,9 +27,12 @@
 #include <list>
 #include <atomic>
 #include <cstring>
+#include <cstdlib>
 
 #include "common.hh"
 #include "ObjectStore.hh"
+#include "Subscriber.hh"
+#include "Event.hh"
 
 MBSTF_NAMESPACE_START
 using namespace std::literals;
@@ -330,6 +333,109 @@ static void testConcurrentUpdateAndIngestCopy(ObjectStore &store) {
     check(torn.load() == 0, "a metadata copy taken under the store lock is never torn by a concurrent update");
 }
 
+/* A subscriber that takes a lock of its own inside processEvent(), the way
+   ObjectManifestController::processEvent() does: it calls manifestHandler(), which takes
+   m_manifestHandlerMutex. */
+class LockTakingSubscriber : public Subscriber {
+public:
+    LockTakingSubscriber(std::recursive_mutex &other_lock) : m_otherLock(other_lock), m_ran(0) {};
+    virtual ~LockTakingSubscriber() {};
+
+    virtual void processEvent(Event &event, SubscriptionService &event_service) {
+        std::lock_guard<std::recursive_mutex> lock(m_otherLock);
+        m_ran++;
+    };
+
+    unsigned long ran() const { return m_ran.load(); };
+
+private:
+    std::recursive_mutex &m_otherLock;
+    std::atomic_ulong m_ran;
+};
+
+void testSynchronousEventDispatchDoesNotHoldTheStoreLock(ObjectStore& store)
+{
+    /* The lock-order inversion that stalled the broadcast demo after about 45 seconds of
+       media, with the service announcement carousel still running so the session looked
+       alive. Two lock orders existed at once:
+
+         - a scheduled-pull worker holds ObjectManifestController::m_manifestHandlerMutex
+           while it calls the handler, which reads this store: handler lock, then store lock;
+         - an ingest thread calls updateMetadata(), which dispatched the ObjectUpdated event
+           to that same controller while still holding the store lock, and the controller took
+           the handler lock: store lock, then handler lock.
+
+       Each thread then held what the other waited for.
+
+       The interleaving is forced rather than raced for. Letting two threads loop and hoping
+       to collide does not reproduce this: both critical sections are a map lookup long, and
+       a version of this test that did so passed against the unfixed store. So the two
+       threads hand off explicitly: the reader takes the subscriber's lock and holds it, the
+       writer then enters the store, and only once the writer is inside does the reader reach
+       for the store. Unfixed, that is the deadlock every time; fixed, the writer is out of
+       the store before it needs the subscriber's lock, so both finish. */
+
+    std::recursive_mutex subscriber_lock;
+    LockTakingSubscriber subscriber(subscriber_lock);
+    store.subscribe({ObjectStore::ObjectUpdatedEvent::event_name}, subscriber);
+
+    std::atomic_bool reader_holds(false), writer_entered(false);
+    std::atomic_bool reader_done(false), writer_done(false);
+
+    std::thread reader([&]() {
+        std::lock_guard<std::recursive_mutex> lock(subscriber_lock);
+        reader_holds.store(true);
+        while (!writer_entered.load()) std::this_thread::sleep_for(1ms);
+        /* Let the writer get as far as it can: into the store, and up to whatever it does
+           next. This is a settling delay for the handoff, not a timing assumption about
+           correctness; the outcome is the same for any value that lets the writer run. */
+        std::this_thread::sleep_for(250ms);
+        try { (void)store.findMetadataByURL("url1"); } catch (const std::exception &) {}
+        reader_done.store(true);
+    });
+
+    std::thread writer([&]() {
+        while (!reader_holds.load()) std::this_thread::sleep_for(1ms);
+        writer_entered.store(true);
+        ObjectStore::Metadata replacement(firstObject, "type1", "url1", "fetched_url1",
+                                          "acquisition1", std::chrono::system_clock::now());
+        try {
+            store.updateMetadata(firstObject, std::move(replacement), true);
+        } catch (const std::exception &) {}
+        writer_done.store(true);
+    });
+
+    /* Neither thread can be joined while deadlocked, so wait with a deadline instead. The
+       handoff takes a quarter of a second by construction; ten is far more than it needs,
+       and no amount of waiting recovers a deadlock. */
+    const auto deadline = std::chrono::steady_clock::now() + 10s;
+    while (std::chrono::steady_clock::now() < deadline &&
+           !(reader_done.load() && writer_done.load())) {
+        std::this_thread::sleep_for(10ms);
+    }
+
+    const bool finished = reader_done.load() && writer_done.load();
+    check(finished, "a synchronous event dispatch does not hold the store lock, so a subscriber "
+                    "taking its own lock cannot deadlock against a store read");
+
+    if (!finished) {
+        std::cout << "ERROR: deadlocked: reader " << (reader_done.load() ? "finished" : "stuck")
+                  << ", writer " << (writer_done.load() ? "finished" : "stuck")
+                  << ", " << subscriber.ran() << " events delivered. Not joining stuck threads."
+                  << std::endl;
+        std::cout << "Test: ObjectStore " << "Pass: " << pass << " Fail: " << fail << std::endl;
+        std::cout.flush();
+        /* Leaving the threads blocked would hang the run at exit and report nothing. */
+        std::_Exit(1);
+    }
+
+    writer.join();
+    reader.join();
+    store.unsubscribe(subscriber);
+
+    check(subscriber.ran() == 1, "the synchronous event still reached the subscriber");
+}
+
 int main() {
     
     ObjectController objectController;
@@ -350,6 +456,7 @@ int main() {
     testEntityTagSurvivesCopyAndMove();
     testFindMetadataByUrlReturnsAnIndependentValue(*store);
     testConcurrentUpdateAndIngestCopy(*store);
+    testSynchronousEventDispatchDoesNotHoldTheStoreLock(*store);
     std::cout<<"Test: ObjectStore "<<"Pass: "<<pass<<" Fail: "<<fail<<std::endl;
     std::cout<<"### ObjectStore: Test finish #### "<<std::endl;
     store.reset();
