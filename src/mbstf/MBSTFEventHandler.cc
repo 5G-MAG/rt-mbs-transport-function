@@ -28,6 +28,8 @@
 #include "LocalEvents.hh"
 #include "Open5GSEvent.hh"
 #include "Open5GSFSM.hh"
+#include "NfServer.hh"
+#include "App.hh"
 #include "Open5GSSBIServer.hh"
 #include "Open5GSSBIStream.hh"
 
@@ -88,9 +90,23 @@ void MBSTFEventHandler::dispatch(Open5GSFSM &fsm, Open5GSEvent &event)
                         ogs_nnrf_nfm_handle_nf_status_notify(stream.ogsSBIStream(), message.ogsSBIMessage());
                     } else {
                         ogs_error("Invalid HTTP method [%s]", method.c_str());
-                        ogs_assert(true == Open5GSSBIServer::sendError(stream,
-                                        OGS_SBI_HTTP_STATUS_MEHTOD_NOT_ALLOWED, message,
-                                        "Invalid HTTP method", "METHOD_NOT_ALLOWED"));
+                        /* Answered through NfServer so the response carries the Allow header, which
+                           Open5GSSBIServer::sendError cannot add: it hands the response to
+                           ogs_sbi_server_send_error(), which builds and sends it internally.
+
+                           TS 29.500 V18.10.0 clause 5.2.7.2: “If the NF supports the HTTP method for
+                           several resources in the API, but not for the target resource of a given HTTP
+                           request, the NF shall reject the request with the HTTP status code "405 Method
+                           Not Allowed" and shall include in the response an Allow header field
+                           containing the supported method(s) for that resource.”
+
+                           This resource is the NRF's status notification callback, which serves POST
+                           and nothing else. */
+                        ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_MEHTOD_NOT_ALLOWED, 0,
+                                        message, App::self().mbstfAppMetadata(), std::nullopt,
+                                        "Method Not Allowed", "Invalid HTTP method in NRF status notification",
+                                        std::nullopt, std::nullopt, std::nullopt,
+                                        std::string(OGS_SBI_HTTP_METHOD_POST)));
                     }
                 } else {
                     ogs_error("Invalid resource name [%s]", resource.c_str());
