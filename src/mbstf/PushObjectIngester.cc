@@ -33,6 +33,7 @@
 #include "ObjectListController.hh"
 #include "ObjectStore.hh"
 
+#include "MediaTypeInference.hh"
 #include "PushObjectIngester.hh"
 
 MBSTF_NAMESPACE_START
@@ -113,9 +114,34 @@ std::optional<std::string> PushObjectIngester::Request::getHeader(const std::str
 void PushObjectIngester::Request::processRequest()
 {
     auto now = std::chrono::system_clock::now();
-    static const std::string app_octet("application/octet-stream");
     const auto &last_modified = m_lastModified.value_or(now);
-    const auto &content_type = m_contentType.value_or(app_octet);
+
+    /* An object with no media type cannot be described conformantly: TS 26.517 V18.6.0 clause 6.2.1
+       binds the MBSTF to the MBMS Download Profile, and TS 26.346 V18.2.0 clause L.4.2 lists
+       Content-Type first among the attributes that “shall be carried in the FDT sent by the FLUTE
+       sender”.
+
+       Where the pushing client sent none, the type is inferred from the object name. Where that
+       fails the ingest fails, rather than the MBSTF asserting a media type nobody established: a
+       wrong Content-Type on the wire is worse than a refused object, because a receiver has no way
+       to tell it is wrong. This defaulted silently to application/octet-stream, which is that
+       assertion in its least visible form. The pull path already refuses on the same ground; this
+       is the push half. Raised by review on 5G-MAG/rt-mbs-transport-function#74. */
+    std::string content_type;
+    if (m_contentType && !m_contentType->empty()) {
+        content_type = *m_contentType;
+    } else {
+        auto inferred = inferMediaTypeFromUrl(m_urlPath);
+        if (!inferred) {
+            throw std::runtime_error(std::string("the pushed object [") + m_urlPath +
+                                     "] carried no Content-Type and none could be inferred from its "
+                                     "name; an object with no media type cannot be carried in a "
+                                     "conformant FDT");
+        }
+        ogs_info("Push ingest of [%s]: no Content-Type sent, inferred [%s] from the object name",
+                 m_urlPath.c_str(), inferred->c_str());
+        content_type = *inferred;
+    }
 
     std::string url(m_urlPath);
     if (url.front() == '/') {
