@@ -1092,7 +1092,8 @@ void DistributionSession::_apiSessionCreate(Open5GSSBIStream &stream, Open5GSSBI
         std::string subsc_id;
         if (opt_subsc) {
             subsc_id = distributionSession->addSubscription(opt_subsc.value());
-            distributionSession->m_subscriptionLocation = std::format("{}/{}/subscriptions/{}", request.uri(), distributionSession->distributionSessionId(), subsc_id);
+            distributionSession->m_subscriptionLocation = NfServer::resourceUri(stream, message,
+                            {"dist-sessions", distributionSession->distributionSessionId(), "subscriptions", subsc_id});
         }
     } catch (ModelException &err) {
         send_model_error(err, stream, 1, message, app_meta, api, "Bad Request",
@@ -1142,7 +1143,8 @@ void DistributionSession::_apiSessionCreate(Open5GSSBIStream &stream, Open5GSSBI
     CJson create_rsp_data_json(distributionSession->json(false, true));
     std::string body(create_rsp_data_json.serialise());
     ogs_debug("Response Parsed JSON: %s", body.c_str());
-    std::string location = std::format("{}/{}", request.uri(), distributionSession->distributionSessionId());
+    std::string location = NfServer::resourceUri(stream, message,
+                            {"dist-sessions", distributionSession->distributionSessionId()});
     std::optional<std::string> content_type;
     if (!body.empty()) {
         content_type = "application/json";
@@ -1246,7 +1248,7 @@ void DistributionSession::_apiSessionPatch(Open5GSSBIStream &stream, Open5GSSBIM
     if (!body.empty()) {
         rsp_content_type = "application/json";
     }
-    std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(std::string(request.uri()), rsp_content_type, generated(),
+    std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(NfServer::resourceUri(stream, message, {"dist-sessions", distributionSessionId()}), rsp_content_type, generated(),
                                                                 hash().c_str(), App::self().context()->cacheControl.distMaxAge,
                                                                 std::nullopt, api, app_meta));
     ogs_assert(response);
@@ -1276,7 +1278,7 @@ void DistributionSession::_apiSessionGet(Open5GSSBIStream &stream, Open5GSSBIMes
     if (!body.empty()) {
         content_type = "application/json";
     }
-    std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(std::string(request.uri()), content_type, generated(),
+    std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(NfServer::resourceUri(stream, message, {"dist-sessions", distributionSessionId()}), content_type, generated(),
                                                         hash().c_str(), App::self().context()->cacheControl.distMaxAge,
                                                         std::nullopt, api, app_meta));
     ogs_assert(response);
@@ -1335,7 +1337,8 @@ void DistributionSession::_apiSubscriptionCreate(Open5GSSBIStream &stream, Open5
         rsp.setReportList(immediate_notifications);
     }
     std::string rsp_body(rsp.toJSON(false).serialise());
-    std::string location = std::format("{}/{}", request.uri(), subsc->subscriptionId());
+    std::string location = NfServer::resourceUri(stream, message,
+                            {"dist-sessions", distributionSessionId(), "subscriptions", subsc->subscriptionId()});
     std::optional<std::string> content_type;
     if (!rsp_body.empty()) content_type = "application/json";
     std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(location, content_type, std::nullopt /* last-modified */,

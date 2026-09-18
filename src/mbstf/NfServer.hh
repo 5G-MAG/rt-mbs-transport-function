@@ -22,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "common.hh"
 #include "openapi/model/CJson.hh"
@@ -126,6 +127,20 @@ public:
                                                            const AppMetadata &app);
 
     static std::shared_ptr<Open5GSSBIResponse> populateResponse(std::shared_ptr<Open5GSSBIResponse> &response, const std::string &content, int status);
+
+    /** Build the absolute URI of a resource served by this NF.
+     *
+     * The service name and API version are taken from the request being answered, and the
+     * scheme and authority from the server the request arrived on, so the result carries the
+     * apiRoot the consumer actually reached rather than a path the consumer must resolve.
+     *
+     * \param stream     The stream the request arrived on, which identifies the server.
+     * \param message    The parsed request, for its service name and API version.
+     * \param components The resource path components after the API version.
+     * \return the absolute URI, or an empty string if the server cannot be identified.
+     */
+    static std::string resourceUri(Open5GSSBIStream &stream, const Open5GSSBIMessage &message,
+                                   const std::vector<std::string> &components);
 
     static std::map<std::string, std::string> makeInvalidParams(const std::string &param, const std::string &reason);
 

@@ -21,10 +21,12 @@
 
 #include <format>
 #include <cctype>
+#include <cstring>
 #include <algorithm>
 #include <map>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "common.hh"
 #include "EntityTag.hh"
@@ -223,6 +225,34 @@ std::shared_ptr<Open5GSSBIResponse> NfServer::newResponse(const std::optional<st
     return std::shared_ptr<Open5GSSBIResponse>(new Open5GSSBIResponse(new_response(app, interface, location, content_type,
                                                                                    last_modified, etag, cache_control_max_age,
                                                                                    allow_methods)));
+}
+
+std::string NfServer::resourceUri(Open5GSSBIStream &stream, const Open5GSSBIMessage &message,
+                                  const std::vector<std::string> &components)
+{
+    ogs_sbi_server_t *server = ogs_sbi_server_from_stream(stream.ogsSBIStream());
+    if (!server) return std::string();
+
+    ogs_sbi_header_t header;
+    memset(&header, 0, sizeof(header));
+
+    std::string service_name(message.serviceName());
+    std::string api_version(message.apiVersion());
+    header.service.name = const_cast<char*>(service_name.c_str());
+    header.api.version = const_cast<char*>(api_version.c_str());
+
+    /* ogs_sbi_header_t carries a fixed number of components; anything beyond it would be dropped
+       silently, so the caller is given an empty string instead of a truncated URI. */
+    if (components.size() > OGS_SBI_MAX_NUM_OF_RESOURCE_COMPONENT) return std::string();
+    for (size_t i = 0; i < components.size(); i++) {
+        header.resource.component[i] = const_cast<char*>(components[i].c_str());
+    }
+
+    char *uri = ogs_sbi_server_uri(server, &header);
+    if (!uri) return std::string();
+    std::string result(uri);
+    ogs_free(uri);
+    return result;
 }
 
 std::shared_ptr<Open5GSSBIResponse> NfServer::populateResponse(std::shared_ptr<Open5GSSBIResponse> &response, const std::string &content, int status)
