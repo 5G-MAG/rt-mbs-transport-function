@@ -307,10 +307,25 @@ std::list<PullObjectIngester::IngestItem> ObjectManifestController::getPullAcqui
 
 void ObjectManifestController::startWorker()
 {
-    if (!m_scheduledPullRunning) {
-        if (m_scheduledPullThread.joinable()) m_scheduledPullThread.detach();
-        m_scheduledPullThread = std::thread(&ObjectManifestController::workerLoop, this);
-    }
+    /* The slot is claimed here, not by the worker once it runs.
+       m_scheduledPullRunning was set at the top of workerLoop(), so between this function creating
+       the thread and that thread being scheduled the flag was still false. A second call in that
+       window passed the check and started a second worker, and both then ran their own fetch
+       schedule against the same manifest -- one manifest refetched and resent several times in quick
+       succession, which is what reactivation produces: the manifest is processed again and this
+       function is reached more than once before the first worker has run.
+
+       compare_exchange_strong makes exactly one caller the starter. Every exit from workerLoop()
+       clears the flag before returning, so a genuinely finished worker still allows the next start.
+       code-derived, no spec claim. */
+    bool expected = false;
+    if (!m_scheduledPullRunning.compare_exchange_strong(expected, true)) return;
+
+    /* The previous thread has left workerLoop() by now, since it cleared the flag on its way out.
+       Detached rather than joined because this runs on the event loop, and a worker still inside a
+       fetch would stall it. */
+    if (m_scheduledPullThread.joinable()) m_scheduledPullThread.detach();
+    m_scheduledPullThread = std::thread(&ObjectManifestController::workerLoop, this);
 }
 
 void ObjectManifestController::initPullObjectIngesters()
