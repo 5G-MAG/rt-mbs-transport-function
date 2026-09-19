@@ -239,6 +239,11 @@ mbstf:
     pathMtu: 1500
     consecutiveIngestFailuresBeforeDeactivate: 5
     packetModeSchedulingQueueSize: 131072 # 128KB queue per packet mode DistSession
+    # The most PullObjectIngester instances one Distribution Session may run at once, each
+    # costing an ingest worker and an event thread. Without a ceiling the count is whatever
+    # the content provider's manifest contains. Items are queued per ingester, so a ceiling
+    # below the item count serialises fetches and drops nothing.
+    maxConcurrentPullIngesters: 256
     serverResponseCacheControl:
       - distMaxAge: 60
         ObjectMaxAge: 60

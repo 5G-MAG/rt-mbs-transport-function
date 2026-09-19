@@ -37,6 +37,8 @@
 #include "utilities.hh"
 #include "openapi/model/DistSessionState.h"
 
+#include <algorithm>
+
 #include "App.hh"
 #include "Context.hh"
 #include "ObjectManifestController.hh"
@@ -448,7 +450,12 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
         if (object_store) {
             std::lock_guard<std::recursive_mutex> lock(controller->m_pullObjectIngestersMutex);
             auto &ingesters = controller->getPullObjectIngesters();
-            while (ingesters.size() < next_ingest_items.second.size()) {
+            /* Bounded by configuration rather than by whatever the content provider's manifest
+               happens to contain: see Context::maxConcurrentPullIngesters. The distribution below
+               hands every item to an ingester whether or not there is one per item. */
+            const std::size_t ceiling = App::self().context()->maxConcurrentPullIngesters;
+            const std::size_t wanted = std::min(next_ingest_items.second.size(), ceiling);
+            while (ingesters.size() < wanted) {
                 controller->addPullObjectIngester(new PullObjectIngester(object_store, *controller, urls));
             }
         }
@@ -482,8 +489,12 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
             std::lock_guard<std::recursive_mutex> lock(controller->m_pullObjectIngestersMutex);
             // Add the URLs to the PullObjectIngester instances
             auto &ingesters = controller->getPullObjectIngesters();
-            for (auto ingester_it = ingesters.begin(); ingester_it!= ingesters.end(); ++ingester_it) {
-                if (next_ingest_items.second.empty()) break;
+            /* Round robin over the ingesters rather than one item each: with a ceiling there can
+               be more items than ingesters, and stopping at the end of the list would silently
+               leave the remainder unfetched. Each ingester keeps its own deadline-sorted queue, so
+               a second item handed to one is fetched after its first, not instead of it. */
+            auto ingester_it = ingesters.begin();
+            while (!next_ingest_items.second.empty() && ingester_it != ingesters.end()) {
                 auto ingest_item = next_ingest_items.second.front();
                 next_ingest_items.second.pop_front();  // remove the item
                 //ingest_item.deadline(std::nullopt);
@@ -510,6 +521,8 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
                 if (!(*ingester_it)->fetch(ingest_item)) {
                     ogs_debug("Failed to fetch item: %s", ingest_item.url().c_str());
                 }
+
+                if (++ingester_it == ingesters.end()) ingester_it = ingesters.begin();
             }
         }
     }

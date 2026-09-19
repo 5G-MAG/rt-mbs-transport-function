@@ -54,6 +54,7 @@ Context::Context()
     ,notifyRetryAttempts(5)
     ,notifyRetryDelay(5)
     ,packetModeSchedulingQueueSize(128*1024) // 128KB queue for rate smoothing
+    ,maxConcurrentPullIngesters(kDefaultMaxConcurrentPullIngesters)
     ,manifestGlobals()
 {
 }
@@ -172,6 +173,19 @@ bool Context::parseConfig()
                         }
                     } else {
                         throw std::out_of_range("Bad configuration node at mbstf.packetModeSchedulingQueueSize");
+                    }
+                } else if (mbstf_key == "maxConcurrentPullIngesters") {
+                    Open5GSYamlIter ingesters_iter(mbstf_iter);
+                    if (ingesters_iter.type() == YAML_SCALAR_NODE) {
+                        std::string num_val(ingesters_iter.value());
+                        size_t idx = 0;
+                        long value = std::stol(num_val, &idx);
+                        if (idx != num_val.size() || value < 1) {
+                            throw std::out_of_range("Bad configuration value at mbstf.maxConcurrentPullIngesters");
+                        }
+                        maxConcurrentPullIngesters = static_cast<size_t>(value);
+                    } else {
+                        throw std::out_of_range("Bad configuration node at mbstf.maxConcurrentPullIngesters");
                     }
                 } else if (mbstf_key == "manifestHandler") {
                     Open5GSYamlIter manifest_handler_iter(mbstf_iter);

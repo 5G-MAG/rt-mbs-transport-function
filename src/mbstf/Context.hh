@@ -132,6 +132,27 @@ public:
      */
     int notifyRetryDelay;
     size_t packetModeSchedulingQueueSize; //< The maximum queue size for packet mode scheduling per DistSession
+    /** How many PullObjectIngester instances one Distribution Session may run at once.
+     *
+     * The scheduled pull used to keep one ingester per item in the content provider's manifest, so
+     * the thread count was whatever that manifest happened to contain: a 157 object carousel ran
+     * 157 ingesters, and each carries an ingest worker and an asynchronous event thread. Nothing
+     * an operator sets bounded it.
+     *
+     * No clause governs this, so it is an explicit default the operator can override (RULES.md
+     * rule 12). What the ceiling is for is stopping a manifest from dictating the thread count
+     * without limit, not tuning parallelism, so the default is set high enough that manifests of
+     * realistic size keep the behaviour they had, one ingester per item, and only a manifest far
+     * larger than any this has been run against is capped. Lower it where a deployment needs a
+     * tighter thread budget and can accept fetches being serialised.
+     *
+     * Items are queued per ingester and sorted by deadline, so a ceiling below the item count
+     * serialises fetches within an ingester rather than dropping any item. Measured on a 157
+     * object carousel: at a ceiling of 32 the process ran 73 threads against 323 uncapped, and
+     * distinct objects completed more slowly, which is why the default is not that low.
+     */
+    size_t maxConcurrentPullIngesters;
+    static constexpr size_t kDefaultMaxConcurrentPullIngesters = 256;
     struct {
         /** The maximum time allowed before the manifest will be transmitted again
          *
