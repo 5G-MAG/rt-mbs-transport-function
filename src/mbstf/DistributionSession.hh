@@ -35,6 +35,10 @@
 #include "DistributionSessionSubscription.hh"
 #include "NfServer.hh"
 
+namespace reftools::mbstf {
+    class FECConfig;
+}
+
 namespace fiveg_mag_reftools {
     class CJson;
 }
@@ -93,6 +97,9 @@ public:
     in_port_t getTunnelPortNumber() const;
     uint32_t getRateLimit() const;
     std::optional<BitRate> getMbr() const;
+    /** DistSession.fecInformation (TS 29.581 clause 6.1.6.2.5, TS 29.580 V18.8.0 clause 6.2.6.2.14
+     *  FECConfig), unset when the create request did not carry it. */
+    std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> getFecInformation() const;
     const std::optional<std::string> &getObjectIngestBaseUrl() const;
     const std::string &getObjectAcquisitionMethod() const;
     void setObjectIngestBaseUrl(std::string ingestBaseUrl);

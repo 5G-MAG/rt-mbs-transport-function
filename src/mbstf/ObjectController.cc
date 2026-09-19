@@ -81,13 +81,16 @@ void ObjectController::processEvent(Event &event, SubscriptionService &event_ser
         ogs_info("Object [%s] sent", object_id.c_str());
 
         if (m_objectStore) {
-            const ObjectStore::Metadata &metadata = m_objectStore->getMetadata(object_id);
-
-            if(!metadata.keepAfterSend()) {
-                ogs_debug("Removing object [%s] after sending...", object_id.c_str());
-                m_objectStore->deleteObject(object_id);
+            /* Decided and acted on under the store's own lock: reading keepAfterSend() through a
+               reference and then deleting leaves room for another thread to replace or erase the
+               entry in between. An object already gone is a normal outcome of that race rather than
+               an error, so it is reported as "not deleted here" instead of throwing out of an event
+               handler that has no handler for it. */
+            if (m_objectStore->deleteUnlessKeptAfterSend(object_id)) {
+                ogs_debug("Removed object [%s] after sending", object_id.c_str());
             } else {
-                ogs_debug("Keeping object [%s] in object store after sending...", object_id.c_str());
+                ogs_debug("Keeping object [%s] in object store after sending, or it is already gone",
+                          object_id.c_str());
             }
         }
         if (objSendEvent.queueEmpty()) {

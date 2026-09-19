@@ -27,6 +27,7 @@
 #include "PullObjectIngester.hh"
 #include "hash.hh"
 #include "Curl.hh"
+#include "MediaTypeInference.hh"
 #include "ObjectStore.hh"
 
 LIBMPDPP_NAMESPACE_USING(BaseURL);
@@ -49,10 +50,13 @@ PullObjectIngester::IngestItem::IngestItem(const ObjectStore::Metadata &object_m
     ,m_forceRecache(force_recache)
     ,m_markAsKeepAfterSend(keep_after_send)
     ,m_markAsCompressedSend(compress_send)
+    ,m_fetchFailures(0)
+    ,m_availabilityStartTime(object_meta.availabilityStartTime())
+    ,m_availabilityEndTime(object_meta.availabilityEndTime())
 {
 }
 
-PullObjectIngester::IngestItem::IngestItem(const std::string &object_id, const std::string &url, const std::string &acquisition_id, const std::optional<std::string> &obj_ingest_base_url,  const std::optional<std::string> &obj_distribution_base_url, const std::optional<time_type> &download_deadline, bool force_recache, bool keep_after_send, bool compress_send)
+PullObjectIngester::IngestItem::IngestItem(const std::string &object_id, const std::string &url, const std::string &acquisition_id, const std::optional<std::string> &obj_ingest_base_url,  const std::optional<std::string> &obj_distribution_base_url, const std::optional<time_type> &download_deadline, bool force_recache, bool keep_after_send, bool compress_send, const std::optional<time_type> &availability_start_time, const std::optional<time_type> &availability_end_time)
     :m_objectId(object_id)
     ,m_url(url)
     ,m_acquisitionId(acquisition_id)
@@ -62,6 +66,9 @@ PullObjectIngester::IngestItem::IngestItem(const std::string &object_id, const s
     ,m_forceRecache(force_recache)
     ,m_markAsKeepAfterSend(keep_after_send)
     ,m_markAsCompressedSend(compress_send)
+    ,m_fetchFailures(0)
+    ,m_availabilityStartTime(availability_start_time)
+    ,m_availabilityEndTime(availability_end_time)
 {
 }
 
@@ -75,6 +82,9 @@ PullObjectIngester::IngestItem::IngestItem(const IngestItem &other)
     ,m_forceRecache(other.m_forceRecache)
     ,m_markAsKeepAfterSend(other.m_markAsKeepAfterSend)
     ,m_markAsCompressedSend(other.m_markAsCompressedSend)
+    ,m_fetchFailures(other.m_fetchFailures)
+    ,m_availabilityStartTime(other.m_availabilityStartTime)
+    ,m_availabilityEndTime(other.m_availabilityEndTime)
 {
 }
 
@@ -88,6 +98,9 @@ PullObjectIngester::IngestItem::IngestItem(IngestItem &&other)
     ,m_forceRecache(other.m_forceRecache)
     ,m_markAsKeepAfterSend(other.m_markAsKeepAfterSend)
     ,m_markAsCompressedSend(other.m_markAsCompressedSend)
+    ,m_fetchFailures(other.m_fetchFailures)
+    ,m_availabilityStartTime(std::move(other.m_availabilityStartTime))
+    ,m_availabilityEndTime(std::move(other.m_availabilityEndTime))
 {
 }
 
@@ -124,7 +137,9 @@ bool PullObjectIngester::fetch(const std::string &object_id, const std::optional
 
     // otherwise we need a new fetch based on the ObjectStore entry
     if (it == m_fetchList.end()) {
-        m_fetchList.emplace_back(objectStore()->getMetadata(object_id).keepAfterSend(keep_after_send).compressedSend(compress_send), download_deadline, force_recache);
+        // Copied under the store's own lock: see ObjectStore::takeMetadataForIngest().
+        m_fetchList.emplace_back(objectStore()->takeMetadataForIngest(object_id, keep_after_send, compress_send),
+                                 download_deadline, force_recache);
     }
 
     sortListByPolicy();
@@ -140,9 +155,10 @@ bool PullObjectIngester::fetch(const IngestItem &item) {
 bool PullObjectIngester::fetch(IngestItem &&item) {
     std::lock_guard<std::recursive_mutex> lock(*m_ingestItemsMutex);
     try {
-        auto &metadata = objectStore()->getMetadata(item.objectId());
-        if (!metadata.keepAfterSend()) metadata.keepAfterSend(item.markAsKeepAfterSend());
-        metadata.compressedSend(item.markAsCompressedSend());
+        // Marked under the store's own lock rather than through a reference it has stopped
+        // guarding: see ObjectStore::markForFetch(). Throws out_of_range when there is no previous
+        // version, which the catch below already handles.
+        objectStore()->markForFetch(item.objectId(), item.markAsKeepAfterSend(), item.markAsCompressedSend());
         return fetch(item.objectId(), item.deadline(), item.forceRecache(), item.markAsKeepAfterSend(), item.markAsCompressedSend());
     } catch (const std::out_of_range &ex) {
         // No previous version, this isn't a refresh, but may still be a re-request for an existing list item
@@ -194,17 +210,19 @@ void PullObjectIngester::doObjectIngest() {
             auto item = m_fetchList.front();
             m_fetchList.pop_front();
             m_ingestItemsMutex->unlock(); // temp unlock while we fetch
-            ObjectStore::Metadata *old_meta = nullptr;
-            try {
-                auto &meta = objectStore()->getMetadata(item.objectId());
-                old_meta = &meta;
-                if (!item.forceRecache() && meta.hasExpiryTime() && meta.ExpiryTime() > ObjectStore::datetime_type::clock::now()) {
+            /* A copy taken under the store lock, not a reference into the store. This is read
+               again further down, after the fetch below has run with the ingest list unlocked, and a
+               store entry can be replaced by updateMetadata() or erased entirely while that is in
+               flight. See ObjectStore::tryGetMetadata(). */
+            std::optional<ObjectStore::Metadata> old_meta = objectStore()->tryGetMetadata(item.objectId());
+            if (old_meta) {
+                if (!item.forceRecache() && old_meta->hasExpiryTime() && old_meta->ExpiryTime() > ObjectStore::datetime_type::clock::now()) {
                     // Existing store item is still fresh
                     ogs_debug("Reusing cached object for %s instead of fetching again", item.url().c_str());
                     // "Update" (using same metadata) in the ObjectStore to set last used timestamps and trigger update event
-                    ObjectStore::Metadata metadata(meta);
+                    ObjectStore::Metadata metadata(*old_meta);
                     try {
-                        this->objectStore()->updateMetadata(meta.objectId(), std::move(metadata), true);
+                        this->objectStore()->updateMetadata(old_meta->objectId(), std::move(metadata), true);
                     } catch (std::runtime_error &ex) {
                         ogs_warn("While reusing cached object %s: %s", item.url().c_str(), ex.what());
                         emitObjectPullIngestFailedEvent(item, item.url(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
@@ -212,13 +230,13 @@ void PullObjectIngester::doObjectIngest() {
                     m_ingestItemsMutex->lock(); // lock so that the lock_guard can release properly
                     return;
                 }
-                auto &file_desc = meta.fluteFileDescription();
+                const auto &file_desc = old_meta->fluteFileDescription();
                 if (file_desc) {
                     ogs_debug("Refetching %s (TOI %u)...", item.url().c_str(), file_desc->toi());
                 } else {
                     ogs_debug("Refetching %s...", item.url().c_str());
                 }
-            } catch (const std::out_of_range &ex) {
+            } else {
                 ogs_debug("Fetching %s...", item.url().c_str());
             }
 
@@ -245,20 +263,51 @@ void PullObjectIngester::doObjectIngest() {
                 ogs_debug("Received %ld bytes of data", bytesReceived);
                 std::string fetched_url = URI(m_curl->getPermanentRedirectUrl()).resolveUsingBaseURLs(std::list<BaseURL>{BaseURL(item.url())}).str();
                 if (fetched_url.empty()) fetched_url = item.url();
-                ObjectStore::Metadata metadata(item.objectId(), m_curl->getContentType(), item.url(), fetched_url, item.acquisitionId(), m_curl->getLastModified(), item.objIngestBaseUrl(), item.objDistributionBaseUrl());
-                /* re-get metadata from ObjectStore as it may have changed */
-                try {
-                    auto &meta = objectStore()->getMetadata(item.objectId());
-                    old_meta = &meta;
-                } catch (const std::out_of_range &ex) {
-                    old_meta = nullptr;
+
+                /* An object with no media type cannot be described conformantly: TS 26.517 V18.6.0
+                   clause 6.2.1 binds the MBSTF to the MBMS Download Profile, and TS 26.346 V18.2.0
+                   clause L.4.2 lists Content-Type first among the attributes that "shall be carried
+                   in the FDT sent by the FLUTE sender".
+
+                   Where the origin sent none, the type is inferred from the object's filename
+                   extension. Where that fails the ingest fails, rather than the MBSTF asserting a
+                   media type nobody established: a wrong Content-Type on the wire is worse than a
+                   refused object, because a receiver has no way to tell it is wrong. */
+                std::string media_type = m_curl->getContentType();
+                if (media_type.empty()) {
+                    auto inferred = inferMediaTypeFromUrl(item.url());
+                    if (!inferred) {
+                        ogs_warn("Ingest of [%s] failed: the origin sent no Content-Type and none "
+                                 "could be inferred from the object name; an object with no media "
+                                 "type cannot be carried in a conformant FDT",
+                                 item.url().c_str());
+                        emitObjectPullIngestFailedEvent(item, item.url(),
+                                                        ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
+                        m_ingestItemsMutex->lock(); // lock so that the lock_guard can release properly
+                        return;
+                    }
+                    ogs_info("Ingest of [%s]: origin sent no Content-Type, inferred [%s] from the "
+                             "object name", item.url().c_str(), inferred->c_str());
+                    media_type = *inferred;
                 }
+
+                ObjectStore::Metadata metadata(item.objectId(), media_type, item.url(), fetched_url, item.acquisitionId(), m_curl->getLastModified(), item.objIngestBaseUrl(), item.objDistributionBaseUrl());
+                /* re-get metadata from ObjectStore as it may have changed, again as a copy taken
+                   under the store lock rather than a reference it has stopped guarding */
+                old_meta = objectStore()->tryGetMetadata(item.objectId());
                 if (old_meta) {
                     metadata.fluteFileDescription(old_meta->fluteFileDescription());
                     metadata.keepAfterSend(old_meta->keepAfterSend() || item.markAsKeepAfterSend());
                 } else {
                     metadata.keepAfterSend(item.markAsKeepAfterSend());
                 }
+                // TS 26.517 V18.6.0 clause 6.2.3.5 requires the object's availability start and end
+                // times to be maintained per object in the object list. They reach the ingester on the
+                // IngestItem and are stored here so ObjectListPackager can set File@Expires and
+                // Cache-Control@Expires from them.
+                metadata.availabilityStartTime(item.availabilityStartTime());
+                metadata.availabilityEndTime(item.availabilityEndTime());
+
                 unsigned long max_age = m_curl->getCacheControlMaxAge();
                 unsigned long current_age = m_curl->getAge();
                 metadata.cacheExpires(max_age ? std::chrono::system_clock::now() + std::chrono::seconds(max_age) - std::chrono::seconds(current_age) : std::chrono::system_clock::now() + std::chrono::seconds(ObjectStore::Metadata::cacheExpiry()));

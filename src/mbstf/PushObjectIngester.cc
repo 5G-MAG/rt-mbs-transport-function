@@ -28,10 +28,12 @@
 
 #include "common.hh"
 #include "App.hh"
+#include "Open5GSSBIServer.hh"
 #include "hash.hh"
 #include "ObjectListController.hh"
 #include "ObjectStore.hh"
 
+#include "MediaTypeInference.hh"
 #include "PushObjectIngester.hh"
 
 MBSTF_NAMESPACE_START
@@ -112,9 +114,34 @@ std::optional<std::string> PushObjectIngester::Request::getHeader(const std::str
 void PushObjectIngester::Request::processRequest()
 {
     auto now = std::chrono::system_clock::now();
-    static const std::string app_octet("application/octet-stream");
     const auto &last_modified = m_lastModified.value_or(now);
-    const auto &content_type = m_contentType.value_or(app_octet);
+
+    /* An object with no media type cannot be described conformantly: TS 26.517 V18.6.0 clause 6.2.1
+       binds the MBSTF to the MBMS Download Profile, and TS 26.346 V18.2.0 clause L.4.2 lists
+       Content-Type first among the attributes that “shall be carried in the FDT sent by the FLUTE
+       sender”.
+
+       Where the pushing client sent none, the type is inferred from the object name. Where that
+       fails the ingest fails, rather than the MBSTF asserting a media type nobody established: a
+       wrong Content-Type on the wire is worse than a refused object, because a receiver has no way
+       to tell it is wrong. This defaulted silently to application/octet-stream, which is that
+       assertion in its least visible form. The pull path already refuses on the same ground; this
+       is the push half. Raised by review on 5G-MAG/rt-mbs-transport-function#74. */
+    std::string content_type;
+    if (m_contentType && !m_contentType->empty()) {
+        content_type = *m_contentType;
+    } else {
+        auto inferred = inferMediaTypeFromUrl(m_urlPath);
+        if (!inferred) {
+            throw std::runtime_error(std::string("the pushed object [") + m_urlPath +
+                                     "] carried no Content-Type and none could be inferred from its "
+                                     "name; an object with no media type cannot be carried in a "
+                                     "conformant FDT");
+        }
+        ogs_info("Push ingest of [%s]: no Content-Type sent, inferred [%s] from the object name",
+                 m_urlPath.c_str(), inferred->c_str());
+        content_type = *inferred;
+    }
 
     std::string url(m_urlPath);
     if (url.front() == '/') {
@@ -245,9 +272,154 @@ PushObjectIngester::~PushObjectIngester()
     stop();  // Then stop the HTTP daemon
 }
 
+/* PushObjectIngester::generateUUID() was declared but never defined, so nothing could call it. The
+   body matches the other four definitions of the same helper in this component
+   (ObjectListController.cc:163 and the rest), rather than introducing a different scheme. */
+std::string PushObjectIngester::generateUUID() {
+    uuid_t uuid;
+    uuid_generate_random(uuid);
+    char uuid_str[37];
+    uuid_unparse(uuid, uuid_str);
+    return std::string(uuid_str);
+}
+
+/* Shared-port mode statics. See the declarations in PushObjectIngester.hh for why this exists. */
+std::recursive_mutex PushObjectIngester::s_sharedMtx;
+struct MHD_Daemon *PushObjectIngester::s_sharedDaemon = nullptr;
+std::map<std::string, PushObjectIngester*> PushObjectIngester::s_sharedIngesters;
+struct sockaddr_storage PushObjectIngester::s_sharedSockaddr = {};
+
+bool PushObjectIngester::sharedPortConfigured()
+{
+    /* A fixed port, not merely a configured address. mbstf.httpPushIngest with "port: 0" asks for an
+       ephemeral port, which is what the per-ingester daemons already give and is what the shipped
+       demo configuration sets; treating that as shared mode would move those deployments onto one
+       daemon while still not giving them a port they can publish, which is the whole point of the
+       option. So port zero keeps the previous behaviour. */
+    auto ctx = App::self().context();
+    if (!ctx) return false;
+    const auto &servers = ctx->servers[Context::SERVER_OBJECT_PUSH];
+    if (servers.empty()) return false;
+    const ogs_sbi_server_t *srv = servers.front()->ogsSBIServer();
+    if (!srv) return false;
+    return sockaddrPort(&srv->node.addr) != 0;
+}
+
+uint16_t PushObjectIngester::sockaddrPort(const void *addr)
+{
+    const struct sockaddr_storage *ss = reinterpret_cast<const struct sockaddr_storage*>(addr);
+    if (!ss) return 0;
+    if (ss->ss_family == AF_INET) {
+        return ntohs(reinterpret_cast<const struct sockaddr_in*>(ss)->sin_port);
+    }
+    if (ss->ss_family == AF_INET6) {
+        return ntohs(reinterpret_cast<const struct sockaddr_in6*>(ss)->sin6_port);
+    }
+    return 0;
+}
+
+bool PushObjectIngester::splitSharedPath(const char *url, std::string &segment, std::string &object_path)
+{
+    if (!url || url[0] != '/') return false;
+    const std::string path(url + 1);                 /* drop the leading '/' */
+    const auto slash = path.find('/');
+    segment = path.substr(0, slash);
+    if (segment.empty()) return false;               /* "/" or "//..." routes to nothing */
+
+    /* What follows the discriminator keeps its leading '/', so a child sees exactly the path it
+       would have seen on a port of its own. A push straight to the discriminator with nothing after
+       it addresses the session's root, which is "/". */
+    object_path = (slash == std::string::npos) ? std::string("/") : path.substr(slash);
+    return true;
+}
+
+PushObjectIngester *PushObjectIngester::routeSharedRequest(const char *url, std::string &object_path)
+{
+    std::string segment;
+    if (!splitSharedPath(url, segment, object_path)) return nullptr;
+
+    std::lock_guard<std::recursive_mutex> lock(s_sharedMtx);
+    auto it = s_sharedIngesters.find(segment);
+    if (it == s_sharedIngesters.end()) return nullptr;
+    return it->second;
+}
+
+std::string PushObjectIngester::joinSharedDaemon()
+{
+    std::lock_guard<std::recursive_mutex> lock(s_sharedMtx);
+
+    if (!s_sharedDaemon) {
+        auto ctx = App::self().context();
+        const auto &servers = ctx->servers[Context::SERVER_OBJECT_PUSH];
+        if (servers.empty()) return std::string();
+
+        /* The first configured endpoint is the one bound. Several would each need their own daemon,
+           and the option exists so a container can publish one known port, so more than one is not
+           interpreted here rather than being guessed at. */
+        if (servers.size() > 1) {
+            ogs_warn("mbstf.httpPushIngest lists %zu addresses; the object push server uses the first "
+                     "and ignores the rest", servers.size());
+        }
+        const ogs_sbi_server_t *srv = servers.front()->ogsSBIServer();
+        if (!srv) return std::string();
+        memcpy(&s_sharedSockaddr, &srv->node.addr, sizeof(s_sharedSockaddr));
+
+        s_sharedDaemon = MHD_start_daemon(
+                                    MHD_USE_SELECT_INTERNALLY,
+                                    0,
+                                    NULL, NULL,
+                                    handle_request, nullptr,
+                                    MHD_OPTION_NOTIFY_COMPLETED, request_completion_callback, nullptr,
+                                    MHD_OPTION_SOCK_ADDR, (union MHD_DaemonInfo *)&s_sharedSockaddr,
+                                    MHD_OPTION_END
+                                    );
+        if (!s_sharedDaemon) {
+            ogs_error("Could not bind the configured object push address; falling back to an "
+                      "ephemeral port for this ingest session");
+            return std::string();
+        }
+        ogs_info("Object push server listening on the configured address for all ingest sessions");
+    }
+
+    /* A fresh discriminator per ingester, which is what keeps sessions apart on one port. */
+    std::string segment;
+    do {
+        segment = generateUUID();
+    } while (s_sharedIngesters.count(segment));
+    s_sharedIngesters[segment] = this;
+    return segment;
+}
+
+void PushObjectIngester::leaveSharedDaemon()
+{
+    std::lock_guard<std::recursive_mutex> lock(s_sharedMtx);
+    if (m_sharedPathSegment.empty()) return;
+    s_sharedIngesters.erase(m_sharedPathSegment);
+    m_sharedPathSegment.clear();
+    if (s_sharedIngesters.empty() && s_sharedDaemon) {
+        MHD_stop_daemon(s_sharedDaemon);
+        s_sharedDaemon = nullptr;
+        ogs_info("Object push server stopped, no ingest sessions remain");
+    }
+}
+
 bool PushObjectIngester::start()
 {
     if (m_mhdDaemon) return false;
+    if (!m_sharedPathSegment.empty()) return false;   /* already attached to the shared daemon */
+
+    /* With an address configured, every ingest session is reached through one daemon on it and told
+       apart by a path segment, so a container can publish a port it knows in advance. Falls through
+       to a daemon of its own when nothing is configured, or when binding the configured address
+       failed, which keeps an existing deployment working exactly as before. */
+    if (sharedPortConfigured()) {
+        m_sharedPathSegment = joinSharedDaemon();
+        if (!m_sharedPathSegment.empty()) {
+            std::lock_guard<std::recursive_mutex> lock(m_mtx);
+            m_condVar.notify_all();     /* getIngestServerPrefix() waits on this */
+            return true;
+        }
+    }
 
     ogs_info("PushObjectIngester[%p]::start(): Starting MHD", this);
     m_sockaddr.ss_family = AF_INET;
@@ -277,6 +449,11 @@ bool PushObjectIngester::start()
 bool PushObjectIngester::stop()
 {
     std::lock_guard<std::recursive_mutex> lock(m_mtx);
+
+    if (!m_sharedPathSegment.empty()) {
+        leaveSharedDaemon();
+        return true;
+    }
 
     ogs_debug("PushObjectIngester[%p]::stop(): Stopping MHD (%p)", this, m_mhdDaemon);
 
@@ -340,6 +517,39 @@ void PushObjectIngester::addedBodyBlock(const std::shared_ptr<Request> &request,
 
 const std::string &PushObjectIngester::getIngestServerPrefix()
 {
+    /* Shared-port mode has no daemon of its own, so the address comes from what the shared one was
+       bound to and the UUID segment is appended. Handled before the wait below, which would never
+       finish here: m_mhdDaemon stays null in this mode, so the predicate could never become false. */
+    if (!m_sharedPathSegment.empty()) {
+        if (m_urlPrefix.empty()) {
+            std::lock_guard<std::recursive_mutex> lock(s_sharedMtx);
+            socklen_t addr_len = sizeof(s_sharedSockaddr);
+            char host[NI_MAXHOST];
+            std::string addr;
+            if (getnameinfo(reinterpret_cast<struct sockaddr*>(&s_sharedSockaddr), addr_len, host,
+                            sizeof(host), nullptr, 0, NI_NUMERICHOST) == 0) {
+                addr = host;
+            }
+            unsigned port = 0;
+            if (s_sharedSockaddr.ss_family == AF_INET) {
+                port = ntohs(reinterpret_cast<struct sockaddr_in*>(&s_sharedSockaddr)->sin_port);
+            } else if (s_sharedSockaddr.ss_family == AF_INET6) {
+                port = ntohs(reinterpret_cast<struct sockaddr_in6*>(&s_sharedSockaddr)->sin6_port);
+            }
+            if (!addr.empty() && port) {
+                /* The segment is what tells the shared handler which ingest session a push belongs
+                   to, so the URL the Application Provider is given has to carry it. */
+                const bool literal_v6 = (s_sharedSockaddr.ss_family == AF_INET6);
+                m_urlPrefix = std::string("http://") + (literal_v6 ? "[" : "") + addr +
+                              (literal_v6 ? "]" : "") + ":" + std::to_string(port) + "/" +
+                              m_sharedPathSegment + "/";
+            } else {
+                ogs_error("Could not render the configured object push address as a URL");
+            }
+        }
+        return m_urlPrefix;
+    }
+
     if (m_urlPrefix.empty()) {
         {
             // Wait for microhttpd to start up
@@ -465,6 +675,24 @@ static void request_completion_callback(void *cls, struct MHD_Connection *connec
 static MHD_Result handle_request(void *cls, struct MHD_Connection *connection, const char *url, const char *method, const char *version, const char *upload_data, size_t *upload_data_size, void **con_cls)
 {
     PushObjectIngester *ingester = reinterpret_cast<PushObjectIngester*>(cls);
+
+    /* The shared daemon registers no ingester of its own, so cls is null there and the leading path
+       segment says which ingest session this belongs to. What is left after that segment is the
+       object path, so a child sees exactly what it would have seen on a port of its own. An
+       unrecognised segment belongs to no session and is refused. */
+    std::string shared_object_path;
+    if (!ingester) {
+        ingester = PushObjectIngester::routeSharedRequest(url, shared_object_path);
+        if (!ingester) {
+            ogs_warn("Object push to unknown path %s refused", url ? url : "(none)");
+            struct MHD_Response *resp = MHD_create_response_from_buffer(0, (void*)"", MHD_RESPMEM_PERSISTENT);
+            MHD_Result rv = MHD_queue_response(connection, MHD_HTTP_NOT_FOUND, resp);
+            MHD_destroy_response(resp);
+            return rv;
+        }
+        url = shared_object_path.c_str();
+    }
+
     ogs_debug("handle_request[%p, %p, %s, %s, %s, %p, %lu, %p]", cls, connection, url, method, version, upload_data, *upload_data_size, *con_cls);
 
     if (*con_cls == nullptr) {

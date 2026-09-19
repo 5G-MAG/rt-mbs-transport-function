@@ -36,6 +36,7 @@
 #include "ObjectStore.hh"
 #include "openapi/model/Object.h"
 
+#include "FecOtiHelper.hh"
 #include "ObjectCarouselPackager.hh"
 
 using namespace std::literals::chrono_literals;
@@ -154,8 +155,9 @@ ObjectCarouselPackager::ObjectCarouselPackager(const std::shared_ptr<ObjectStore
 
 ObjectCarouselPackager::ObjectCarouselPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
                                        const SsmPort &ssm_port, uint32_t rate_limit, unsigned short mtu,
-                                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
-    :ObjectPackager(object_store, controller, ssm_port, rate_limit, mtu, tunnel_address, tunnel_port)
+                                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port,
+                                       const std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> &fec_information)
+    :ObjectPackager(object_store, controller, ssm_port, rate_limit, mtu, tunnel_address, tunnel_port, fec_information)
     ,m_packageItemsMutex(new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems()
     ,m_packagingUpdateCondVar()
@@ -258,10 +260,27 @@ void ObjectCarouselPackager::ensureTransmitter()
     if (!m_transmitter) {
         const auto &ssm_port = ssmPort();
         if (!ssm_port) return;
+        /* The Distribution Session's own requested AL-FEC configuration, converted to the
+           Transmitter-level FEC OTI. Without this the session is sent unprotected however it was
+           provisioned. fecOtiFromFecConfig() rejects a scheme the MBMS Download Profile does not
+           admit, which is a packaging failure for this session rather than a reason to send it
+           without the protection it asked for. */
+        std::optional<LibFlute::FecOti> content_fec_oti;
+        uint32_t fec_redundancy_level = LibFlute::kDefaultFecRedundancyLevel;
+        try {
+            std::tie(content_fec_oti, fec_redundancy_level) = fecOtiFromFecConfig(fecInformation());
+        } catch (const std::runtime_error &err) {
+            ogs_error("Cannot apply the Distribution Session's FEC configuration, not transmitting: %s",
+                      err.what());
+            return;
+        }
         m_transmitter.reset(new LibFlute::Transmitter(ssm_port.destinationAddress(), static_cast<short>(ssm_port.port()), tsi(), mtu(),
                                                       rateLimit(), m_io, m_tunnelEndpoint,
                                                       LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005, true,
-                                                      ssm_port.sourceAddress()));
+                                                      ssm_port.sourceAddress(),
+                                                      content_fec_oti,
+                                                      LibFlute::Profile::Ts26517,
+                                                      fec_redundancy_level));
         m_transmitter->register_completion_callback(
             [this](uint32_t toi) {
                 ogs_debug("Object with TOI %d completed", toi);

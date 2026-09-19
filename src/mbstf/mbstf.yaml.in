@@ -212,6 +212,16 @@ sbi:
 #   update period is greater than the repetition period then the MPD will be repeated at the given interval until the update
 #   period elapses, at which point the MPD will be refetched and sent.
 #
+# <Path MTU>
+#   pathMtu: 1500
+#
+# o The MTU, in bytes, of the path a distribution session's packets travel to the receiver. FLUTE encoding symbols are sized
+#   from it, so a value larger than the path carries puts every multi-symbol object into datagrams that never arrive.
+#
+# o The MBSTF can only measure the first hop, and where it is co-located with the ingress point that hop is loopback and
+#   measures 65536. The default of 1500, the conventional Ethernet MTU, is used instead unless the first hop measures less.
+#   Set this to the real figure for a path that carries more, or less, than an Ethernet frame.
+#
 mbstf:
     sbi:
       - addr: 127.0.0.59
@@ -226,6 +236,7 @@ mbstf:
       - addr: 127.0.0.61
         port: 0 # ephemeral
     totalMaxBitRateSoftLimit: 1000 # 1Gbps
+    pathMtu: 1500
     consecutiveIngestFailuresBeforeDeactivate: 5
     packetModeSchedulingQueueSize: 131072 # 128KB queue per packet mode DistSession
     serverResponseCacheControl:

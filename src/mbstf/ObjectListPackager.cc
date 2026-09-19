@@ -22,6 +22,8 @@
 #include <netinet/in.h>
 
 #include "ogs-app.h" // ogs_error(), ogs_info()
+
+#include "FecOtiHelper.hh"
 #include "ogs-sbi.h"
 #include "Transmitter.h" // LibFlute
 
@@ -113,8 +115,9 @@ ObjectListPackager::ObjectListPackager(const std::shared_ptr<ObjectStore> &objec
 
 ObjectListPackager::ObjectListPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
                                        const SsmPort &ssm_port, uint32_t rateLimit, unsigned short mtu,
-                                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
-    :ObjectPackager(object_store, controller, ssm_port, rateLimit, mtu, tunnel_address, tunnel_port)
+                                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port,
+                                       const std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> &fec_information)
+    :ObjectPackager(object_store, controller, ssm_port, rateLimit, mtu, tunnel_address, tunnel_port, fec_information)
     ,m_packageItemsMutex (new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems()
     ,m_tunnelEndpoint()
@@ -199,6 +202,20 @@ void ObjectListPackager::doObjectPackage() {
         std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
 
         if (!m_transmitter) {
+            /* The Distribution Session's own requested AL-FEC configuration, converted to the
+               Transmitter-level FEC OTI. Without this the session is sent unprotected however it
+               was provisioned. fecOtiFromFecConfig() rejects a scheme the MBMS Download Profile
+               does not admit, which is a packaging failure for this session rather than a reason
+               to send it without the protection it asked for. */
+            std::optional<LibFlute::FecOti> content_fec_oti;
+            uint32_t fec_redundancy_level = LibFlute::kDefaultFecRedundancyLevel;
+            try {
+                std::tie(content_fec_oti, fec_redundancy_level) = fecOtiFromFecConfig(fecInformation());
+            } catch (const std::runtime_error &err) {
+                ogs_error("Cannot apply the Distribution Session's FEC configuration, not transmitting: %s",
+                          err.what());
+                return;
+            }
             m_transmitter.reset(new LibFlute::Transmitter(
                     ssm_port.destinationAddress(),
                     static_cast<short>(ssm_port.port()),
@@ -209,7 +226,10 @@ void ObjectListPackager::doObjectPackage() {
                     m_tunnelEndpoint,
                     LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005,
                     true,
-                    ssm_port.sourceAddress()));
+                    ssm_port.sourceAddress(),
+                    content_fec_oti,
+                    LibFlute::Profile::Ts26517,
+                    fec_redundancy_level));
             m_transmitter->register_completion_callback(
                     [this](uint32_t toi) {
                         ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", m_transmitter->number_of_files(), m_packageItems.size());
@@ -296,14 +316,22 @@ void ObjectListPackager::doObjectPackage() {
             }
 
             m_queued = true;
-            LibFlute::Transmitter::FileDescription::date_time_type expires_at;
-            const auto &cache_expires = metadata.cacheExpires();
-            if (cache_expires) {
-                expires_at = cache_expires.value();
-            } else {
-                expires_at = LibFlute::Transmitter::FileDescription::date_time_type::clock::now() + 60s;
-            }
+
+            // File@Expires is bounded by the object's availability start time; see fileExpiryTime()
+            // for the clause. The 60s fallback is the pre-existing behaviour for an object whose
+            // ingest response carried no expiry, and rests on no clause.
+            const auto expires_at = fileExpiryTime(metadata.cacheExpires(), metadata.availabilityStartTime(),
+                                                   time_type::clock::now() + 60s);
             file_desc->set_expiry_time(expires_at);
+
+            // TS 26.517 V18.6.0 clause 6.2.3.5: "-The Cache-Control@Expires attribute shall be used to
+            // indicate the availability end time of the object." Left unset when the object has no
+            // availability end time, which emits no Cache-Control element at all; the profiled schema
+            // makes the element minOccurs="0", so its absence is valid and says nothing false.
+            const auto &availability_end = metadata.availabilityEndTime();
+            if (availability_end) {
+                file_desc->set_cache_expiry_time(*availability_end);
+            }
 
             file_desc->set_content_type(metadata.mediaType());
 

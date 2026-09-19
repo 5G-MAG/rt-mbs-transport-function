@@ -12,6 +12,7 @@
  * https://drive.google.com/file/d/1cinCiA778IErENZ3JN52VFW-1ffHpx7Z/view
  */
 #include <list>
+#include <set>
 #include <string>
 #include <thread>
 #include <utility>
@@ -95,6 +96,25 @@ private:
     bool m_refreshMpd;
     ManifestHandler::time_type m_mpdReceivedTime;
     std::list<SegmentEntry> m_extraPullObjects;
+    /** Media segment URLs already handed to the ingester in this session.
+     *
+     * A live MPD keeps a segment listed for the whole of its availability window, which is what tells
+     * a unicast client it may still fetch it. It does not mean the segment still needs sending. In
+     * OBJECT_STREAMING an object is removed from the ObjectStore once it has been sent
+     * (ObjectStreamingController leaves Metadata::keepAfterSend() at false, unlike the carousel), so
+     * the store cannot answer "has this been sent already?" either: findMetadataByURL() misses, a
+     * second ObjectStore object is created for the same URL, and it goes out under a second TOI.
+     *
+     * A receiver cannot combine symbols across TOIs. RFC 3926 clause 3.1: "Note that each object is
+     * associated with a unique TOI within the scope of a session." Each copy is therefore a separate,
+     * independently incomplete object rather than redundancy, and the copies consume the bearer that
+     * the first copy needed.
+     *
+     * Bounded by the MPD's own availability window: pruneSentSegments() drops every entry the current
+     * manifest no longer lists, so this holds at most one string per segment currently advertised.
+     */
+    std::set<std::string> m_sentSegmentUrls;
+    void pruneSentSegments(const std::list<SegmentEntry> &current_segments);
 };
 
 MBSTF_NAMESPACE_STOP

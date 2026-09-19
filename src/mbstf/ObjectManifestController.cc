@@ -37,6 +37,8 @@
 #include "utilities.hh"
 #include "openapi/model/DistSessionState.h"
 
+#include "App.hh"
+#include "Context.hh"
 #include "ObjectManifestController.hh"
 
 using reftools::mbstf::DistSessionState;
@@ -140,8 +142,35 @@ void ObjectManifestController::processEvent(Event &event, SubscriptionService &e
                 if (!ingesters.empty()) {
                     auto &ingester = ingesters.front();
                     auto &item = pull_ingest_failed_event.item();
-                    item.forceRecache(true); // Force refetch on error
-                    ingester->fetch(item);
+
+                    // TS 26.517 V18.6.0 clause 6.1.2, object manifest parameter latestFetchTime:
+                    // "The MBSTF shall fetch the object no later than this UTC timestamp." Once that
+                    // time has passed the object must not be fetched again, however many attempts have
+                    // been made, so a retry past it is refused rather than issued and failed.
+                    const bool past_latest_fetch_time =
+                        item.hasDeadline() && std::chrono::system_clock::now() > item.getDeadline();
+
+                    // An object with no latestFetchTime may, by the same clause, be fetched "at a time
+                    // of its choosing", so no clause bounds its retries and the operator's own
+                    // consecutiveIngestFailuresBeforeDeactivate is applied per object instead. The
+                    // session-wide counter in ObjectController cannot serve here: any other object's
+                    // successful fetch resets it, so one permanently unfetchable object would be
+                    // retried without limit while the rest of the session proceeds normally.
+                    const int  max_failures  = App::self().context()->consecutiveIngestFailuresBeforeDeactivate;
+                    const unsigned failures  = item.recordFetchFailure();
+                    const bool out_of_tries  = max_failures != 0 && failures >= static_cast<unsigned>(max_failures);
+
+                    if (past_latest_fetch_time) {
+                        ogs_info("Not refetching %s: its latest fetch time has passed after %u attempt(s)",
+                                 item.objectId().c_str(), failures);
+                    } else if (out_of_tries) {
+                        ogs_warn("Not refetching %s: %u consecutive fetch failures reached the configured "
+                                 "consecutiveIngestFailuresBeforeDeactivate limit of %d",
+                                 item.objectId().c_str(), failures, max_failures);
+                    } else {
+                        item.forceRecache(true); // Force refetch on error
+                        ingester->fetch(item);
+                    }
                 }
             } catch (std::bad_cast &ex) {
                 // Should never happen, but just incase
@@ -259,7 +288,7 @@ std::list<PullObjectIngester::IngestItem> ObjectManifestController::getPullAcqui
                         }
                     }
 
-                    const auto *metadata = object_store->findMetadataByURL(obj_ingest_url);
+                    const auto metadata = object_store->findMetadataByURL(obj_ingest_url);
                     if (metadata) {
                         /* this is a refetch */
                         result.emplace_back(*metadata);
@@ -278,10 +307,25 @@ std::list<PullObjectIngester::IngestItem> ObjectManifestController::getPullAcqui
 
 void ObjectManifestController::startWorker()
 {
-    if (!m_scheduledPullRunning) {
-        if (m_scheduledPullThread.joinable()) m_scheduledPullThread.detach();
-        m_scheduledPullThread = std::thread(&ObjectManifestController::workerLoop, this);
-    }
+    /* The slot is claimed here, not by the worker once it runs.
+       m_scheduledPullRunning was set at the top of workerLoop(), so between this function creating
+       the thread and that thread being scheduled the flag was still false. A second call in that
+       window passed the check and started a second worker, and both then ran their own fetch
+       schedule against the same manifest -- one manifest refetched and resent several times in quick
+       succession, which is what reactivation produces: the manifest is processed again and this
+       function is reached more than once before the first worker has run.
+
+       compare_exchange_strong makes exactly one caller the starter. Every exit from workerLoop()
+       clears the flag before returning, so a genuinely finished worker still allows the next start.
+       code-derived, no spec claim. */
+    bool expected = false;
+    if (!m_scheduledPullRunning.compare_exchange_strong(expected, true)) return;
+
+    /* The previous thread has left workerLoop() by now, since it cleared the flag on its way out.
+       Detached rather than joined because this runs on the event loop, and a worker still inside a
+       fetch would stall it. */
+    if (m_scheduledPullThread.joinable()) m_scheduledPullThread.detach();
+    m_scheduledPullThread = std::thread(&ObjectManifestController::workerLoop, this);
 }
 
 void ObjectManifestController::initPullObjectIngesters()
@@ -452,9 +496,14 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
                     if (controller->m_manifestHandler) {
                         controller->m_manifestHandler->startedFetch(ingest_item);
                     } else {
-                        // Manifest handler has disappeared, end scheduled pull
+                        /* Manifest handler has disappeared, end scheduled pull.
+                           return, not break: this sits inside the per-ingester for loop, so a break
+                           left the enclosing while running while the flag said no worker was running.
+                           The pull therefore did not end, and startWorker() was free to start a
+                           second worker alongside this one. Every other exit from this function
+                           clears the flag and returns; this was the one that did not. */
                         controller->m_scheduledPullRunning = false;
-                        break;
+                        return;
                     }
                 }
 
