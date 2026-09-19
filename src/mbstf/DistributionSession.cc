@@ -241,6 +241,31 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                     if (resource0 == "dist-sessions") {
                         /* starts with .../dist-sessions... */
                         std::string method(message.method());
+
+                        /* TS 29.581 V18.6.0 gives this API four methods across its four resources:
+                           POST in clauses 6.1.3.2.3.1 and 6.1.3.4.3.1, PATCH in 6.1.3.3.3.1 and
+                           6.1.3.5.3.2, DELETE in 6.1.3.3.3.2 and 6.1.3.5.3.1, and GET in 6.1.3.3.3.3.
+                           PUT appears in none of them, so a PUT is not a wrong method for one of
+                           these resources, it is one no resource of the API serves.
+
+                           TS 29.500 V18.10.0 clause 5.2.7.2: “A request using an HTTP method which is not supported by any resource of a given 5GC SBI API shall be rejected with the HTTP status code "501 Not Implemented".”
+
+                           OPTIONS stays out of this test and is served below. TS 29.500 V18.10.0
+                           clause 6.9.1 allows it: “The OPTIONS method, as described in clause 9.3.7 of IETF RFC 9110 [11], may be used by a NF Service Consumer to determine the communication options supported by a NF Service Producer for a target resource.”
+
+                           Checked before the dispatch so such a method cannot reach a branch that
+                           answers 405 and names an Allow list, which would say the method is merely
+                           wrong here rather than unknown to the API. */
+                        if (method != OGS_SBI_HTTP_METHOD_POST && method != OGS_SBI_HTTP_METHOD_GET &&
+                            method != OGS_SBI_HTTP_METHOD_PATCH && method != OGS_SBI_HTTP_METHOD_DELETE &&
+                            method != OGS_SBI_HTTP_METHOD_OPTIONS) {
+                            ogs_error("Method [%s] is not supported by any resource of this API", method.c_str());
+                            ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_NOT_IMPLEMENTED, 0,
+                                                                  message, app_meta, api, "Not Implemented",
+                                                                  "Method not supported by any resource of this API"));
+                            return true;
+                        }
+
                         const char *ptr_resource1 = message.resourceComponent(1);
                         if (ptr_resource1) {
                             /* starts with .../dist-sessions/{distSessionId}... */
