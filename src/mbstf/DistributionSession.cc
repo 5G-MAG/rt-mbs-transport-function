@@ -1070,6 +1070,9 @@ void DistributionSession::_apiSessionCreate(Open5GSSBIStream &stream, Open5GSSBI
                            const NfServer::AppMetadata &app_meta)
 {
     /* static method */
+    /* A body in a coding this NF cannot decode is refused before it is read, so the
+       encoded octets never reach the JSON parser and get blamed on the document. */
+    if (NfServer::refuseUnsupportedContentCoding(request, stream, 1, message, app_meta, api)) return;
     if (request.headerValue(OGS_SBI_CONTENT_TYPE, std::string()) != "application/json") {
         /* TS 29.500 V18.10.0 table 5.2.7.1-1 marks 415 mandatory for POST. Its table 5.2.7.2-1
            defines no named cause for 415, so the numeric status is constructed directly here,
@@ -1212,6 +1215,9 @@ void DistributionSession::_apiSessionPatch(Open5GSSBIStream &stream, Open5GSSBIM
                           const std::optional<NfServer::InterfaceMetadata> &api,
                           const NfServer::AppMetadata &app_meta)
 {
+    /* A body in a coding this NF cannot decode is refused before it is read, so the
+       encoded octets never reach the JSON parser and get blamed on the document. */
+    if (NfServer::refuseUnsupportedContentCoding(request, stream, 2, message, app_meta, api)) return;
     std::string content_type(message.contentType());
     if (content_type != OGS_SBI_CONTENT_PATCH_TYPE) {
         /* TS 29.500 V18.10.0 table 5.2.7.1-1 marks 415 mandatory for PATCH. This resource's
@@ -1315,6 +1321,9 @@ void DistributionSession::_apiSubscriptionCreate(Open5GSSBIStream &stream, Open5
                                 const std::optional<NfServer::InterfaceMetadata> &api,
                                 const NfServer::AppMetadata &app_meta)
 {
+    /* A body in a coding this NF cannot decode is refused before it is read, so the
+       encoded octets never reach the JSON parser and get blamed on the document. */
+    if (NfServer::refuseUnsupportedContentCoding(request, stream, 1, message, app_meta, api)) return;
     if (request.headerValue(OGS_SBI_CONTENT_TYPE, std::string()) != "application/json") {
         /* TS 29.500 V18.10.0 table 5.2.7.1-1 marks 415 mandatory for POST. Its table 5.2.7.2-1
            defines no named cause for 415, so the numeric status is constructed directly here,
@@ -1397,6 +1406,9 @@ void DistributionSession::_apiSubscriptionPatch(const DistributionSessionSubscri
        /dist-sessions/{distSessionRef}/subscriptions/{subscriptionId} PATCH operation) requires
        application/json-patch+json for this resource. Both PATCH operations in that document
        request this type, not application/merge-patch+json. */
+    /* A body in a coding this NF cannot decode is refused before it is read, so the
+       encoded octets never reach the JSON parser and get blamed on the document. */
+    if (NfServer::refuseUnsupportedContentCoding(request, stream, 4, message, app_meta, api)) return;
     std::string content_type(message.contentType());
     if (content_type != OGS_SBI_CONTENT_PATCH_TYPE) {
         std::ostringstream err;
