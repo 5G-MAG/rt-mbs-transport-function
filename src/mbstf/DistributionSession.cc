@@ -26,6 +26,7 @@
 #include <chrono>
 #include <memory>
 #include <stdexcept>
+#include <cctype>
 #include <string>
 
 // App header includes
@@ -1551,6 +1552,31 @@ static void _validate(const std::shared_ptr<DistSession> &dist_session)
     if (!dist_session) {
         throw ModelException("No distSession in CreateReqData", "DistributionSession", "distSession",
                              ProblemCause::MANDATORY_IE_MISSING);
+    }
+
+    /* TS 29.581 V18.6.0 clause 6.1.6.2.4, type DistSession, attribute dscpMarking: “It shall be encoded as two octet string in hexadecimal representation.” and “The first octet shall contain the DSCP value in the IPv4 Type-of-Service or the IPv6 Traffic-Class field and the second octet shall contain the ToS/Traffic Class mask field, which shall be set to "0xFC".”
+
+       The generated model carries the attribute as a free string, so nothing below this point
+       would notice a value of the wrong length, a value that is not hexadecimal, or a mask other
+       than the one the clause fixes. Such a value would be carried into the marking applied to
+       outgoing traffic, where a wrong mask changes which bits of the Traffic Class field are
+       overwritten. */
+    const auto &dscp_marking = dist_session->getDscpMarking();
+    if (dscp_marking) {
+        const std::string &dscp_value = dscp_marking.value();
+        bool well_formed = (dscp_value.size() == 4);
+        if (well_formed) {
+            for (char ch : dscp_value) if (!std::isxdigit(static_cast<unsigned char>(ch))) well_formed = false;
+        }
+        if (!well_formed) {
+            throw ModelException("dscpMarking must be two octets in hexadecimal representation, i.e. four hexadecimal digits",
+                                 "DistributionSession", "distSession.dscpMarking", ProblemCause::MANDATORY_IE_INCORRECT);
+        }
+        const std::string mask(dscp_value.substr(2));
+        if (!(mask == "FC" || mask == "fc" || mask == "Fc" || mask == "fC")) {
+            throw ModelException("dscpMarking mask octet must be FC", "DistributionSession", "distSession.dscpMarking",
+                                 ProblemCause::MANDATORY_IE_INCORRECT);
+        }
     }
 
     const auto &obj_distr_data = dist_session->getObjDistributionData();
