@@ -148,13 +148,8 @@ DistributionSession::~DistributionSession()
     m_controller.reset(); // Detach controller
 }
 
-CJson DistributionSession::json(bool as_request, bool include_subscription_location) const
+std::shared_ptr<DistSession> DistributionSession::_distSessionRepresentation(bool include_subscription_location) const
 {
-    if (as_request) {
-        /* Return original request object as JSON */
-        return m_createReqData->toJSON(as_request);
-    }
-    /* Create new response object from DistSession */
     std::shared_ptr<DistSession> dist_session(new DistSession(*m_createReqData->getDistSession()));
     if (include_subscription_location) {
         /* We need to add the subscription location URI if an original subscription was present */
@@ -165,8 +160,26 @@ CJson DistributionSession::json(bool as_request, bool include_subscription_locat
             dist_session->setDistSessionSubscription(new_subsc);
         }
     }
+    return dist_session;
+}
+
+CJson DistributionSession::distSessionJson(bool include_subscription_location) const
+{
+    return _distSessionRepresentation(include_subscription_location)->toJSON(false);
+}
+
+CJson DistributionSession::json(bool as_request, bool include_subscription_location) const
+{
+    if (as_request) {
+        /* Return original request object as JSON */
+        return m_createReqData->toJSON(as_request);
+    }
+    /* CreateRspData wraps the Distribution Session, and that wrapper belongs to the creation
+       response alone. TS 29.581 V18.6.0 table 6.1.3.2.3.1-3 gives the POST 201 body as
+       CreateRspData, while table 6.1.3.3.3.3-3 gives the GET 200 body as DistSession and table
+       6.1.3.3.3.1-3 gives the PATCH 200 body as DistSession. Those two use distSessionJson(). */
     CreateRspData response{};
-    response.setDistSession(dist_session);
+    response.setDistSession(_distSessionRepresentation(include_subscription_location));
     return response.toJSON(as_request);
 }
 
@@ -1219,18 +1232,12 @@ void DistributionSession::_apiSessionPatch(Open5GSSBIStream &stream, Open5GSSBIM
     /* A body in a coding this NF cannot decode is refused before it is read, so the
        encoded octets never reach the JSON parser and get blamed on the document. */
     if (NfServer::refuseUnsupportedContentCoding(request, stream, 2, message, app_meta, api)) return;
-    std::string content_type(message.contentType());
-    if (content_type != OGS_SBI_CONTENT_PATCH_TYPE) {
-        /* TS 29.500 V18.10.0 table 5.2.7.1-1 marks 415 mandatory for PATCH. This resource's
-           expected type is the merge-patch type, not the plain application/json the POST handlers
-           check, so the comparison differs from theirs while the status does not. */
-        std::ostringstream err;
-        err << "Content-Type [" << message.contentType() << "] unknown for PATCH method, expecting " OGS_SBI_CONTENT_PATCH_TYPE;
-        ogs_error("%s", err.str().c_str());
-        ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE, 2, message, app_meta, api,
-                                                "Unsupported Media Type", err.str()));
-        return;
-    }
+    /* TS 29.500 V18.10.0 table 5.2.7.1-1 marks 415 mandatory for PATCH, and clause 5.2.7.2 has the
+       refusal carry Accept-Patch. This API's patch document is a JSON Patch, an array of PatchItem
+       signalled by application/json-patch+json, and not the JSON Merge Patch the MBSF's own APIs
+       take: the two differ, so the name of the media type comes from one place rather than being
+       described in a comment. */
+    if (NfServer::refuseUnsupportedPatchDocument(request, stream, 2, message, app_meta, api)) return;
     if (request_too_large(request, stream, 2, message, app_meta, api)) return;
 
     /* parse body */
@@ -1273,7 +1280,7 @@ void DistributionSession::_apiSessionPatch(Open5GSSBIStream &stream, Open5GSSBIM
         return;
     }
 
-    CJson rsp_json = json(false);
+    CJson rsp_json = distSessionJson();
     std::string body(rsp_json.serialise());
     ogs_debug("Generated JSON: %s", body.c_str());
     std::optional<std::string> rsp_content_type;
@@ -1303,7 +1310,7 @@ void DistributionSession::_apiSessionGet(Open5GSSBIStream &stream, Open5GSSBIMes
         return;
     }
 
-    CJson dist_session_json(json());
+    CJson dist_session_json(distSessionJson());
     std::string body(dist_session_json.serialise());
     ogs_debug("Generated JSON: %s", body.c_str());
     std::optional<std::string> content_type;
@@ -1410,15 +1417,9 @@ void DistributionSession::_apiSubscriptionPatch(const DistributionSessionSubscri
     /* A body in a coding this NF cannot decode is refused before it is read, so the
        encoded octets never reach the JSON parser and get blamed on the document. */
     if (NfServer::refuseUnsupportedContentCoding(request, stream, 4, message, app_meta, api)) return;
-    std::string content_type(message.contentType());
-    if (content_type != OGS_SBI_CONTENT_PATCH_TYPE) {
-        std::ostringstream err;
-        err << "Content-Type [" << content_type << "] unknown for PATCH method, expecting " OGS_SBI_CONTENT_PATCH_TYPE;
-        ogs_error("%s", err.str().c_str());
-        ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE, 4, message, app_meta, api,
-                                                "Unsupported Media Type", err.str()));
-        return;
-    }
+    /* The refusal carries Accept-Patch, which TS 29.500 V18.10.0 clause 5.2.7.2 requires on it,
+       the same as the Distribution Session's own PATCH. */
+    if (NfServer::refuseUnsupportedPatchDocument(request, stream, 4, message, app_meta, api)) return;
     if (request_too_large(request, stream, 4, message, app_meta, api)) return;
 
     CJson req_json(CJson::Null);

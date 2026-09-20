@@ -45,6 +45,7 @@ namespace fiveg_mag_reftools {
 
 namespace reftools::mbstf {
     class CreateReqData;
+    class DistSession;
     class DistSessionSubscription;
     class ObjDistributionData;
     class TunnelAddress;
@@ -74,6 +75,14 @@ public:
     virtual ~DistributionSession();
 
     fiveg_mag_reftools::CJson json(bool as_request = false, bool include_subscription_location = false) const;
+
+    /** The Distribution Session on its own, without the creation response wrapper.
+     *
+     * TS 29.581 V18.6.0 table 6.1.3.3.3.3-3 gives the GET 200 body as DistSession and table
+     * 6.1.3.3.3.1-3 gives the PATCH 200 body as DistSession; only the POST 201 body is
+     * CreateRspData, table 6.1.3.2.3.1-3.
+     */
+    fiveg_mag_reftools::CJson distSessionJson(bool include_subscription_location = false) const;
 
     static const std::shared_ptr<DistributionSession> &find(const std::string &id); // throws std::out_of_range if id does not exist
     const std::string &distributionSessionId() const { return m_distributionSessionId; };
@@ -183,6 +192,8 @@ private:
     void _apiSessionDelete(Open5GSSBIStream &stream, Open5GSSBIMessage &message, Open5GSSBIRequest &request,
                            const std::optional<NfServer::InterfaceMetadata> &api,
                            const NfServer::AppMetadata &app_meta);
+    std::shared_ptr<reftools::mbstf::DistSession> _distSessionRepresentation(bool include_subscription_location) const;
+
     void _apiSessionPatch(Open5GSSBIStream &stream, Open5GSSBIMessage &message, Open5GSSBIRequest &request,
                           const std::optional<NfServer::InterfaceMetadata> &api,
                           const NfServer::AppMetadata &app_meta);

@@ -135,6 +135,26 @@ public:
      * returns true. Returns false, having sent nothing, when the request carries no content
      * coding or names the identity coding.
      */
+    /** Refuse a PATCH whose request body is not a patch document this NF applies.
+     *
+     * Answers 415 with an Accept-Patch header naming what would have been accepted, and returns
+     * true. Returns false, having sent nothing, when the Content-Type is the JSON Patch type.
+     *
+     * TS 29.500 V18.10.0 clause 5.2.7.2: “If the HTTP PATCH method is rejected due to unsupported
+     * patch document, the NF shall include the Accept-Patch header field set to the value of
+     * supported patch document media types for a target resource i.e. to
+     * "application/merge-patch+json" if the NF supports "JSON Merge Patch" and to
+     * "application/json-patch+json" if the NF supports "JSON Patch".”
+     *
+     * This API's PATCH body is a JSON Patch document, an array of PatchItem, so the header names
+     * that one. TS 29.581 V18.6.0 clause 6.1.2.2.2 does not name a patch media type; the API's own
+     * OpenAPI in that specification gives the PATCH requestBody as application/json-patch+json.
+     */
+    static bool refuseUnsupportedPatchDocument(Open5GSSBIRequest &request, Open5GSSBIStream &stream,
+                                               size_t number_of_components, Open5GSSBIMessage &message,
+                                               const AppMetadata &app,
+                                               const std::optional<InterfaceMetadata> &interface);
+
     static bool refuseUnsupportedContentCoding(Open5GSSBIRequest &request, Open5GSSBIStream &stream,
                                                size_t number_of_components, Open5GSSBIMessage &message,
                                                const AppMetadata &app,

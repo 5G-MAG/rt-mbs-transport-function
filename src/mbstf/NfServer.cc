@@ -255,6 +255,38 @@ std::string NfServer::resourceUri(Open5GSSBIStream &stream, const Open5GSSBIMess
     return result;
 }
 
+bool NfServer::refuseUnsupportedPatchDocument(Open5GSSBIRequest &request, Open5GSSBIStream &stream,
+                                              size_t number_of_components, Open5GSSBIMessage &message,
+                                              const AppMetadata &app,
+                                              const std::optional<InterfaceMetadata> &interface)
+{
+    std::string content_type(message.contentType());
+    if (content_type == OGS_SBI_CONTENT_PATCH_TYPE) return false;
+
+    std::ostringstream err;
+    err << "Patch document \"" << content_type << "\" is not supported; send " OGS_SBI_CONTENT_PATCH_TYPE;
+    ogs_error("%s", err.str().c_str());
+
+    std::shared_ptr<Open5GSSBIResponse> response(newResponse(std::nullopt, "application/problem+json",
+                                                             std::nullopt, std::nullopt, 0, std::nullopt,
+                                                             interface, app));
+    ogs_assert(response);
+    /* The header is what tells a consumer which patch document to send instead, and clause 5.2.7.2
+       requires it on exactly this refusal. */
+    ogs_sbi_header_set(response->ogsSBIResponse()->http.headers, "Accept-Patch", OGS_SBI_CONTENT_PATCH_TYPE);
+
+    CJson problem(CJson::newObject());
+    problem.set("title", CJson::newString("Unsupported Media Type"));
+    problem.set("status", CJson::newNumber(OGS_SBI_HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE));
+    problem.set("detail", CJson::newString(err.str()));
+    problem.set("cause", CJson::newString(fiveg_mag_reftools::ProblemCause::UNSPECIFIED_MSG_FAILURE.cause()));
+    std::string body(problem.serialise());
+    populateResponse(response, body, OGS_SBI_HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE);
+    ogs_assert(true == Open5GSSBIServer::sendResponse(stream, *response));
+
+    return true;
+}
+
 bool NfServer::refuseUnsupportedContentCoding(Open5GSSBIRequest &request, Open5GSSBIStream &stream,
                                               size_t number_of_components, Open5GSSBIMessage &message,
                                               const AppMetadata &app,
