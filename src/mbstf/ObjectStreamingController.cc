@@ -62,6 +62,17 @@ ObjectStreamingController::ObjectStreamingController(DistributionSession &distri
 
 ObjectStreamingController::~ObjectStreamingController()
 {
+    /* Dropped before anything else: this object is still subscribed to the object store, and an
+       event delivered once the derived part is gone reaches ObjectManifestController::processEvent
+       through a vtable that no longer has sendToPackager(), which ends the process with "pure
+       virtual method called". ~Subscriber() unsubscribes too, but it runs after every derived
+       destructor, which is exactly too late. */
+    /* Stopped before anything else: the ingest workers this controller owns are held by its
+       ObjectController base, so destruction alone stops them last, after every derived destructor
+       has run. abort() below joins a scheduled pull that can take tens of seconds, and the workers
+       keep ingesting throughout, using objects the teardown is already dismantling. */
+    abortIngest();
+    unsubscribeFromAll();
     abort();
 }
 

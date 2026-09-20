@@ -63,6 +63,12 @@ extern "C" int app_initialize(const char *const argv[])
 
 extern "C" void app_terminate(void)
 {
+    /* Before anything is torn down. The ingest workers run on their own threads and keep fetching
+       and writing until told to stop; stopping them as a side effect of destroying their owners
+       leaves them running throughout the teardown, using objects that are being destroyed around
+       them. */
+    if (self && self->context()) self->context()->abortAllIngest();
+
     if (event_handler) {
         self->registerEventHandler(nullptr);
         delete event_handler;

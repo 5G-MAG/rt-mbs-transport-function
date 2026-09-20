@@ -34,6 +34,21 @@ using fiveg_mag_reftools::ProblemCause;
 
 MBSTF_NAMESPACE_START
 
+void ObjectController::abortIngest()
+{
+    if (m_pushIngester) m_pushIngester->abort();
+    {
+        std::lock_guard<decltype(m_pullObjectIngestersMutex)> lock(m_pullObjectIngestersMutex);
+        for (auto &ingester : m_pullIngesters) {
+            if (ingester) ingester->abort();
+        }
+    }
+    /* The object store carries its own asynchronous event thread, for the same reason and with
+       the same deadline as the ingesters' own. */
+    if (m_objectStore) m_objectStore->stopAsyncEvents();
+    Controller::abortIngest();
+}
+
 const std::shared_ptr<PullObjectIngester> &ObjectController::addPullObjectIngester(
                                                                     const std::shared_ptr<PullObjectIngester> &pull_obj_ingester)
 {

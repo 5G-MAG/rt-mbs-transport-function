@@ -82,6 +82,7 @@ public:
     const SysTimeMS &generated() const {return m_generated;};
     const std::string &hash() const {return m_hash;};
     void setController(std::shared_ptr<Controller> controller) {m_controller = controller;};
+    const std::shared_ptr<Controller> &controller() const {return m_controller;};
 
     virtual void processEvent(Event &event, SubscriptionService &event_service);
     static bool processEvent(Open5GSEvent &event);

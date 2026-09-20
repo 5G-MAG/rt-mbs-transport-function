@@ -57,6 +57,14 @@ public:
 */
     void addDistributionSession(const std::shared_ptr<DistributionSession> &DistributionSession);
     void deleteDistributionSession(const std::string &distributionSessionid);
+
+    /** Stop every ingest worker in every Distribution Session, destroying nothing.
+     *
+     * Establishes, before teardown starts, that no ingest worker is running. Leaving them to
+     * stop as their owners are destroyed is too late: they keep fetching and writing into
+     * objects the teardown is already dismantling.
+     */
+    void abortAllIngest();
     const std::shared_ptr<DistributionSession> &findDistributionSession(const std::string &distributionSessionid);
 
     enum ServerType {

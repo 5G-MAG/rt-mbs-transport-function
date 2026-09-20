@@ -28,6 +28,7 @@
 
 #include "common.hh"
 #include "App.hh"
+#include "Controller.hh"
 #include "DistributionSession.hh"
 #include "ManifestHandlerFactory.hh"
 #include "Open5GSNetworkFunction.hh"
@@ -201,6 +202,15 @@ void Context::addDistributionSession(const std::shared_ptr<DistributionSession> 
     updateNFLoad();
 }
 
+
+void Context::abortAllIngest()
+{
+    for (auto &entry : distributionSessions) {
+        if (!entry.second) continue;
+        const std::shared_ptr<Controller> &controller = entry.second->controller();
+        if (controller) controller->abortIngest();
+    }
+}
 
 void Context::deleteDistributionSession(const std::string &distributionSessionid)
 {

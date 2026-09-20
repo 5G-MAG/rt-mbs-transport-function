@@ -46,6 +46,17 @@ public:
     ObjectController(const ObjectController &) = delete;
     ObjectController(ObjectController &&) = delete;
 
+    /** Stop every ingest worker this controller owns.
+     *
+     * The workers are owned by this base, so destruction alone stops them last, after every
+     * derived destructor has run. ObjectManifestController::abort() joins a scheduled pull that
+     * can take tens of seconds, and the workers keep ingesting throughout, using objects the
+     * teardown is already dismantling. Calling this first in a most-derived destructor stops
+     * them before anything they depend on goes away. Idempotent: ObjectIngester::abort() leaves
+     * the worker cancelled and no longer joinable, so the later reset and clear repeat nothing.
+     */
+    virtual void abortIngest();
+
     virtual ~ObjectController() {
         m_pushIngester.reset();
         std::lock_guard<decltype(m_pullObjectIngestersMutex)> lock(m_pullObjectIngestersMutex);
