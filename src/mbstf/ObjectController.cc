@@ -147,7 +147,14 @@ std::string ObjectController::nextObjectId()
 const std::shared_ptr<ObjectPackager> &ObjectController::packager(ObjectPackager *packager)
 {
     m_packager.reset(packager);
-    subscribeTo({ObjectPackager::ObjectSendCompleted::event_name, ObjectPackager::PackagingFailedEvent::event_name}, *m_packager.get());
+    /* packager(nullptr) unsets the current packager -- ObjectCollectionController::
+       unsetObjectListPackager() and unsetObjectPackager() both call it this way, on a manifest
+       that has no packager to give up as much as one that does. Subscribing only makes sense
+       when there is now something to subscribe to; dereferencing m_packager unconditionally here
+       crashed every one of those calls. */
+    if (m_packager) {
+        subscribeTo({ObjectPackager::ObjectSendCompleted::event_name, ObjectPackager::PackagingFailedEvent::event_name}, *m_packager.get());
+    }
     return m_packager;
 }
 
