@@ -84,7 +84,13 @@ bool ObjectController::removeAllPullObjectIngesters()
 const std::shared_ptr<PushObjectIngester> &ObjectController::pushObjectIngester(PushObjectIngester *pushIngester)
 {
     m_pushIngester.reset(pushIngester);
-    subscribeTo({ObjectIngester::IngestFailedEvent::event_name}, *m_pushIngester);
+    /* pushObjectIngester(nullptr) removes the current one -- ObjectListController and
+       ObjectManifestController's own reconfigurePushObjectIngester() both call it this way, on an
+       acquisition method change away from PUSH. Same defect as packager(nullptr) above: subscribing
+       only makes sense when there is now something to subscribe to. */
+    if (m_pushIngester) {
+        subscribeTo({ObjectIngester::IngestFailedEvent::event_name}, *m_pushIngester);
+    }
     return m_pushIngester;
 }
 
