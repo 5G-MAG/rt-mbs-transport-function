@@ -284,15 +284,45 @@ void ObjectCarouselPackager::ensureTransmitter()
         m_transmitter->register_completion_callback(
             [this](uint32_t toi) {
                 ogs_debug("Object with TOI %d completed", toi);
+                std::string toi_str(std::to_string(toi));
                 try {
                     /* find stream containing current object with toi */
                     streamsRemoveToi(toi);
                 } catch (std::out_of_range &ex) {
                     errorInCarousel(ex.what(), ObjectPackager::PackagingFailedEvent::RESOURCE_NOT_AVAILABLE);
                 }
+                bool queue_empty;
+                {
+                    std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+                    queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
+                }
+                /* objectSendCompletion() was declared on this class (see the header) since it was
+                   first written from ObjectListPackager's template for issue #51, but nothing here
+                   ever called it: this completion callback only removed the finished stream and
+                   returned. Established from git blame and left unfixed until now, per rule 14 --
+                   without it, DistributionSession::haveEmptyQueue() is never called for a carousel,
+                   so deactivate() below returning false (queue not yet empty at the moment it was
+                   called) left nothing to ever finish the job; the Distribution Session would sit
+                   in DEACTIVATING forever. */
+                objectSendCompletion(toi_str, queue_empty);
+                if (m_deactivating && queue_empty) {
+                    ogs_debug("Deactivating FLUTE stream on last file");
+                    {
+                        std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+                        m_transmitter->deactivate();
+                    }
+                    abort();
+                    m_deactivating = false;
+                }
             }
         );
     }
+}
+
+void ObjectCarouselPackager::objectSendCompletion(std::string &object_id, bool queue_empty)
+{
+    std::shared_ptr<Event> event(new ObjectPackager::ObjectSendCompleted(object_id, queue_empty));
+    sendEventAsynchronous(event);
 }
 
 void ObjectCarouselPackager::flushQueue()
