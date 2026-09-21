@@ -86,7 +86,8 @@ public:
         data_size_type bodySize() const { return m_totalBodySize; };
 
         bool addBodyBlock(const data_type &body_block);
-        bool setError(unsigned int status_code = 0, const std::string &reason = std::string());
+        bool setError(unsigned int status_code = 0, const std::string &reason = std::string(),
+                     const std::string &detail = std::string());
         void completed(struct MHD_Connection *connection, enum MHD_RequestTerminationCode term_code);
         virtual void waitClose() {};
         void requestHandler(struct MHD_Connection *connection);
@@ -119,6 +120,7 @@ public:
 
         unsigned int m_statusCode;
         std::string m_errorReason;
+        std::string m_errorDetail;
         bool m_noMoreBodyData;
 
         std::unique_ptr<std::recursive_mutex> m_mutex;

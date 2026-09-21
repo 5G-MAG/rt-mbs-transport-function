@@ -27,7 +27,6 @@
 #include "PullObjectIngester.hh"
 #include "hash.hh"
 #include "Curl.hh"
-#include "MediaTypeInference.hh"
 #include "ObjectStore.hh"
 
 LIBMPDPP_NAMESPACE_USING(BaseURL);
@@ -269,26 +268,22 @@ void PullObjectIngester::doObjectIngest() {
                    clause L.4.2 lists Content-Type first among the attributes that "shall be carried
                    in the FDT sent by the FLUTE sender".
 
-                   Where the origin sent none, the type is inferred from the object's filename
-                   extension. Where that fails the ingest fails, rather than the MBSTF asserting a
-                   media type nobody established: a wrong Content-Type on the wire is worse than a
-                   refused object, because a receiver has no way to tell it is wrong. */
+                   The origin not sending one is refused rather than inferred from the object's
+                   filename or guessed from its content. This reference implementation is what an
+                   MBS Application Provider integrates against, and covering for one that omits
+                   Content-Type would hide the very shortcoming an integrator needs to see, rather
+                   than let it surface as a clear ingest failure. Raised by review on
+                   5G-MAG/rt-mbs-transport-function#74, which had this MBSTF inferring the type
+                   before this. */
                 std::string media_type = m_curl->getContentType();
                 if (media_type.empty()) {
-                    auto inferred = inferMediaTypeFromUrl(item.url());
-                    if (!inferred) {
-                        ogs_warn("Ingest of [%s] failed: the origin sent no Content-Type and none "
-                                 "could be inferred from the object name; an object with no media "
-                                 "type cannot be carried in a conformant FDT",
-                                 item.url().c_str());
-                        emitObjectPullIngestFailedEvent(item, item.url(),
-                                                        ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
-                        m_ingestItemsMutex->lock(); // lock so that the lock_guard can release properly
-                        return;
-                    }
-                    ogs_info("Ingest of [%s]: origin sent no Content-Type, inferred [%s] from the "
-                             "object name", item.url().c_str(), inferred->c_str());
-                    media_type = *inferred;
+                    ogs_warn("Ingest of [%s] failed: the origin sent no Content-Type; an object with "
+                             "no media type cannot be carried in a conformant FDT",
+                             item.url().c_str());
+                    emitObjectPullIngestFailedEvent(item, item.url(),
+                                                    ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
+                    m_ingestItemsMutex->lock(); // lock so that the lock_guard can release properly
+                    return;
                 }
 
                 ObjectStore::Metadata metadata(item.objectId(), media_type, item.url(), fetched_url, item.acquisitionId(), m_curl->getLastModified(), item.objIngestBaseUrl(), item.objDistributionBaseUrl());

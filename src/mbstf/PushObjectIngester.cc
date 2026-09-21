@@ -33,7 +33,6 @@
 #include "ObjectListController.hh"
 #include "ObjectStore.hh"
 
-#include "MediaTypeInference.hh"
 #include "PushObjectIngester.hh"
 
 MBSTF_NAMESPACE_START
@@ -63,6 +62,7 @@ PushObjectIngester::Request::Request(struct MHD_Connection *mhd_connection, Push
     ,m_totalBodySize(0)
     ,m_statusCode(0)
     ,m_errorReason()
+    ,m_errorDetail()
     ,m_noMoreBodyData(false)
     ,m_mutex(new std::recursive_mutex)
     ,m_condVar()
@@ -90,11 +90,13 @@ void PushObjectIngester::Request::completed(struct MHD_Connection *connection,
     // if (term_code != MHD_REQUEST_TERMINATED_COMPLETED_OK) m_pushObjectIngester.emitObjectIngestFailedEvent();
 }
 
-bool PushObjectIngester::Request::setError(unsigned int status_code, const std::string &reason)
+bool PushObjectIngester::Request::setError(unsigned int status_code, const std::string &reason,
+                                           const std::string &detail)
 {
     if (m_noMoreBodyData) return false;
     m_statusCode = status_code;
     m_errorReason = reason;
+    m_errorDetail = detail;
     return true;
 }
 
@@ -121,27 +123,17 @@ void PushObjectIngester::Request::processRequest()
        Content-Type first among the attributes that “shall be carried in the FDT sent by the FLUTE
        sender”.
 
-       Where the pushing client sent none, the type is inferred from the object name. Where that
-       fails the ingest fails, rather than the MBSTF asserting a media type nobody established: a
-       wrong Content-Type on the wire is worse than a refused object, because a receiver has no way
-       to tell it is wrong. This defaulted silently to application/octet-stream, which is that
-       assertion in its least visible form. The pull path already refuses on the same ground; this
-       is the push half. Raised by review on 5G-MAG/rt-mbs-transport-function#74. */
-    std::string content_type;
-    if (m_contentType && !m_contentType->empty()) {
-        content_type = *m_contentType;
-    } else {
-        auto inferred = inferMediaTypeFromUrl(m_urlPath);
-        if (!inferred) {
-            throw std::runtime_error(std::string("the pushed object [") + m_urlPath +
-                                     "] carried no Content-Type and none could be inferred from its "
-                                     "name; an object with no media type cannot be carried in a "
-                                     "conformant FDT");
-        }
-        ogs_info("Push ingest of [%s]: no Content-Type sent, inferred [%s] from the object name",
-                 m_urlPath.c_str(), inferred->c_str());
-        content_type = *inferred;
+       A pushing client that sends none is refused (400) rather than inferred from the object name
+       or guessed from its content. This reference implementation is what an MBS Application
+       Provider integrates against, and covering for one that omits Content-Type would hide the
+       shortcoming an integrator needs to see. Raised by review on
+       5G-MAG/rt-mbs-transport-function#74, which had this MBSTF inferring the type before this. */
+    if (!m_contentType || m_contentType->empty()) {
+        throw std::runtime_error(std::string("the pushed object [") + m_urlPath +
+                                 "] carried no Content-Type; an object with no media type cannot be "
+                                 "carried in a conformant FDT");
     }
+    std::string content_type(*m_contentType);
 
     std::string url(m_urlPath);
     if (url.front() == '/') {
@@ -200,7 +192,7 @@ void PushObjectIngester::Request::requestHandler(struct MHD_Connection *connecti
             processRequest();
         } catch (std::runtime_error &ex) {
             ogs_warn("Failed to accept pushed object: %s", ex.what());
-            setError(400, "Bad Request");
+            setError(400, "Bad Request", ex.what());
         }
     }
 
@@ -208,6 +200,24 @@ void PushObjectIngester::Request::requestHandler(struct MHD_Connection *connecti
         m_pushObjectIngester.emitObjectIngestFailedEvent(m_urlPath, ObjectIngester::IngestFailedEvent::CLIENT_ERROR);
     } else if (m_statusCode >= 500 && m_statusCode <= 599) {
         m_pushObjectIngester.emitObjectIngestFailedEvent(m_urlPath, ObjectIngester::IngestFailedEvent::SERVER_ERROR);
+    }
+
+    /* setError() recorded a detail: the empty response created above answers nothing back to the
+       pushing client, which is no better than the bare status code review on
+       5G-MAG/rt-mbs-transport-function#74 asked this not to be -- an integrator whose object was
+       refused needs to be told why, not left to read the MBSTF's own log. Replaced rather than
+       reused: MHD ties a response object to the memory mode it was created with, and the original
+       was created MHD_RESPMEM_PERSISTENT over a zero-length, static buffer. MHD_RESPMEM_MUST_COPY
+       copies m_errorDetail's bytes immediately, so the response remains valid once this function
+       returns and the string is destroyed. No ProblemDetails structure: TS 26.517 does not define
+       an error body for this interface, so inventing one here would be a schema resting on
+       nothing; plain text says exactly what went wrong without asserting a format nobody defined. */
+    if (!m_errorDetail.empty()) {
+        MHD_destroy_response(m_mhdResponse);
+        m_mhdResponse = MHD_create_response_from_buffer(m_errorDetail.size(),
+                                                        const_cast<char*>(m_errorDetail.data()),
+                                                        MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(m_mhdResponse, "Content-Type", "text/plain");
     }
 
     ogs_info("Queue response (%u) for %s to microhttpd", m_statusCode, m_urlPath.c_str());
