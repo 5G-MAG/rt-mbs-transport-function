@@ -98,7 +98,8 @@ public:
             BIT_RATE_OVERFLOW = 1,
             BIT_RATE_UNDERFLOW,
             OBJECT_TOO_BIG,
-            RESOURCE_NOT_AVAILABLE
+            RESOURCE_NOT_AVAILABLE,
+            FEC_CONFIGURATION_REJECTED
         } FailureType;
 
         PackagingFailedEvent(const std::string &reason, FailureType fail_type)

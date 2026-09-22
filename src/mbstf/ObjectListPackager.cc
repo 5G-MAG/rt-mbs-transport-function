@@ -214,6 +214,17 @@ void ObjectListPackager::doObjectPackage() {
             } catch (const std::runtime_error &err) {
                 ogs_error("Cannot apply the Distribution Session's FEC configuration, not transmitting: %s",
                           err.what());
+                /* Nothing about this failure will resolve itself on a later pass -- the session's own
+                   FEC configuration is what was rejected, so this same exception fires again on the
+                   worker's very next iteration with no Transmitter ever coming into existence. Report
+                   it as the packaging failure it is, synchronously so ObjectController's own handler
+                   (which marks the Distribution Session INACTIVE for any PackagingFailedEvent) has
+                   done so before the worker stops, then abort() rather than leave the worker spinning
+                   this catch block forever. */
+                ObjectPackager::PackagingFailedEvent packaging_failed(
+                        err.what(), ObjectPackager::PackagingFailedEvent::FEC_CONFIGURATION_REJECTED);
+                sendEventSynchronous(packaging_failed);
+                abort();
                 return;
             }
             m_transmitter.reset(new LibFlute::Transmitter(
