@@ -170,7 +170,7 @@ public:
     bool fetch(const IngestItem &item);
     bool fetch(IngestItem &&item);
     bool fetch(const std::string &object_id, const std::optional<time_type> &download_deadline, bool force_recache,
-               bool keep_after_send, bool send_compressed);
+               bool keep_after_send, bool send_compressed, unsigned fetch_failures = 0);
 
     std::shared_ptr<Curl> curl() {return m_curl;};
     //static int client_notify_cb(int status, ogs_sbi_response_t *response, void *data);

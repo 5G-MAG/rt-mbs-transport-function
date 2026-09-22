@@ -116,7 +116,7 @@ PullObjectIngester::~PullObjectIngester() {
     abort();
 }
 
-bool PullObjectIngester::fetch(const std::string &object_id, const std::optional<time_type> &download_deadline, bool force_recache, bool keep_after_send, bool compress_send)
+bool PullObjectIngester::fetch(const std::string &object_id, const std::optional<time_type> &download_deadline, bool force_recache, bool keep_after_send, bool compress_send, unsigned fetch_failures)
 {
     std::lock_guard<std::recursive_mutex> lock(*m_ingestItemsMutex);
 
@@ -136,9 +136,15 @@ bool PullObjectIngester::fetch(const std::string &object_id, const std::optional
 
     // otherwise we need a new fetch based on the ObjectStore entry
     if (it == m_fetchList.end()) {
-        // Copied under the store's own lock: see ObjectStore::takeMetadataForIngest().
-        m_fetchList.emplace_back(objectStore()->takeMetadataForIngest(object_id, keep_after_send, compress_send),
+        // Copied under the store's own lock: see ObjectStore::takeMetadataForIngest(). This
+        // constructor always starts m_fetchFailures at 0 -- a genuinely new item is meant to -- so
+        // a retry landing here (the object was already popped from m_fetchList by the failure that
+        // is being retried; see fetch(IngestItem&&) below) must reapply its own prior count itself,
+        // or ObjectManifestController's per-object consecutiveIngestFailuresBeforeDeactivate count
+        // silently restarts from zero on every single failure and never reaches its limit.
+        auto &new_item = m_fetchList.emplace_back(objectStore()->takeMetadataForIngest(object_id, keep_after_send, compress_send),
                                  download_deadline, force_recache);
+        if (fetch_failures) new_item.fetchFailures(fetch_failures);
     }
 
     sortListByPolicy();
@@ -158,7 +164,7 @@ bool PullObjectIngester::fetch(IngestItem &&item) {
         // guarding: see ObjectStore::markForFetch(). Throws out_of_range when there is no previous
         // version, which the catch below already handles.
         objectStore()->markForFetch(item.objectId(), item.markAsKeepAfterSend(), item.markAsCompressedSend());
-        return fetch(item.objectId(), item.deadline(), item.forceRecache(), item.markAsKeepAfterSend(), item.markAsCompressedSend());
+        return fetch(item.objectId(), item.deadline(), item.forceRecache(), item.markAsKeepAfterSend(), item.markAsCompressedSend(), item.fetchFailures());
     } catch (const std::out_of_range &ex) {
         // No previous version, this isn't a refresh, but may still be a re-request for an existing list item
         decltype(m_fetchList)::iterator it;
