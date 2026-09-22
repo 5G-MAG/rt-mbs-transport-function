@@ -488,6 +488,15 @@ void ObjectCarouselPackager::scheduleCarousel()
         if (streamsAllocateToi([this,&pkg_item]() -> std::pair<uint32_t, std::shared_ptr<ObjectStore::Object> > {
                 std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
                 ensureTransmitter();
+                /* ensureTransmitter() leaves m_transmitter unset when the session's own FEC
+                   configuration was rejected (see its own comment above), logging the reason
+                   there. Throwing here, rather than falling through to m_transmitter->send()
+                   below, hands this attempt to streamsAllocateToi()'s existing catch, which
+                   already treats a failed get_toi_fn() as "try this item again next cycle"
+                   rather than crashing the scheduler. */
+                if (!m_transmitter) {
+                    throw std::runtime_error("no FLUTE Transmitter available for this session");
+                }
                 auto &metadata = pkg_item.object()->second;
                 auto &file_desc = metadata.fluteFileDescription();
                 std::string location;
