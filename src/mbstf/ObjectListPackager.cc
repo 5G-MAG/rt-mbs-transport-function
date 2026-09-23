@@ -337,7 +337,7 @@ void ObjectListPackager::doObjectPackage() {
                 }
             }
 
-            if (metadata.compressedSend()) {
+            if (m_transmitter->can_compress_objects() && metadata.compressedSend()) {
                 file_desc->set_compression(LibFlute::Transmitter::FileDescription::CompressionAlgorithm::COMPRESSION_GZIP);
             } else {
                 file_desc->set_compression(LibFlute::Transmitter::FileDescription::CompressionAlgorithm::COMPRESSION_NONE);
