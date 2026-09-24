@@ -46,12 +46,12 @@ PullObjectIngester::IngestItem::IngestItem(const ObjectStore::Metadata &object_m
     ,m_objIngestBaseUrl(object_meta.objIngestBaseUrl())
     ,m_objDistributionBaseUrl(object_meta.objDistributionBaseUrl())
     ,m_deadline(download_deadline)
+    ,m_availabilityStartTime(object_meta.availabilityStartTime())
+    ,m_availabilityEndTime(object_meta.availabilityEndTime())
+    ,m_fetchFailures(0)
     ,m_forceRecache(force_recache)
     ,m_markAsKeepAfterSend(keep_after_send)
     ,m_markAsCompressedSend(compress_send)
-    ,m_fetchFailures(0)
-    ,m_availabilityStartTime(object_meta.availabilityStartTime())
-    ,m_availabilityEndTime(object_meta.availabilityEndTime())
 {
 }
 
@@ -62,12 +62,12 @@ PullObjectIngester::IngestItem::IngestItem(const std::string &object_id, const s
     ,m_objIngestBaseUrl(obj_ingest_base_url)
     ,m_objDistributionBaseUrl(obj_distribution_base_url)
     ,m_deadline(download_deadline)
+    ,m_availabilityStartTime(availability_start_time)
+    ,m_availabilityEndTime(availability_end_time)
+    ,m_fetchFailures(0)
     ,m_forceRecache(force_recache)
     ,m_markAsKeepAfterSend(keep_after_send)
     ,m_markAsCompressedSend(compress_send)
-    ,m_fetchFailures(0)
-    ,m_availabilityStartTime(availability_start_time)
-    ,m_availabilityEndTime(availability_end_time)
 {
 }
 
@@ -78,12 +78,12 @@ PullObjectIngester::IngestItem::IngestItem(const IngestItem &other)
     ,m_objIngestBaseUrl(other.m_objIngestBaseUrl)
     ,m_objDistributionBaseUrl(other.m_objDistributionBaseUrl)
     ,m_deadline(other.m_deadline)
+    ,m_availabilityStartTime(other.m_availabilityStartTime)
+    ,m_availabilityEndTime(other.m_availabilityEndTime)
+    ,m_fetchFailures(other.m_fetchFailures)
     ,m_forceRecache(other.m_forceRecache)
     ,m_markAsKeepAfterSend(other.m_markAsKeepAfterSend)
     ,m_markAsCompressedSend(other.m_markAsCompressedSend)
-    ,m_fetchFailures(other.m_fetchFailures)
-    ,m_availabilityStartTime(other.m_availabilityStartTime)
-    ,m_availabilityEndTime(other.m_availabilityEndTime)
 {
 }
 
@@ -94,12 +94,12 @@ PullObjectIngester::IngestItem::IngestItem(IngestItem &&other)
     ,m_objIngestBaseUrl(std::move(other.m_objIngestBaseUrl))
     ,m_objDistributionBaseUrl(std::move(other.m_objDistributionBaseUrl))
     ,m_deadline(std::move(other.m_deadline))
+    ,m_availabilityStartTime(std::move(other.m_availabilityStartTime))
+    ,m_availabilityEndTime(std::move(other.m_availabilityEndTime))
+    ,m_fetchFailures(other.m_fetchFailures)
     ,m_forceRecache(other.m_forceRecache)
     ,m_markAsKeepAfterSend(other.m_markAsKeepAfterSend)
     ,m_markAsCompressedSend(other.m_markAsCompressedSend)
-    ,m_fetchFailures(other.m_fetchFailures)
-    ,m_availabilityStartTime(std::move(other.m_availabilityStartTime))
-    ,m_availabilityEndTime(std::move(other.m_availabilityEndTime))
 {
 }
 
