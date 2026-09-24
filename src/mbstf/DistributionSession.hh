@@ -35,12 +35,17 @@
 #include "DistributionSessionSubscription.hh"
 #include "NfServer.hh"
 
+namespace reftools::mbstf {
+    class FECConfig;
+}
+
 namespace fiveg_mag_reftools {
     class CJson;
 }
 
 namespace reftools::mbstf {
     class CreateReqData;
+    class DistSession;
     class DistSessionSubscription;
     class ObjDistributionData;
     class TunnelAddress;
@@ -71,6 +76,14 @@ public:
 
     fiveg_mag_reftools::CJson json(bool as_request = false, bool include_subscription_location = false) const;
 
+    /** The Distribution Session on its own, without the creation response wrapper.
+     *
+     * TS 29.581 V18.6.0 table 6.1.3.3.3.3-3 gives the GET 200 body as DistSession and table
+     * 6.1.3.3.3.1-3 gives the PATCH 200 body as DistSession; only the POST 201 body is
+     * CreateRspData, table 6.1.3.2.3.1-3.
+     */
+    fiveg_mag_reftools::CJson distSessionJson(bool include_subscription_location = false) const;
+
     static const std::shared_ptr<DistributionSession> &find(const std::string &id); // throws std::out_of_range if id does not exist
     const std::string &distributionSessionId() const { return m_distributionSessionId; };
     const std::shared_ptr<reftools::mbstf::CreateReqData> &distributionSessionReqData() const {return m_createReqData;};
@@ -78,6 +91,7 @@ public:
     const SysTimeMS &generated() const {return m_generated;};
     const std::string &hash() const {return m_hash;};
     void setController(std::shared_ptr<Controller> controller) {m_controller = controller;};
+    const std::shared_ptr<Controller> &controller() const {return m_controller;};
 
     virtual void processEvent(Event &event, SubscriptionService &event_service);
     static bool processEvent(Open5GSEvent &event);
@@ -93,6 +107,9 @@ public:
     in_port_t getTunnelPortNumber() const;
     uint32_t getRateLimit() const;
     std::optional<BitRate> getMbr() const;
+    /** DistSession.fecInformation (TS 29.581 clause 6.1.6.2.5, TS 29.580 V18.8.0 clause 6.2.6.2.14
+     *  FECConfig), unset when the create request did not carry it. */
+    std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> getFecInformation() const;
     const std::optional<std::string> &getObjectIngestBaseUrl() const;
     const std::string &getObjectAcquisitionMethod() const;
     void setObjectIngestBaseUrl(std::string ingestBaseUrl);
@@ -175,6 +192,8 @@ private:
     void _apiSessionDelete(Open5GSSBIStream &stream, Open5GSSBIMessage &message, Open5GSSBIRequest &request,
                            const std::optional<NfServer::InterfaceMetadata> &api,
                            const NfServer::AppMetadata &app_meta);
+    std::shared_ptr<reftools::mbstf::DistSession> _distSessionRepresentation(bool include_subscription_location) const;
+
     void _apiSessionPatch(Open5GSSBIStream &stream, Open5GSSBIMessage &message, Open5GSSBIRequest &request,
                           const std::optional<NfServer::InterfaceMetadata> &api,
                           const NfServer::AppMetadata &app_meta);

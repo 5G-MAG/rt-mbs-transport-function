@@ -1,6 +1,19 @@
+# The MBS profile branch, which both this repository and rt-mbs-client are built against, so the
+# two components share one libflute rather than each pinning a different line of it.
+#
+# It carries the FLUTE-layer obligations this repository depends on -- the TS 26.346 annex L.6
+# profiled FDT schema, the scheme-specific FEC OTI, suppression of Transfer-Length under the MBMS
+# Download Profile, the split expiry setter and the RFC 5053 Raptor scheme -- alongside the
+# receiver work the MBS Client needs. Every commit on it is already on an open pull request
+# (#61, #62, #64, #68); see that branch's own merge commit for what it contains and why.
+#
+# Repoint this at a tag once those pull requests have merged and a release carries them.
+#
+# If subprojects/rt-libflute exists as a checkout it must be on this branch, because meson's
+# subproject directory precedence means an existing checkout silently wins over this file.
 [wrap-git]
 url = https://github.com/5G-MAG/rt-libflute.git
-revision = rt-libflute-0.12.3
+revision = feature/mbs-profile
 method = cmake
 
 #diff_files = rt-libflute/IpSec-xfrm_algo.patch

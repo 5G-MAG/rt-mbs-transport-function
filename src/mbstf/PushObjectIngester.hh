@@ -13,6 +13,7 @@
  */
 
 #include <list>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -85,7 +86,8 @@ public:
         data_size_type bodySize() const { return m_totalBodySize; };
 
         bool addBodyBlock(const data_type &body_block);
-        bool setError(unsigned int status_code = 0, const std::string &reason = std::string());
+        bool setError(unsigned int status_code = 0, const std::string &reason = std::string(),
+                     const std::string &detail = std::string());
         void completed(struct MHD_Connection *connection, enum MHD_RequestTerminationCode term_code);
         virtual void waitClose() {};
         void requestHandler(struct MHD_Connection *connection);
@@ -118,6 +120,7 @@ public:
 
         unsigned int m_statusCode;
         std::string m_errorReason;
+        std::string m_errorDetail;
         bool m_noMoreBodyData;
 
         std::unique_ptr<std::recursive_mutex> m_mutex;
@@ -168,6 +171,29 @@ public:
         std::shared_ptr<Request> m_request;
     };
 
+    /** Split a shared-daemon request path into its leading discriminator and the object path.
+     *
+     * Separated from the lookup so it can be tested without a registered ingester, which needs an
+     * ObjectStore and an ObjectController to exist.
+     *
+     * \param url         the request path, as libmicrohttpd gives it, beginning with '/'.
+     * \param segment     set to the leading path segment, the ingest session's discriminator.
+     * \param object_path set to what follows it, keeping a leading '/' so a child sees the same
+     *                    path it would have seen on a port of its own.
+     * \return false when there is no leading segment to route on, in which case neither output is
+     *         meaningful.
+     */
+    static bool splitSharedPath(const char *url, std::string &segment, std::string &object_path);
+
+    /** Find the ingester a request path belongs to, and the object path within it.
+     *
+     * Static because the shared daemon's handler has no ingester of its own to be called on.
+     * \param url        the request path, beginning with '/'.
+     * \param object_path set to the path with the UUID segment removed.
+     * \return the ingester registered under the leading segment, or nullptr if none is.
+     */
+    static PushObjectIngester *routeSharedRequest(const char *url, std::string &object_path);
+
     PushObjectIngester(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller)
         :ObjectIngester(object_store, controller)
         ,m_mhdDaemon(nullptr)
@@ -203,6 +229,34 @@ protected:
 
 private:
     std::string generateUUID();
+
+    /* Shared-port mode, for 5G-MAG/rt-mbs-transport-function#27.
+     *
+     * Without mbstf.httpPushIngest configured each ingester keeps its own daemon on an ephemeral
+     * port, which is what a container cannot publish because the number is not known when it starts.
+     * With it configured, one daemon is bound to that address and port for the whole process and
+     * every ingester is reached through it, told apart by a UUID path segment its ingest prefix
+     * carries. No clause governs any of this: it is a deployment concern, and the port is the
+     * operator's to set (RULES.md rule 12).
+     */
+    static bool sharedPortConfigured();
+    /** The port from a sockaddr_storage, or 0 if it carries none. Takes void* so the header need not
+     *  pull in the socket headers. */
+    static uint16_t sockaddrPort(const void *addr);
+    /** Bind the shared daemon if it is not already bound, and register this ingester under a fresh
+     *  UUID. Returns the UUID, or an empty string if the shared daemon could not be bound. */
+    std::string joinSharedDaemon();
+    /** Remove this ingester from the shared daemon, stopping it once the last one leaves. */
+    void leaveSharedDaemon();
+
+
+    static std::recursive_mutex s_sharedMtx;         //!< guards the three members below
+    static struct MHD_Daemon *s_sharedDaemon;        //!< the one daemon, when in shared-port mode
+    static std::map<std::string, PushObjectIngester*> s_sharedIngesters; //!< UUID -> ingester
+    static struct sockaddr_storage s_sharedSockaddr; //!< what the shared daemon is bound to
+
+    std::string m_sharedPathSegment;  //!< this ingester's UUID segment, empty when not shared
+
     struct MHD_Daemon *m_mhdDaemon;
     struct sockaddr_storage m_sockaddr;
     std::list<std::shared_ptr<Request> > m_activeRequests;

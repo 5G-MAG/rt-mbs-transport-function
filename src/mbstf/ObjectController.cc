@@ -34,6 +34,21 @@ using fiveg_mag_reftools::ProblemCause;
 
 MBSTF_NAMESPACE_START
 
+void ObjectController::abortIngest()
+{
+    if (m_pushIngester) m_pushIngester->abort();
+    {
+        std::lock_guard<decltype(m_pullObjectIngestersMutex)> lock(m_pullObjectIngestersMutex);
+        for (auto &ingester : m_pullIngesters) {
+            if (ingester) ingester->abort();
+        }
+    }
+    /* The object store carries its own asynchronous event thread, for the same reason and with
+       the same deadline as the ingesters' own. */
+    if (m_objectStore) m_objectStore->stopAsyncEvents();
+    Controller::abortIngest();
+}
+
 const std::shared_ptr<PullObjectIngester> &ObjectController::addPullObjectIngester(
                                                                     const std::shared_ptr<PullObjectIngester> &pull_obj_ingester)
 {
@@ -69,7 +84,13 @@ bool ObjectController::removeAllPullObjectIngesters()
 const std::shared_ptr<PushObjectIngester> &ObjectController::pushObjectIngester(PushObjectIngester *pushIngester)
 {
     m_pushIngester.reset(pushIngester);
-    subscribeTo({ObjectIngester::IngestFailedEvent::event_name}, *m_pushIngester);
+    /* pushObjectIngester(nullptr) removes the current one -- ObjectListController and
+       ObjectManifestController's own reconfigurePushObjectIngester() both call it this way, on an
+       acquisition method change away from PUSH. Same defect as packager(nullptr) above: subscribing
+       only makes sense when there is now something to subscribe to. */
+    if (m_pushIngester) {
+        subscribeTo({ObjectIngester::IngestFailedEvent::event_name}, *m_pushIngester);
+    }
     return m_pushIngester;
 }
 
@@ -81,13 +102,16 @@ void ObjectController::processEvent(Event &event, SubscriptionService &event_ser
         ogs_info("Object [%s] sent", object_id.c_str());
 
         if (m_objectStore) {
-            const ObjectStore::Metadata &metadata = m_objectStore->getMetadata(object_id);
-
-            if(!metadata.keepAfterSend()) {
-                ogs_debug("Removing object [%s] after sending...", object_id.c_str());
-                m_objectStore->deleteObject(object_id);
+            /* Decided and acted on under the store's own lock: reading keepAfterSend() through a
+               reference and then deleting leaves room for another thread to replace or erase the
+               entry in between. An object already gone is a normal outcome of that race rather than
+               an error, so it is reported as "not deleted here" instead of throwing out of an event
+               handler that has no handler for it. */
+            if (m_objectStore->deleteUnlessKeptAfterSend(object_id)) {
+                ogs_debug("Removed object [%s] after sending", object_id.c_str());
             } else {
-                ogs_debug("Keeping object [%s] in object store after sending...", object_id.c_str());
+                ogs_debug("Keeping object [%s] in object store after sending, or it is already gone",
+                          object_id.c_str());
             }
         }
         if (objSendEvent.queueEmpty()) {
@@ -129,7 +153,14 @@ std::string ObjectController::nextObjectId()
 const std::shared_ptr<ObjectPackager> &ObjectController::packager(ObjectPackager *packager)
 {
     m_packager.reset(packager);
-    subscribeTo({ObjectPackager::ObjectSendCompleted::event_name, ObjectPackager::PackagingFailedEvent::event_name}, *m_packager.get());
+    /* packager(nullptr) unsets the current packager -- ObjectCollectionController::
+       unsetObjectListPackager() and unsetObjectPackager() both call it this way, on a manifest
+       that has no packager to give up as much as one that does. Subscribing only makes sense
+       when there is now something to subscribe to; dereferencing m_packager unconditionally here
+       crashed every one of those calls. */
+    if (m_packager) {
+        subscribeTo({ObjectPackager::ObjectSendCompleted::event_name, ObjectPackager::PackagingFailedEvent::event_name}, *m_packager.get());
+    }
     return m_packager;
 }
 

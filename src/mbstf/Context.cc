@@ -28,6 +28,7 @@
 
 #include "common.hh"
 #include "App.hh"
+#include "Controller.hh"
 #include "DistributionSession.hh"
 #include "ManifestHandlerFactory.hh"
 #include "Open5GSNetworkFunction.hh"
@@ -48,8 +49,12 @@ Context::Context()
     ,servers()
     ,cacheControl({60, 60})
     ,totalMaxBitRateSoftLimit(100)
+    ,pathMtu(kDefaultPathMtu)
     ,consecutiveIngestFailuresBeforeDeactivate(5)
+    ,notifyRetryAttempts(5)
+    ,notifyRetryDelay(5)
     ,packetModeSchedulingQueueSize(128*1024) // 128KB queue for rate smoothing
+    ,maxConcurrentPullIngesters(kDefaultMaxConcurrentPullIngesters)
     ,manifestGlobals()
 {
 }
@@ -119,6 +124,32 @@ bool Context::parseConfig()
                     } else {
                         throw std::out_of_range("Bad configuration node at mbstf.totalMaxBitRateSoftLimit");
                     }
+                } else if (mbstf_key == "pathMtu") {
+                    Open5GSYamlIter mtu_iter(mbstf_iter);
+                    if (mtu_iter.type() == YAML_SCALAR_NODE) {
+                        std::string num_val(mtu_iter.value());
+                        size_t idx = 0;
+                        pathMtu = std::stoi(num_val, &idx);
+                        if (idx != num_val.size() || pathMtu <= 0) {
+                            throw std::out_of_range("Bad configuration value at mbstf.pathMtu");
+                        }
+                    } else {
+                        throw std::out_of_range("Bad configuration node at mbstf.pathMtu");
+                    }
+                } else if (mbstf_key == "notifyRetryDelay") {
+                    std::string num_val(mbstf_iter.value());
+                    size_t idx = 0;
+                    notifyRetryDelay = std::stoi(num_val, &idx);
+                    if (idx != num_val.size()) {
+                        throw std::out_of_range("Bad configuration value at mbstf.notifyRetryDelay");
+                    }
+                } else if (mbstf_key == "notifyRetryAttempts") {
+                    std::string num_val(mbstf_iter.value());
+                    size_t idx = 0;
+                    notifyRetryAttempts = std::stoi(num_val, &idx);
+                    if (idx != num_val.size()) {
+                        throw std::out_of_range("Bad configuration value at mbstf.notifyRetryAttempts");
+                    }
                 } else if (mbstf_key == "consecutiveIngestFailuresBeforeDeactivate") {
                     Open5GSYamlIter failures_iter(mbstf_iter);
                     if (failures_iter.type() == YAML_SCALAR_NODE) {
@@ -142,6 +173,19 @@ bool Context::parseConfig()
                         }
                     } else {
                         throw std::out_of_range("Bad configuration node at mbstf.packetModeSchedulingQueueSize");
+                    }
+                } else if (mbstf_key == "maxConcurrentPullIngesters") {
+                    Open5GSYamlIter ingesters_iter(mbstf_iter);
+                    if (ingesters_iter.type() == YAML_SCALAR_NODE) {
+                        std::string num_val(ingesters_iter.value());
+                        size_t idx = 0;
+                        long value = std::stol(num_val, &idx);
+                        if (idx != num_val.size() || value < 1) {
+                            throw std::out_of_range("Bad configuration value at mbstf.maxConcurrentPullIngesters");
+                        }
+                        maxConcurrentPullIngesters = static_cast<size_t>(value);
+                    } else {
+                        throw std::out_of_range("Bad configuration node at mbstf.maxConcurrentPullIngesters");
                     }
                 } else if (mbstf_key == "manifestHandler") {
                     Open5GSYamlIter manifest_handler_iter(mbstf_iter);
@@ -172,6 +216,15 @@ void Context::addDistributionSession(const std::shared_ptr<DistributionSession> 
     updateNFLoad();
 }
 
+
+void Context::abortAllIngest()
+{
+    for (auto &entry : distributionSessions) {
+        if (!entry.second) continue;
+        const std::shared_ptr<Controller> &controller = entry.second->controller();
+        if (controller) controller->abortIngest();
+    }
+}
 
 void Context::deleteDistributionSession(const std::string &distributionSessionid)
 {

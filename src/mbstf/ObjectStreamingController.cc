@@ -62,6 +62,17 @@ ObjectStreamingController::ObjectStreamingController(DistributionSession &distri
 
 ObjectStreamingController::~ObjectStreamingController()
 {
+    /* Dropped before anything else: this object is still subscribed to the object store, and an
+       event delivered once the derived part is gone reaches ObjectManifestController::processEvent
+       through a vtable that no longer has sendToPackager(), which ends the process with "pure
+       virtual method called". ~Subscriber() unsubscribes too, but it runs after every derived
+       destructor, which is exactly too late. */
+    /* Stopped before anything else: the ingest workers this controller owns are held by its
+       ObjectController base, so destruction alone stops them last, after every derived destructor
+       has run. abort() below joins a scheduled pull that can take tens of seconds, and the workers
+       keep ingesting throughout, using objects the teardown is already dismantling. */
+    abortIngest();
+    unsubscribeFromAll();
     abort();
 }
 
@@ -71,8 +82,14 @@ void ObjectStreamingController::setObjectPackager()
     const std::optional<std::string> &tunnel_addr = distributionSession().getTunnelAddr();
     uint32_t rate_limit = distributionSession().getRateLimit();
     in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
-    unsigned short mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port, GET_MTU_ETHERNET_PAYLOAD) - GTP_HEADER_SIZE;
-    packager(new ObjectListPackager(objectStore(), *this, ssm_port, rate_limit, mtu, tunnel_addr, tunnel_port));
+    bool mtu_via_loopback = false;
+    /* Sequenced, not nested: the order arguments are evaluated in is unspecified, so reading
+       mtu_via_loopback in the same call that fills it would read it before it is set. */
+    const int discovered_mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port,
+                                                     GET_MTU_ETHERNET_PAYLOAD, &mtu_via_loopback);
+    unsigned short mtu = flute_path_mtu(discovered_mtu, mtu_via_loopback) - GTP_HEADER_SIZE;
+    packager(new ObjectListPackager(objectStore(), *this, ssm_port, rate_limit, mtu, tunnel_addr, tunnel_port,
+                                    distributionSession().getFecInformation()));
     auto pkgr = getObjectListPackager();
     subscribeToService(*pkgr);
     startWorker();
@@ -105,7 +122,14 @@ void ObjectStreamingController::sendToPackager(const std::shared_ptr<ObjectStore
 {
     auto packager = getObjectListPackager();
     if (packager) {
-        ObjectListPackager::PackageItem item(object);
+        // TS 26.517 V18.6.0 clause 6.2.3.5: "The MBSTF shall transmit each object in the object list
+        // such that the last packet of the delivered FLUTE transmission object (including any FEC
+        // recovery packets, when configured) is available at the MBSTF Client no later than its
+        // availability start time." The packaging queue is ordered by each item's deadline for that
+        // purpose, so for this operating mode the deadline is that availability start time. Passing
+        // no deadline leaves every item undated, and the ordering predicate then has nothing to
+        // order by.
+        ObjectListPackager::PackageItem item(object, object->second.availabilityStartTime());
         packager->add(item);
     }
 }

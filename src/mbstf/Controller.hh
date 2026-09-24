@@ -36,6 +36,15 @@ public:
 
     virtual void reconfigure() {};
 
+    /** Stop every ingest worker this controller runs, without destroying anything.
+     *
+     * Called before teardown begins so that no worker is running while the objects it uses are
+     * being destroyed. Destruction alone is too late: the workers belong to a base class, so they
+     * would stop only after every derived destructor had run, and one of those joins a scheduled
+     * pull that can take tens of seconds.
+     */
+    virtual void abortIngest() { stopAsyncEvents(); };
+
     virtual void establishInactiveInputs() = 0; /* Inactive state for DistSession */
     virtual void establishActiveInputs() = 0;   /* Established state for DistSession */
     virtual void activateOutput() = 0;          /* Active state for DistSession */

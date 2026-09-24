@@ -26,6 +26,7 @@
 #include <chrono>
 #include <memory>
 #include <stdexcept>
+#include <cctype>
 #include <string>
 
 // App header includes
@@ -90,6 +91,7 @@ using reftools::mbstf::StatusSubscribeReqData;
 using reftools::mbstf::StatusSubscribeRspData;
 using reftools::mbstf::TunnelAddress;
 using reftools::mbstf::UpTrafficFlowInfo;
+using reftools::mbstf::FECConfig;
 
 MBSTF_NAMESPACE_START
 
@@ -107,6 +109,9 @@ static void send_model_params_error(const ModelParamsException &err, Open5GSSBIS
                                     const std::optional<NfServer::InterfaceMetadata> &api, const std::string &no_cause_reason,
                                     const std::string &log_prefix);
 static void _validate(const std::shared_ptr<DistSession> &dist_session);
+static bool request_too_large(Open5GSSBIRequest &request, Open5GSSBIStream &stream, int path_segments,
+                              Open5GSSBIMessage &message, const NfServer::AppMetadata &app_meta,
+                              const std::optional<NfServer::InterfaceMetadata> &api);
 
 /**** public: ****/
 
@@ -143,13 +148,8 @@ DistributionSession::~DistributionSession()
     m_controller.reset(); // Detach controller
 }
 
-CJson DistributionSession::json(bool as_request, bool include_subscription_location) const
+std::shared_ptr<DistSession> DistributionSession::_distSessionRepresentation(bool include_subscription_location) const
 {
-    if (as_request) {
-        /* Return original request object as JSON */
-        return m_createReqData->toJSON(as_request);
-    }
-    /* Create new response object from DistSession */
     std::shared_ptr<DistSession> dist_session(new DistSession(*m_createReqData->getDistSession()));
     if (include_subscription_location) {
         /* We need to add the subscription location URI if an original subscription was present */
@@ -160,8 +160,26 @@ CJson DistributionSession::json(bool as_request, bool include_subscription_locat
             dist_session->setDistSessionSubscription(new_subsc);
         }
     }
+    return dist_session;
+}
+
+CJson DistributionSession::distSessionJson(bool include_subscription_location) const
+{
+    return _distSessionRepresentation(include_subscription_location)->toJSON(false);
+}
+
+CJson DistributionSession::json(bool as_request, bool include_subscription_location) const
+{
+    if (as_request) {
+        /* Return original request object as JSON */
+        return m_createReqData->toJSON(as_request);
+    }
+    /* CreateRspData wraps the Distribution Session, and that wrapper belongs to the creation
+       response alone. TS 29.581 V18.6.0 table 6.1.3.2.3.1-3 gives the POST 201 body as
+       CreateRspData, while table 6.1.3.3.3.3-3 gives the GET 200 body as DistSession and table
+       6.1.3.3.3.1-3 gives the PATCH 200 body as DistSession. Those two use distSessionJson(). */
     CreateRspData response{};
-    response.setDistSession(dist_session);
+    response.setDistSession(_distSessionRepresentation(include_subscription_location));
     return response.toJSON(as_request);
 }
 
@@ -237,6 +255,31 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                     if (resource0 == "dist-sessions") {
                         /* starts with .../dist-sessions... */
                         std::string method(message.method());
+
+                        /* TS 29.581 V18.6.0 gives this API four methods across its four resources:
+                           POST in clauses 6.1.3.2.3.1 and 6.1.3.4.3.1, PATCH in 6.1.3.3.3.1 and
+                           6.1.3.5.3.2, DELETE in 6.1.3.3.3.2 and 6.1.3.5.3.1, and GET in 6.1.3.3.3.3.
+                           PUT appears in none of them, so a PUT is not a wrong method for one of
+                           these resources, it is one no resource of the API serves.
+
+                           TS 29.500 V18.10.0 clause 5.2.7.2: “A request using an HTTP method which is not supported by any resource of a given 5GC SBI API shall be rejected with the HTTP status code "501 Not Implemented".”
+
+                           OPTIONS stays out of this test and is served below. TS 29.500 V18.10.0
+                           clause 6.9.1 allows it: “The OPTIONS method, as described in clause 9.3.7 of IETF RFC 9110 [11], may be used by a NF Service Consumer to determine the communication options supported by a NF Service Producer for a target resource.”
+
+                           Checked before the dispatch so such a method cannot reach a branch that
+                           answers 405 and names an Allow list, which would say the method is merely
+                           wrong here rather than unknown to the API. */
+                        if (method != OGS_SBI_HTTP_METHOD_POST && method != OGS_SBI_HTTP_METHOD_GET &&
+                            method != OGS_SBI_HTTP_METHOD_PATCH && method != OGS_SBI_HTTP_METHOD_DELETE &&
+                            method != OGS_SBI_HTTP_METHOD_OPTIONS) {
+                            ogs_error("Method [%s] is not supported by any resource of this API", method.c_str());
+                            ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_NOT_IMPLEMENTED, 0,
+                                                                  message, app_meta, api, "Not Implemented",
+                                                                  "Method not supported by any resource of this API"));
+                            return true;
+                        }
+
                         const char *ptr_resource1 = message.resourceComponent(1);
                         if (ptr_resource1) {
                             /* starts with .../dist-sessions/{distSessionId}... */
@@ -317,7 +360,9 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                                                 ogs_error("%s", err.str().c_str());
                                                 ogs_assert(true == NfServer::sendError(stream,
                                                                         OGS_SBI_HTTP_STATUS_MEHTOD_NOT_ALLOWED,
-                                                                        4, message, app_meta, api, std::nullopt, err.str()));
+                                                                        4, message, app_meta, api, std::nullopt, err.str(),
+                                                                        std::nullopt, std::nullopt, std::nullopt,
+                                                                        OGS_SBI_HTTP_METHOD_PATCH ", " OGS_SBI_HTTP_METHOD_DELETE ", " OGS_SBI_HTTP_METHOD_OPTIONS));
                                             }
                                         }
                                     } else {
@@ -338,7 +383,9 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                                             ogs_error("%s", err.str().c_str());
                                             ogs_assert(true == NfServer::sendError(stream,
                                                                         OGS_SBI_HTTP_STATUS_MEHTOD_NOT_ALLOWED,
-                                                                        3, message, app_meta, api, std::nullopt, err.str()));
+                                                                        3, message, app_meta, api, std::nullopt, err.str(),
+                                                                        std::nullopt, std::nullopt, std::nullopt,
+                                                                        OGS_SBI_HTTP_METHOD_POST ", " OGS_SBI_HTTP_METHOD_OPTIONS));
                                         }
                                     }
                                 } else {
@@ -371,7 +418,9 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                                         << "] is not allowed for a Distribution Session";
                                     ogs_error("%s", err.str().c_str());
                                     ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_MEHTOD_NOT_ALLOWED,
-                                                                        2, message, app_meta, api, std::nullopt, err.str()));
+                                                                        2, message, app_meta, api, std::nullopt, err.str(),
+                                                                        std::nullopt, std::nullopt, std::nullopt,
+                                                                        OGS_SBI_HTTP_METHOD_GET ", " OGS_SBI_HTTP_METHOD_PATCH ", " OGS_SBI_HTTP_METHOD_DELETE ", " OGS_SBI_HTTP_METHOD_OPTIONS));
                                 }
                             }
                         } else {
@@ -391,7 +440,9 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                                 err << "Distribution Sessions method [" << method << "] is not allowed for a Distribution Session";
                                 ogs_error("%s", err.str().c_str());
                                 ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_MEHTOD_NOT_ALLOWED,
-                                                                          2, message, app_meta, api, std::nullopt, err.str()));
+                                                                          2, message, app_meta, api, std::nullopt, err.str(),
+                                                                          std::nullopt, std::nullopt, std::nullopt,
+                                                                          OGS_SBI_HTTP_METHOD_POST ", " OGS_SBI_HTTP_METHOD_OPTIONS));
                             }
                         }
                     } else {
@@ -426,6 +477,51 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
             ogs_debug("Sending notifications for subscription %p", &subsc);
             subsc.sendNotifications();
             dist_event.releaseEventData();
+            return true;
+        }
+    case LocalEvents::NOTIFICATION_RETRY:
+        {
+            /* Pushed by a subscription's retry timer (NotificationRetryTimerFunc in
+             * DistributionSessionSubscription.cc) once mbstf.notifyRetryDelay has elapsed after a
+             * StatusNotify was answered 5xx. The timestamps that notification advanced were already
+             * restored when the answer came in, so simply sending again offers the same events.
+             * Handled here, off the timer's call stack, for the reason given for SUBSCRIPTION_EXPIRED
+             * below. */
+            std::unique_ptr<std::pair<std::string, std::string> > retry(
+                    reinterpret_cast<std::pair<std::string, std::string>*>(event.sbiData()));
+            const auto &dist_session = App::self().context()->findDistributionSession(retry->first);
+            if (dist_session) {
+                try {
+                    dist_session->getSubscription(retry->second).sendNotifications();
+                    ogs_debug("Re-offered notification events for subscription %s", retry->second.c_str());
+                } catch (std::exception &ex) {
+                    /* The subscription has gone since the timer was set, which is not an error: its
+                       events went with it. */
+                    ogs_debug("No subscription %s to re-offer notification events to: %s",
+                              retry->second.c_str(), ex.what());
+                }
+            }
+        }
+        return true;
+
+    case LocalEvents::SUBSCRIPTION_EXPIRED:
+        {
+            /* Pushed by a subscription's expiry timer (SubscriptionExpiryTimerFunc in
+             * DistributionSessionSubscription.cc): its own expiryTime has passed, so remove it.
+             * Handled here, off the timer's call stack, so the subscription and the timer that
+             * fired can both be destroyed safely as part of the removal. */
+            std::unique_ptr<std::pair<std::string, std::string> > expired(
+                    reinterpret_cast<std::pair<std::string, std::string>*>(event.sbiData()));
+            const auto &dist_session = App::self().context()->findDistributionSession(expired->first);
+            if (dist_session) {
+                try {
+                    dist_session->removeSubscription(expired->second);
+                    ogs_debug("Removed expired subscription %s from Distribution Session %s",
+                              expired->second.c_str(), expired->first.c_str());
+                } catch (std::range_error &ex) {
+                    /* already gone, e.g. deleted through the API before the timer fired */
+                }
+            }
             return true;
         }
     default:
@@ -557,6 +653,13 @@ std::optional<BitRate> DistributionSession::getMbr() const
         return BitRate(mbr.value());
     }
     return std::nullopt;
+}
+
+std::optional<std::shared_ptr<FECConfig>> DistributionSession::getFecInformation() const
+{
+    std::shared_ptr<CreateReqData> create_req_data = distributionSessionReqData();
+    std::shared_ptr<DistSession> dist_session = create_req_data->getDistSession();
+    return dist_session->getFecInformation();
 }
 
 const std::optional<std::string> &DistributionSession::getObjectIngestBaseUrl() const
@@ -981,11 +1084,19 @@ void DistributionSession::_apiSessionCreate(Open5GSSBIStream &stream, Open5GSSBI
                            const NfServer::AppMetadata &app_meta)
 {
     /* static method */
+    /* A body in a coding this NF cannot decode is refused before it is read, so the
+       encoded octets never reach the JSON parser and get blamed on the document. */
+    if (NfServer::refuseUnsupportedContentCoding(request, stream, 1, message, app_meta, api)) return;
     if (request.headerValue(OGS_SBI_CONTENT_TYPE, std::string()) != "application/json") {
-        ogs_assert(true == NfServer::sendError(stream, ProblemCause::INVALID_MSG_FORMAT, 1, message, app_meta, api,
+        /* TS 29.500 V18.10.0 table 5.2.7.1-1 marks 415 mandatory for POST. Its table 5.2.7.2-1
+           defines no named cause for 415, so the numeric status is constructed directly here,
+           the same pattern this file already uses for 405 and 501; ProblemCause::INVALID_MSG_FORMAT
+           would answer 400, which is a different condition. */
+        ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE, 1, message, app_meta, api,
                                                 "Unsupported Media Type", "Expected content type: application/json"));
         return;
     }
+    if (request_too_large(request, stream, 1, message, app_meta, api)) return;
 
     CJson distSession(CJson::Null);
     try {
@@ -1023,7 +1134,8 @@ void DistributionSession::_apiSessionCreate(Open5GSSBIStream &stream, Open5GSSBI
         std::string subsc_id;
         if (opt_subsc) {
             subsc_id = distributionSession->addSubscription(opt_subsc.value());
-            distributionSession->m_subscriptionLocation = std::format("{}/{}/subscriptions/{}", request.uri(), distributionSession->distributionSessionId(), subsc_id);
+            distributionSession->m_subscriptionLocation = NfServer::resourceUri(stream, message,
+                            {"dist-sessions", distributionSession->distributionSessionId(), "subscriptions", subsc_id});
         }
     } catch (ModelException &err) {
         send_model_error(err, stream, 1, message, app_meta, api, "Bad Request",
@@ -1073,7 +1185,8 @@ void DistributionSession::_apiSessionCreate(Open5GSSBIStream &stream, Open5GSSBI
     CJson create_rsp_data_json(distributionSession->json(false, true));
     std::string body(create_rsp_data_json.serialise());
     ogs_debug("Response Parsed JSON: %s", body.c_str());
-    std::string location = std::format("{}/{}", request.uri(), distributionSession->distributionSessionId());
+    std::string location = NfServer::resourceUri(stream, message,
+                            {"dist-sessions", distributionSession->distributionSessionId()});
     std::optional<std::string> content_type;
     if (!body.empty()) {
         content_type = "application/json";
@@ -1116,15 +1229,16 @@ void DistributionSession::_apiSessionPatch(Open5GSSBIStream &stream, Open5GSSBIM
                           const std::optional<NfServer::InterfaceMetadata> &api,
                           const NfServer::AppMetadata &app_meta)
 {
-    std::string content_type(message.contentType());
-    if (content_type != OGS_SBI_CONTENT_PATCH_TYPE) {
-        std::ostringstream err;
-        err << "Content-Type [" << message.contentType() << "] unknown for PATCH method, expecting " OGS_SBI_CONTENT_PATCH_TYPE;
-        ogs_error("%s", err.str().c_str());
-        ogs_assert(true == NfServer::sendError(stream, ProblemCause::INVALID_MSG_FORMAT, 2, message, app_meta, api,
-                                                "MBSTF Distribution Session patch bad MIME type", err.str()));
-        return;
-    }
+    /* A body in a coding this NF cannot decode is refused before it is read, so the
+       encoded octets never reach the JSON parser and get blamed on the document. */
+    if (NfServer::refuseUnsupportedContentCoding(request, stream, 2, message, app_meta, api)) return;
+    /* TS 29.500 V18.10.0 table 5.2.7.1-1 marks 415 mandatory for PATCH, and clause 5.2.7.2 has the
+       refusal carry Accept-Patch. This API's patch document is a JSON Patch, an array of PatchItem
+       signalled by application/json-patch+json, and not the JSON Merge Patch the MBSF's own APIs
+       take: the two differ, so the name of the media type comes from one place rather than being
+       described in a comment. */
+    if (NfServer::refuseUnsupportedPatchDocument(request, stream, 2, message, app_meta, api)) return;
+    if (request_too_large(request, stream, 2, message, app_meta, api)) return;
 
     /* parse body */
     CJson patch_json(CJson::newNull());
@@ -1136,11 +1250,21 @@ void DistributionSession::_apiSessionPatch(Open5GSSBIStream &stream, Open5GSSBIM
         return;
     }
 
-    /* Apply patch */
-    auto old_dist_sess = distributionSessionReqData();
+    /* Apply patch.
+
+       The JSON Pointers in the patch address this resource's own representation, which
+       TS 29.581 V18.6.0 (TS29581_Nmbstf_DistSession.yaml) gives as DistSession for both the
+       PATCH and the GET on /dist-sessions/{distSessionRef}; CreateReqData is the request body
+       of the collection POST only.  So a peer sends "/distSessionState", not
+       "/distSession/distSessionState", and the patch is applied to the DistSession that
+       CreateReqData holds rather than to CreateReqData itself.  The enclosing CreateReqData is
+       then rebuilt around the patched DistSession, since that is what this object stores. */
+    auto old_req_data = distributionSessionReqData();
     std::shared_ptr<reftools::mbstf::CreateReqData> new_dist_sess{};
     try {
-        new_dist_sess.reset(old_dist_sess->newWithJSONPatches(patch_json));
+        std::shared_ptr<DistSession> patched_sess(old_req_data->getDistSession()->newWithJSONPatches(patch_json));
+        new_dist_sess.reset(new reftools::mbstf::CreateReqData(*old_req_data));
+        new_dist_sess->setDistSession(patched_sess);
     } catch (ModelException &err) {
         send_model_error(err, stream, 2, message, app_meta, api, "Unable to apply JSON Patch",
                             "MBSTF Distribution Session patch failed to apply");
@@ -1156,14 +1280,14 @@ void DistributionSession::_apiSessionPatch(Open5GSSBIStream &stream, Open5GSSBIM
         return;
     }
 
-    CJson rsp_json = json(false);
+    CJson rsp_json = distSessionJson();
     std::string body(rsp_json.serialise());
     ogs_debug("Generated JSON: %s", body.c_str());
     std::optional<std::string> rsp_content_type;
     if (!body.empty()) {
         rsp_content_type = "application/json";
     }
-    std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(std::string(request.uri()), rsp_content_type, generated(),
+    std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(NfServer::resourceUri(stream, message, {"dist-sessions", distributionSessionId()}), rsp_content_type, generated(),
                                                                 hash().c_str(), App::self().context()->cacheControl.distMaxAge,
                                                                 std::nullopt, api, app_meta));
     ogs_assert(response);
@@ -1175,14 +1299,25 @@ void DistributionSession::_apiSessionGet(Open5GSSBIStream &stream, Open5GSSBIMes
                         const std::optional<NfServer::InterfaceMetadata> &api,
                         const NfServer::AppMetadata &app_meta)
 {
-    CJson createdRspData_json(json(false));
-    std::string body(createdRspData_json.serialise());
+    /* TS 29.500 V18.10.0 table 5.2.7.1-1 marks 406 mandatory for GET. This response is always
+       application/json, so a client whose Accept header cannot take that is answered 406 rather
+       than sent a body it did not ask for. */
+    std::optional<std::string> accept_hdr;
+    if (message.accept()) accept_hdr = message.accept();
+    if (!NfServer::acceptsMediaType(accept_hdr, "application/json")) {
+        ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_NOT_ACCEPTABLE, 1, message, app_meta, api,
+                                                "Not Acceptable", "This resource is only available as application/json"));
+        return;
+    }
+
+    CJson dist_session_json(distSessionJson());
+    std::string body(dist_session_json.serialise());
     ogs_debug("Generated JSON: %s", body.c_str());
     std::optional<std::string> content_type;
     if (!body.empty()) {
         content_type = "application/json";
     }
-    std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(std::string(request.uri()), content_type, generated(),
+    std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(NfServer::resourceUri(stream, message, {"dist-sessions", distributionSessionId()}), content_type, generated(),
                                                         hash().c_str(), App::self().context()->cacheControl.distMaxAge,
                                                         std::nullopt, api, app_meta));
     ogs_assert(response);
@@ -1194,11 +1329,19 @@ void DistributionSession::_apiSubscriptionCreate(Open5GSSBIStream &stream, Open5
                                 const std::optional<NfServer::InterfaceMetadata> &api,
                                 const NfServer::AppMetadata &app_meta)
 {
+    /* A body in a coding this NF cannot decode is refused before it is read, so the
+       encoded octets never reach the JSON parser and get blamed on the document. */
+    if (NfServer::refuseUnsupportedContentCoding(request, stream, 1, message, app_meta, api)) return;
     if (request.headerValue(OGS_SBI_CONTENT_TYPE, std::string()) != "application/json") {
-        ogs_assert(true == NfServer::sendError(stream, ProblemCause::INVALID_MSG_FORMAT, 1, message, app_meta, api,
+        /* TS 29.500 V18.10.0 table 5.2.7.1-1 marks 415 mandatory for POST. Its table 5.2.7.2-1
+           defines no named cause for 415, so the numeric status is constructed directly here,
+           the same pattern this file already uses for 405 and 501; ProblemCause::INVALID_MSG_FORMAT
+           would answer 400, which is a different condition. */
+        ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE, 1, message, app_meta, api,
                                                 "Unsupported Media Type", "Expected content type: application/json"));
         return;
     }
+    if (request_too_large(request, stream, 1, message, app_meta, api)) return;
 
     CJson dist_session_subsc_json(CJson::Null);
     std::string subsc_id;
@@ -1236,7 +1379,8 @@ void DistributionSession::_apiSubscriptionCreate(Open5GSSBIStream &stream, Open5
         rsp.setReportList(immediate_notifications);
     }
     std::string rsp_body(rsp.toJSON(false).serialise());
-    std::string location = std::format("{}/{}", request.uri(), subsc->subscriptionId());
+    std::string location = NfServer::resourceUri(stream, message,
+                            {"dist-sessions", distributionSessionId(), "subscriptions", subsc->subscriptionId()});
     std::optional<std::string> content_type;
     if (!rsp_body.empty()) content_type = "application/json";
     std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(location, content_type, std::nullopt /* last-modified */,
@@ -1266,6 +1410,18 @@ void DistributionSession::_apiSubscriptionPatch(const DistributionSessionSubscri
                                const std::optional<NfServer::InterfaceMetadata> &api,
                                const NfServer::AppMetadata &app_meta)
 {
+    /* TS 29.581 (TS29581_Nmbstf_DistSession.yaml, the
+       /dist-sessions/{distSessionRef}/subscriptions/{subscriptionId} PATCH operation) requires
+       application/json-patch+json for this resource. Both PATCH operations in that document
+       request this type, not application/merge-patch+json. */
+    /* A body in a coding this NF cannot decode is refused before it is read, so the
+       encoded octets never reach the JSON parser and get blamed on the document. */
+    if (NfServer::refuseUnsupportedContentCoding(request, stream, 4, message, app_meta, api)) return;
+    /* The refusal carries Accept-Patch, which TS 29.500 V18.10.0 clause 5.2.7.2 requires on it,
+       the same as the Distribution Session's own PATCH. */
+    if (NfServer::refuseUnsupportedPatchDocument(request, stream, 4, message, app_meta, api)) return;
+    if (request_too_large(request, stream, 4, message, app_meta, api)) return;
+
     CJson req_json(CJson::Null);
     try {
         req_json = CJson::parse(request.content());
@@ -1307,6 +1463,22 @@ static std::shared_ptr<ObjDistributionData> get_object_distribution_data(const D
         return nullptr;
     }
 
+}
+
+static bool request_too_large(Open5GSSBIRequest &request, Open5GSSBIStream &stream, int path_segments,
+                              Open5GSSBIMessage &message, const NfServer::AppMetadata &app_meta,
+                              const std::optional<NfServer::InterfaceMetadata> &api)
+{
+    const auto &max_size = App::self().context()->maxRequestBodySize;
+    if (!max_size || request.contentLength() <= *max_size) return false;
+
+    std::ostringstream err;
+    err << "Request body of " << request.contentLength() << " bytes exceeds the configured maximum of "
+        << *max_size << " bytes";
+    ogs_error("%s", err.str().c_str());
+    ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_PAYLOAD_TOO_LARGE, path_segments, message,
+                                            app_meta, api, "Payload Too Large", err.str()));
+    return true;
 }
 
 static void send_model_error(const ModelException &err, Open5GSSBIStream &stream, int path_segments, Open5GSSBIMessage &message,
@@ -1383,6 +1555,31 @@ static void _validate(const std::shared_ptr<DistSession> &dist_session)
                              ProblemCause::MANDATORY_IE_MISSING);
     }
 
+    /* TS 29.581 V18.6.0 clause 6.1.6.2.4, type DistSession, attribute dscpMarking: “It shall be encoded as two octet string in hexadecimal representation.” and “The first octet shall contain the DSCP value in the IPv4 Type-of-Service or the IPv6 Traffic-Class field and the second octet shall contain the ToS/Traffic Class mask field, which shall be set to "0xFC".”
+
+       The generated model carries the attribute as a free string, so nothing below this point
+       would notice a value of the wrong length, a value that is not hexadecimal, or a mask other
+       than the one the clause fixes. Such a value would be carried into the marking applied to
+       outgoing traffic, where a wrong mask changes which bits of the Traffic Class field are
+       overwritten. */
+    const auto &dscp_marking = dist_session->getDscpMarking();
+    if (dscp_marking) {
+        const std::string &dscp_value = dscp_marking.value();
+        bool well_formed = (dscp_value.size() == 4);
+        if (well_formed) {
+            for (char ch : dscp_value) if (!std::isxdigit(static_cast<unsigned char>(ch))) well_formed = false;
+        }
+        if (!well_formed) {
+            throw ModelException("dscpMarking must be two octets in hexadecimal representation, i.e. four hexadecimal digits",
+                                 "DistributionSession", "distSession.dscpMarking", ProblemCause::MANDATORY_IE_INCORRECT);
+        }
+        const std::string mask(dscp_value.substr(2));
+        if (!(mask == "FC" || mask == "fc" || mask == "Fc" || mask == "fC")) {
+            throw ModelException("dscpMarking mask octet must be FC", "DistributionSession", "distSession.dscpMarking",
+                                 ProblemCause::MANDATORY_IE_INCORRECT);
+        }
+    }
+
     const auto &obj_distr_data = dist_session->getObjDistributionData();
     const auto &pkt_distr_data = dist_session->getPktDistributionData();
     if ((!obj_distr_data && !pkt_distr_data) || (obj_distr_data && pkt_distr_data)) {
@@ -1437,6 +1634,7 @@ static void _validate(const std::shared_ptr<DistSession> &dist_session)
         }
     }
 }
+
 
 MBSTF_NAMESPACE_STOP
 

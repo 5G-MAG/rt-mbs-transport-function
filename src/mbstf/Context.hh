@@ -57,6 +57,14 @@ public:
 */
     void addDistributionSession(const std::shared_ptr<DistributionSession> &DistributionSession);
     void deleteDistributionSession(const std::string &distributionSessionid);
+
+    /** Stop every ingest worker in every Distribution Session, destroying nothing.
+     *
+     * Establishes, before teardown starts, that no ingest worker is running. Leaving them to
+     * stop as their owners are destroyed is too late: they keep fetching and writing into
+     * objects the teardown is already dismantling.
+     */
+    void abortAllIngest();
     const std::shared_ptr<DistributionSession> &findDistributionSession(const std::string &distributionSessionid);
 
     enum ServerType {
@@ -73,8 +81,78 @@ public:
         unsigned int defaultObjectMaxAge; // Use if not given by push/pull resource Cache-Control.
     } cacheControl;
     int totalMaxBitRateSoftLimit; //< total maximum bit rate this MBSTF ought to asked to handle
+    /**< MTU, in bytes, of the path a distribution session's packets travel to the receiver.
+     *
+     * FLUTE encoding symbols are sized from this, so a value larger than the path can carry puts
+     * every multi-symbol object into datagrams that do not arrive. RFC 5651 section 6.1: "However,
+     * network efficiency considerations recommend that the sender uses an as large as possible
+     * packet payload size, but in such a way that packets do not exceed the network's maximum
+     * transmission unit size (MTU), or when fragmentation coupled with packet loss might introduce
+     * severe inefficiency in the transmission."
+     *
+     * getsockopt(IP_MTU) on a socket to the session's tunnel address, or to its SSM destination
+     * when there is no tunnel, measures the first hop only. Where the MBSTF and the ingress point
+     * are co-located, which is every single-host deployment, that hop is the loopback interface
+     * and the answer is the loopback MTU, 65536 on Linux; and where a tunnel is configured the
+     * datagram is re-encapsulated and forwarded over a path the MBSTF cannot measure at all. The
+     * measurement is therefore a ceiling on the first hop, never a description of the whole path.
+     *
+     * kDefaultPathMtu is the default and the operator overrides it with mbstf.pathMtu. The
+     * discovered value is used in place of it only when it is smaller, since a first hop narrower
+     * than the stated path MTU is a real constraint while a wider one says nothing about the rest
+     * of the path.
+     */
+    int pathMtu;
+
+    /**< The path MTU assumed when the operator does not state one, in bytes.
+     *
+     * The conventional Ethernet MTU. No clause fixes it: it is a documented default, and a
+     * deployment whose path differs sets mbstf.pathMtu. Sizing symbols below the path MTU costs
+     * efficiency; sizing them above it costs delivery, so the default is the safe side of that.
+     */
+    static constexpr int kDefaultPathMtu = 1500;
+
     int consecutiveIngestFailuresBeforeDeactivate; //< The number of consecutive ingest failures allowed before the session aborts
+    /** How many times a StatusNotify answered 5xx may be re-offered before its events are dropped.
+     *
+     * RFC 9110 section 15 makes a 5xx a server-side failure of an apparently valid request, so the
+     * same notification may succeed later; a 4xx is never re-offered. No clause bounds the number of
+     * attempts, so this is an explicit default the operator can override (RULES.md rule 12), set to
+     * the same budget as consecutiveIngestFailuresBeforeDeactivate above for consistency within this
+     * component rather than from any measurement. Zero disables re-offering.
+     */
+    int notifyRetryAttempts;
+    /** How long to wait, in seconds, before re-offering a StatusNotify that was answered 5xx.
+     *
+     * A 5xx may clear, so the wait is what stops an overloaded consumer being hit again immediately.
+     * No clause gives a figure, so this is an explicit default the operator can override (rule 12).
+     * Five seconds is short enough that a retried notification is still timely and long enough that
+     * a consumer restarting is not struck mid-restart; raise it where a consumer is known to recover
+     * more slowly. Zero re-offers on the next notification instead of on a timer.
+     */
+    int notifyRetryDelay;
     size_t packetModeSchedulingQueueSize; //< The maximum queue size for packet mode scheduling per DistSession
+    /** How many PullObjectIngester instances one Distribution Session may run at once.
+     *
+     * The scheduled pull used to keep one ingester per item in the content provider's manifest, so
+     * the thread count was whatever that manifest happened to contain: a 157 object carousel ran
+     * 157 ingesters, and each carries an ingest worker and an asynchronous event thread. Nothing
+     * an operator sets bounded it.
+     *
+     * No clause governs this, so it is an explicit default the operator can override (RULES.md
+     * rule 12). What the ceiling is for is stopping a manifest from dictating the thread count
+     * without limit, not tuning parallelism, so the default is set high enough that manifests of
+     * realistic size keep the behaviour they had, one ingester per item, and only a manifest far
+     * larger than any this has been run against is capped. Lower it where a deployment needs a
+     * tighter thread budget and can accept fetches being serialised.
+     *
+     * Items are queued per ingester and sorted by deadline, so a ceiling below the item count
+     * serialises fetches within an ingester rather than dropping any item. Measured on a 157
+     * object carousel: at a ceiling of 32 the process ran 73 threads against 323 uncapped, and
+     * distinct objects completed more slowly, which is why the default is not that low.
+     */
+    size_t maxConcurrentPullIngesters;
+    static constexpr size_t kDefaultMaxConcurrentPullIngesters = 256;
     struct {
         /** The maximum time allowed before the manifest will be transmitted again
          *
@@ -82,6 +160,10 @@ public:
          */
         std::optional<std::chrono::milliseconds> manifestRepetitionRate = std::nullopt;
     } manifestGlobals; //< ManifestHandler global configuration (can be overridden by ManifestHandler implement specific config)
+    // TS 29.500 V18.10.0 cl.5.2.7.2/table 5.2.7.1-1: 413 (Payload Too Large) is mandatory for
+    // PATCH and POST. No clause, and no MBSTF documented default, names a byte limit
+    // -- unset means no limit is enforced, as before this option existed.
+    std::optional<size_t> maxRequestBodySize;
 
     /** Parse a configuration time duration string
      *

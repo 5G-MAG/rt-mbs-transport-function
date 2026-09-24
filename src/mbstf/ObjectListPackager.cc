@@ -22,6 +22,8 @@
 #include <netinet/in.h>
 
 #include "ogs-app.h" // ogs_error(), ogs_info()
+
+#include "FecOtiHelper.hh"
 #include "ogs-sbi.h"
 #include "Transmitter.h" // LibFlute
 
@@ -113,8 +115,9 @@ ObjectListPackager::ObjectListPackager(const std::shared_ptr<ObjectStore> &objec
 
 ObjectListPackager::ObjectListPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
                                        const SsmPort &ssm_port, uint32_t rateLimit, unsigned short mtu,
-                                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
-    :ObjectPackager(object_store, controller, ssm_port, rateLimit, mtu, tunnel_address, tunnel_port)
+                                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port,
+                                       const std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> &fec_information)
+    :ObjectPackager(object_store, controller, ssm_port, rateLimit, mtu, tunnel_address, tunnel_port, fec_information)
     ,m_packageItemsMutex (new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems()
     ,m_tunnelEndpoint()
@@ -199,6 +202,31 @@ void ObjectListPackager::doObjectPackage() {
         std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
 
         if (!m_transmitter) {
+            /* The Distribution Session's own requested AL-FEC configuration, converted to the
+               Transmitter-level FEC OTI. Without this the session is sent unprotected however it
+               was provisioned. fecOtiFromFecConfig() rejects a scheme the MBMS Download Profile
+               does not admit, which is a packaging failure for this session rather than a reason
+               to send it without the protection it asked for. */
+            std::optional<LibFlute::FecOti> content_fec_oti;
+            uint32_t fec_redundancy_level = LibFlute::kDefaultFecRedundancyLevel;
+            try {
+                std::tie(content_fec_oti, fec_redundancy_level) = fecOtiFromFecConfig(fecInformation());
+            } catch (const std::runtime_error &err) {
+                ogs_error("Cannot apply the Distribution Session's FEC configuration, not transmitting: %s",
+                          err.what());
+                /* Nothing about this failure will resolve itself on a later pass -- the session's own
+                   FEC configuration is what was rejected, so this same exception fires again on the
+                   worker's very next iteration with no Transmitter ever coming into existence. Report
+                   it as the packaging failure it is, synchronously so ObjectController's own handler
+                   (which marks the Distribution Session INACTIVE for any PackagingFailedEvent) has
+                   done so before the worker stops, then abort() rather than leave the worker spinning
+                   this catch block forever. */
+                ObjectPackager::PackagingFailedEvent packaging_failed(
+                        err.what(), ObjectPackager::PackagingFailedEvent::FEC_CONFIGURATION_REJECTED);
+                sendEventSynchronous(packaging_failed);
+                abort();
+                return;
+            }
             m_transmitter.reset(new LibFlute::Transmitter(
                     ssm_port.destinationAddress(),
                     static_cast<short>(ssm_port.port()),
@@ -209,7 +237,10 @@ void ObjectListPackager::doObjectPackage() {
                     m_tunnelEndpoint,
                     LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005,
                     true,
-                    ssm_port.sourceAddress()));
+                    ssm_port.sourceAddress(),
+                    content_fec_oti,
+                    LibFlute::Profile::Ts26517,
+                    fec_redundancy_level));
             m_transmitter->register_completion_callback(
                     [this](uint32_t toi) {
                         ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", m_transmitter->number_of_files(), m_packageItems.size());
@@ -228,11 +259,12 @@ void ObjectListPackager::doObjectPackage() {
                             ogs_error("Unscheduled completion of Object with TOI: %d", toi);
                         }
                         if (m_deactivating && queue_empty) {
+                            /* The Transmitter was already told to defer-deactivate, in
+                               doObjectPackage() above, once m_packageItems went empty; it has
+                               done so itself by the time this fires for the last file, so only
+                               this packager's own bookkeeping (worker thread, m_deactivating)
+                               remains to close out here. */
                             ogs_debug("Deactivating FLUTE stream on last file");
-                            {
-                                std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-                                m_transmitter->deactivate();
-                            }
                             abort();
                             m_deactivating = false;
                         }
@@ -243,6 +275,7 @@ void ObjectListPackager::doObjectPackage() {
     }
 
     PackageItem item;
+    bool items_empty = false;
 
     {
         std::lock_guard<std::recursive_mutex> lock(*m_packageItemsMutex);
@@ -251,6 +284,21 @@ void ObjectListPackager::doObjectPackage() {
             item = m_packageItems.front();
             m_packageItems.pop_front();
         }
+        items_empty = m_packageItems.empty();
+    }
+
+    if (m_deactivating && items_empty) {
+        /* Once m_packageItems is empty and m_deactivating is set, add() above refuses every new
+           item (see add(), which checks m_deactivating first), so nothing else will ever reach
+           the Transmitter for this session. That makes it safe to hand the rest of the wait to
+           the Transmitter itself: it already knows exactly what it still has queued and when the
+           last of it goes out, which is what finish_file_transmissions exists for -- "This allows
+           applications to request deactivation without waiting for completion callbacks and
+           checking number_of_files()" (Transmitter.h). Calling this again on every loop iteration
+           until the completion callback below clears m_deactivating is harmless: deactivate() is a
+           no-op once the Transmitter is already inactive. */
+        std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+        if (m_transmitter) m_transmitter->deactivate(true);
     }
 
     if (item) {
@@ -289,21 +337,29 @@ void ObjectListPackager::doObjectPackage() {
                 }
             }
 
-            if (metadata.compressedSend()) {
+            if (m_transmitter->can_compress_objects() && metadata.compressedSend()) {
                 file_desc->set_compression(LibFlute::Transmitter::FileDescription::CompressionAlgorithm::COMPRESSION_GZIP);
             } else {
                 file_desc->set_compression(LibFlute::Transmitter::FileDescription::CompressionAlgorithm::COMPRESSION_NONE);
             }
 
             m_queued = true;
-            LibFlute::Transmitter::FileDescription::date_time_type expires_at;
-            const auto &cache_expires = metadata.cacheExpires();
-            if (cache_expires) {
-                expires_at = cache_expires.value();
-            } else {
-                expires_at = LibFlute::Transmitter::FileDescription::date_time_type::clock::now() + 60s;
-            }
+
+            // File@Expires is bounded by the object's availability start time; see fileExpiryTime()
+            // for the clause. The 60s fallback is the pre-existing behaviour for an object whose
+            // ingest response carried no expiry, and rests on no clause.
+            const auto expires_at = fileExpiryTime(metadata.cacheExpires(), metadata.availabilityStartTime(),
+                                                   time_type::clock::now() + 60s);
             file_desc->set_expiry_time(expires_at);
+
+            // TS 26.517 V18.6.0 clause 6.2.3.5: "-The Cache-Control@Expires attribute shall be used to
+            // indicate the availability end time of the object." Left unset when the object has no
+            // availability end time, which emits no Cache-Control element at all; the profiled schema
+            // makes the element minOccurs="0", so its absence is valid and says nothing false.
+            const auto &availability_end = metadata.availabilityEndTime();
+            if (availability_end) {
+                file_desc->set_cache_expiry_time(*availability_end);
+            }
 
             file_desc->set_content_type(metadata.mediaType());
 

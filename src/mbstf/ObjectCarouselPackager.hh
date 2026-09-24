@@ -90,7 +90,8 @@ public:
                            unsigned short mtu, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
     ObjectCarouselPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller, const SsmPort &ssm_port,
                            uint32_t rateLimit, unsigned short mtu,
-                           const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
+                           const std::optional<std::string> &tunnel_address, in_port_t tunnel_port,
+                           const std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> &fec_information = std::nullopt);
     virtual ~ObjectCarouselPackager();
 
     bool add(const PackageItem &item);

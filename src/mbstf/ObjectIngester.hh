@@ -73,6 +73,10 @@ public:
         if (m_workerThread.get_id() != std::this_thread::get_id() && m_workerThread.joinable()) {
             m_workerThread.join();
         }
+        /* The ingest worker emits its events asynchronously, so this service has a thread of its
+           own that outlives the worker. It allocates from the open5gs memory pools and has to
+           stop before a teardown takes them away. */
+        stopAsyncEvents();
     }
 
     virtual ~ObjectIngester() {

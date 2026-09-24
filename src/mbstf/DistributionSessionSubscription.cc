@@ -18,6 +18,8 @@
  */
 
 #include <chrono>
+#include <limits>
+#include <utility>
 #include <list>
 #include <memory>
 #include <string>
@@ -30,6 +32,10 @@
 #include "App.hh"
 #include "DistributionSession.hh"
 #include "DistributionSessionNotificationEvent.hh"
+#include "LocalEvents.hh"
+#include "Open5GSNetworkFunction.hh"
+#include "Open5GSTimer.hh"
+#include "TimerFunc.hh"
 #include "openapi/model/DistSessionSubscription.h"
 #include "openapi/model/DistSessionEventReport.h"
 #include "openapi/model/DistSessionEventReportList.h"
@@ -48,6 +54,83 @@ using fiveg_mag_reftools::ModelException;
 
 MBSTF_NAMESPACE_START
 
+namespace {
+
+/* Fires once a DistributionSessionSubscription's expiryTime passes. Carries only plain string ids,
+ * not a pointer or reference to the DistributionSession or the subscription, so it depends on
+ * neither object's lifetime.
+ *
+ * trigger() does not call DistributionSession::removeSubscription() directly: this callback runs
+ * from the timer owned by the very DistributionSessionSubscription that would be erased, so
+ * removing it here would destroy this TimerFunc, and the Open5GSTimer executing it, while trigger()
+ * is still on the stack. It pushes a LocalEvents::SUBSCRIPTION_EXPIRED event instead and lets
+ * DistributionSession::processEvent() perform the removal off this call stack, the same deferred
+ * dispatch LocalEvents::SEND_NOTIFICATION and RELEASE_SUBSCRIPTION_SVC already use. */
+/* Pushes LocalEvents::NOTIFICATION_RETRY when the wait after a 5xx has elapsed, so the events that
+ * notification carried are offered again.
+ *
+ * Holds the two identifiers by value for the same reason SubscriptionExpiryTimerFunc below does:
+ * neither object's lifetime is depended on. It pushes an event rather than calling
+ * sendNotifications() directly, so the send happens off this timer's call stack and the timer is not
+ * executing while the subscription that owns it is used. */
+class NotificationRetryTimerFunc : public TimerFunc {
+public:
+    NotificationRetryTimerFunc(const std::string &dist_session_id, const std::string &subscription_id)
+        :TimerFunc(), distSessionId(dist_session_id), subscriptionId(subscription_id) {};
+    NotificationRetryTimerFunc(NotificationRetryTimerFunc &&) = delete;
+    NotificationRetryTimerFunc(const NotificationRetryTimerFunc &) = delete;
+    NotificationRetryTimerFunc &operator=(NotificationRetryTimerFunc &&) = delete;
+    NotificationRetryTimerFunc &operator=(const NotificationRetryTimerFunc &) = delete;
+    virtual ~NotificationRetryTimerFunc() {};
+
+    virtual void trigger()
+    {
+        ogs_debug("Subscription %s notification retry timer fired", subscriptionId.c_str());
+        std::shared_ptr<Open5GSEvent> event(new Open5GSEvent(new ogs_event_t));
+        event->ogsEvent()->id = LocalEvents::NOTIFICATION_RETRY;
+        event->setSbiData(new std::pair<std::string, std::string>(distSessionId, subscriptionId));
+        try {
+            App::self().ogsApp()->pushEvent(event);
+        } catch (std::exception &ex) {
+            ogs_error("Failed to push NOTIFICATION_RETRY event for subscription %s: %s",
+                      subscriptionId.c_str(), ex.what());
+        }
+    }
+
+    std::string distSessionId;
+    std::string subscriptionId;
+};
+
+class SubscriptionExpiryTimerFunc : public TimerFunc {
+public:
+    SubscriptionExpiryTimerFunc(const std::string &dist_session_id, const std::string &subscription_id)
+        :TimerFunc(), distSessionId(dist_session_id), subscriptionId(subscription_id) {};
+    SubscriptionExpiryTimerFunc(SubscriptionExpiryTimerFunc &&) = delete;
+    SubscriptionExpiryTimerFunc(const SubscriptionExpiryTimerFunc &) = delete;
+    SubscriptionExpiryTimerFunc &operator=(SubscriptionExpiryTimerFunc &&) = delete;
+    SubscriptionExpiryTimerFunc &operator=(const SubscriptionExpiryTimerFunc &) = delete;
+    virtual ~SubscriptionExpiryTimerFunc() {};
+
+    virtual void trigger()
+    {
+        ogs_debug("Subscription %s expiry timer fired", subscriptionId.c_str());
+        std::shared_ptr<Open5GSEvent> event(new Open5GSEvent(new ogs_event_t));
+        event->ogsEvent()->id = LocalEvents::SUBSCRIPTION_EXPIRED;
+        event->setSbiData(new std::pair<std::string, std::string>(distSessionId, subscriptionId));
+        try {
+            App::self().ogsApp()->pushEvent(event);
+        } catch (std::exception &ex) {
+            ogs_error("Failed to push SUBSCRIPTION_EXPIRED event for subscription %s: %s",
+                      subscriptionId.c_str(), ex.what());
+        }
+    }
+
+    std::string distSessionId;
+    std::string subscriptionId;
+};
+
+}
+
 static int __notify_client_cb(int status, ogs_sbi_response_t *response, void *data);
 
 namespace {
@@ -55,6 +138,14 @@ namespace {
         ~RequestData() {};
         const DistributionSessionSubscription *subscription;
         std::shared_ptr<Open5GSSBIRequest> request;
+        /* True when this request is itself the result of following a redirect. One hop is followed and
+           no more: the clause asks that the request be reissued to the new URI, and licenses nothing
+           about chasing a chain of them, so a second redirect is logged and dropped rather than
+           bounded by a hop count this project would have to invent (RULES.md rule 12). */
+        bool redirected = false;
+        /* What lastReportedEventTimes held before makeReportList() advanced it, so a 5xx can put the
+           events back rather than let a rejected notification take them with it. */
+        DistributionSessionEvents reportedBefore;
     };
 }
 
@@ -71,6 +162,7 @@ DistributionSessionSubscription::DistributionSessionSubscription(const std::weak
     _setSubscriptionId();
     _setEventFlags();
     _setExpiryTime();
+    _scheduleExpiryTimer();
 }
 
 DistributionSessionSubscription::DistributionSessionSubscription(const std::weak_ptr<DistributionSession> &dist_session,
@@ -85,6 +177,7 @@ DistributionSessionSubscription::DistributionSessionSubscription(const std::weak
     _setSubscriptionId();
     _setEventFlags();
     _setExpiryTime();
+    _scheduleExpiryTimer();
 }
 
 DistributionSessionSubscription::DistributionSessionSubscription(DistributionSessionSubscription &&other)
@@ -92,6 +185,8 @@ DistributionSessionSubscription::DistributionSessionSubscription(DistributionSes
     ,m_subscriptionId(std::move(other.m_subscriptionId))
     ,m_eventTypes(std::move(other.m_eventTypes))
     ,m_distSessionSubscription(std::move(other.m_distSessionSubscription))
+    ,m_expiryTimer(std::move(other.m_expiryTimer))
+    ,m_expiryTimerFunc(std::move(other.m_expiryTimerFunc))
     ,m_expiryTime(std::move(other.m_expiryTime))
     ,m_cache(other.m_cache)
 {
@@ -106,10 +201,14 @@ DistributionSessionSubscription::DistributionSessionSubscription(const Distribut
     ,m_expiryTime(other.m_expiryTime)
     ,m_cache(new DistributionSessionSubscription::CacheType(*other.m_cache))
 {
+    /* A timer's callback is keyed to one subscription object, so the copy gets its own rather
+       than sharing other's. */
+    _scheduleExpiryTimer();
 }
 
 DistributionSessionSubscription::~DistributionSessionSubscription()
 {
+    _cancelExpiryTimer();
     if (m_cache) {
         delete m_cache;
         m_cache = nullptr;
@@ -119,11 +218,14 @@ DistributionSessionSubscription::~DistributionSessionSubscription()
 /* operators */
 DistributionSessionSubscription &DistributionSessionSubscription::operator=(DistributionSessionSubscription &&other)
 {
+    _cancelExpiryTimer();
     m_distributionSession = std::move(other.m_distributionSession);
     m_subscriptionId = std::move(other.m_subscriptionId);
     m_eventTypes = std::move(other.m_eventTypes);
     m_distSessionSubscription = std::move(other.m_distSessionSubscription);
     m_expiryTime = std::move(other.m_expiryTime);
+    m_expiryTimer = std::move(other.m_expiryTimer);
+    m_expiryTimerFunc = std::move(other.m_expiryTimerFunc);
     if (m_cache) delete m_cache;
     m_cache = other.m_cache;
     other.m_cache = nullptr;
@@ -132,12 +234,15 @@ DistributionSessionSubscription &DistributionSessionSubscription::operator=(Dist
 
 DistributionSessionSubscription &DistributionSessionSubscription::operator=(const DistributionSessionSubscription &other)
 {
+    _cancelExpiryTimer();
     m_distributionSession = other.m_distributionSession;
     m_subscriptionId = other.m_subscriptionId;
     m_eventTypes = other.m_eventTypes;
     m_distSessionSubscription = other.m_distSessionSubscription;
     m_expiryTime = other.m_expiryTime;
     *m_cache = *other.m_cache;
+    /* see the copy constructor: an independent timer, not a shared one */
+    _scheduleExpiryTimer();
     return *this;
 }
 
@@ -184,6 +289,7 @@ DistributionSessionSubscription &DistributionSessionSubscription::update(CJson &
     }
     _setEventFlags();
     _setExpiryTime();
+    _scheduleExpiryTimer();
     return *this;
 }
 
@@ -227,6 +333,23 @@ std::shared_ptr<DistSessionEventReportList> DistributionSessionSubscription::mak
     return result;
 }
 
+void DistributionSessionSubscription::startRetryTimer(int delay_seconds)
+{
+    std::shared_ptr<DistributionSession> dist_session(m_distributionSession.lock());
+    if (!dist_session) return;  /* nothing to notify for */
+
+    /* Replaced rather than reused, because a TimerFunc is keyed to one subscription and one pending
+       retry; the previous one has fired by the time a further 5xx can arrive. */
+    m_retryTimerFunc.reset(new NotificationRetryTimerFunc(dist_session->distributionSessionId(), m_subscriptionId));
+    m_retryTimer = App::self().ogsApp()->addTimer(*m_retryTimerFunc);
+    if (m_retryTimer) {
+        m_retryTimer->start(static_cast<int>(delay_seconds) * 1000);
+    } else {
+        ogs_error("Could not schedule a notification retry for subscription %s; its events will be "
+                  "offered on the next notification instead", m_subscriptionId.c_str());
+    }
+}
+
 void DistributionSessionSubscription::pushNotificationsEvent() const
 {
     std::shared_ptr<Open5GSEvent> event(new DistributionSessionNotificationEvent(*this));
@@ -241,6 +364,8 @@ void DistributionSessionSubscription::sendNotifications() const
     const auto &notify_uri = m_distSessionSubscription.getNotifyUri();
     if (notify_uri) {
         //ogs_debug("DistributionSessionSubscription[%p]: notify URL = %s", this, notify_uri.value().c_str());
+        /* Taken before makeReportList(), which advances lastReportedEventTimes as it builds. */
+        const auto reported_before = m_cache->lastReportedEventTimes;
         auto report_list = makeReportList();
         const auto &reports = report_list->getEventReportList();
         if (!reports.empty()) {
@@ -259,7 +384,7 @@ void DistributionSessionSubscription::sendNotifications() const
             static const std::string api_version(std::format("{}/{}", StatusNotifyReqData::apiName, StatusNotifyReqData::apiVersion));
             std::shared_ptr<Open5GSSBIRequest> request(new Open5GSSBIRequest(post_method, notify_uri.value(), api_version,
                                                 body, OGS_SBI_CONTENT_JSON_TYPE));
-            RequestData *data = new RequestData{this, request};
+            RequestData *data = new RequestData{this, request, false, reported_before};
             m_cache->client->sendRequest(__notify_client_cb, request, data);
         }
     }
@@ -274,7 +399,83 @@ bool DistributionSessionSubscription::processClientResponse(const Open5GSEvent &
         if (req_data && req_data->subscription == this) {
             if (event.sbiState() == OGS_OK) {
                 auto resp = event.sbiResponse(true);
-                ogs_debug("Got %i response from notification(s) to %s", resp.status(), req_data->request->uri());
+                const int status = resp.status();
+                ogs_debug("Got %i response from notification(s) to %s", status, req_data->request->uri());
+
+                if (status == OGS_SBI_HTTP_STATUS_TEMPORARY_REDIRECT ||
+                    status == OGS_SBI_HTTP_STATUS_PERMANENT_REDIRECT) {
+                    /* Both say the notification is to be reissued elsewhere; they differ in whether the
+                       move is permanent, and so in whether the stored notification URI changes.
+
+                       RFC 9110 section 15.4: “Redirects that indicate this resource might be available at a different URI, as provided by the Location header field, as in the status codes 301 (Moved Permanently), 302 (Found), 307 (Temporary Redirect), and 308 (Permanent Redirect).”
+
+                       RFC 7538 section 3: “The 308 (Permanent Redirect) status code indicates that the target resource has been assigned a new permanent URI and any future references to this resource ought to use one of the enclosed URIs.”
+                       The next sentence is why the stored URI is rewritten rather than the hop merely followed.
+                       RFC 7538 section 3: “Clients with link editing capabilities ought to automatically re-link references to the effective request URI (Section 5.5 of [RFC7230]) to one or more of the new references sent by the server, where possible.”
+                       A 307 is therefore followed without touching what is stored. */
+                    const std::string location(resp.headerValue("Location", std::string()));
+                    if (location.empty()) {
+                        ogs_warn("Notification to %s answered %i with no Location header; dropped",
+                                 req_data->request->uri(), status);
+                    } else if (req_data->redirected) {
+                        ogs_warn("Notification redirected more than once, to %s; dropped",
+                                 location.c_str());
+                    } else {
+                        if (status == OGS_SBI_HTTP_STATUS_PERMANENT_REDIRECT) {
+                            ogs_info("Notification URI permanently moved to %s", location.c_str());
+                            m_distSessionSubscription.setNotifyUri(location);
+                            m_cache->client.reset(new Open5GSSBIClient(location));
+                        }
+                        static const std::string post_method(OGS_SBI_HTTP_METHOD_POST);
+                        static const std::string api_version(std::format("{}/{}", StatusNotifyReqData::apiName,
+                                                                          StatusNotifyReqData::apiVersion));
+                        std::string body(req_data->request->content() ? req_data->request->content() : "");
+                        std::shared_ptr<Open5GSSBIRequest> retry(new Open5GSSBIRequest(post_method, location,
+                                                            api_version, body, OGS_SBI_CONTENT_JSON_TYPE));
+                        RequestData *retry_data = new RequestData{this, retry, true};
+                        Open5GSSBIClient *client = nullptr;
+                        if (status == OGS_SBI_HTTP_STATUS_PERMANENT_REDIRECT) {
+                            client = m_cache->client.get();
+                        } else {
+                            m_cache->redirectClient.reset(new Open5GSSBIClient(location));
+                            client = m_cache->redirectClient.get();
+                        }
+                        if (client) client->sendRequest(__notify_client_cb, retry, retry_data);
+                    }
+                } else if (status >= 400 && status <= 499) {
+                    /* RFC 9110 section 15: “4xx (Client Error): The request contains bad syntax or cannot be fulfilled”
+                       Repeating it unchanged would fail the same way, so it is not repeated. */
+                    ogs_warn("Notification to %s rejected %i; not repeated", req_data->request->uri(), status);
+                } else if (status >= 500 && status <= 599) {
+                    /* RFC 9110 section 15: “5xx (Server Error): The server failed to fulfill an apparently valid request”
+                       The same notification may therefore succeed later, so its events are put back
+                       rather than lost. makeReportList() marks each event reported while building the
+                       list, which happens before the POST, so restoring the timestamps it advanced
+                       leaves those events newer than what is recorded as reported and the next
+                       notification offers them again.
+
+                       Bounded by mbstf.notifyRetryAttempts so a consumer that keeps failing does not
+                       hold its events for ever. No timer is involved: they are re-offered on the next
+                       notification this subscription sends, not on a schedule of their own. */
+                    const int budget = App::self().context()->notifyRetryAttempts;
+                    if (m_cache->notifyAttempts < budget) {
+                        m_cache->notifyAttempts++;
+                        m_cache->lastReportedEventTimes = req_data->reportedBefore;
+                        const int delay_s = App::self().context()->notifyRetryDelay;
+                        if (delay_s > 0) startRetryTimer(delay_s);
+                        ogs_warn("Notification to %s failed %i; its events will be offered again "
+                                 "%s (attempt %i of %i)", req_data->request->uri(), status,
+                                 delay_s > 0 ? "after the retry delay" : "on the next notification",
+                                 m_cache->notifyAttempts, budget);
+                    } else {
+                        m_cache->notifyAttempts = 0;
+                        ogs_error("Notification to %s failed %i and the %i-attempt budget is spent; "
+                                  "its events are dropped", req_data->request->uri(), status, budget);
+                    }
+                } else if (status >= 200 && status <= 299) {
+                    /* Accepted, so the budget applies to the next set of events rather than these. */
+                    m_cache->notifyAttempts = 0;
+                }
             } else {
                 ogs_debug("Problem sending notification(s) to %s", req_data->request->uri());
             }
@@ -335,6 +536,41 @@ void DistributionSessionSubscription::_setExpiryTime()
         is >> std::chrono::parse("%FT%TZ", utc_exp_time);
         m_expiryTime = std::chrono::utc_clock::to_sys(utc_exp_time);
     }
+}
+
+void DistributionSessionSubscription::_scheduleExpiryTimer()
+{
+    _cancelExpiryTimer();
+
+    if (!m_expiryTime) return; /* no expiryTime set, nothing to enforce */
+
+    std::shared_ptr<DistributionSession> dist_session(m_distributionSession.lock());
+    if (!dist_session) return; /* no parent DistributionSession to key the timer to */
+
+    const auto now = std::chrono::system_clock::now();
+    long long delay_ms = 0;
+    if (m_expiryTime.value() > now) {
+        delay_ms = std::chrono::duration_cast<std::chrono::milliseconds>(m_expiryTime.value() - now).count();
+    }
+    if (delay_ms > std::numeric_limits<int>::max()) delay_ms = std::numeric_limits<int>::max();
+
+    m_expiryTimerFunc.reset(new SubscriptionExpiryTimerFunc(dist_session->distributionSessionId(), m_subscriptionId));
+    m_expiryTimer = App::self().ogsApp()->addTimer(*m_expiryTimerFunc);
+    if (m_expiryTimer) {
+        m_expiryTimer->start(static_cast<int>(delay_ms));
+    } else {
+        ogs_error("Failed to create expiry timer for subscription %s", m_subscriptionId.c_str());
+        m_expiryTimerFunc.reset();
+    }
+}
+
+void DistributionSessionSubscription::_cancelExpiryTimer()
+{
+    if (m_expiryTimer) {
+        App::self().ogsApp()->removeTimer(m_expiryTimer);
+        m_expiryTimer.reset();
+    }
+    m_expiryTimerFunc.reset();
 }
 
 void DistributionSessionSubscription::_setSubscriptionId()

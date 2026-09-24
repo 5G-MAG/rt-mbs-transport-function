@@ -89,7 +89,10 @@ ObjectStore::Metadata::Metadata(const Metadata &other)
     ,m_compressedSend(other.m_compressedSend)
     ,m_objIngestBaseUrl(other.m_objIngestBaseUrl)
     ,m_objDistributionBaseUrl(other.m_objDistributionBaseUrl)
+    ,m_entityTag(other.m_entityTag)
     ,m_cacheExpires(other.m_cacheExpires)
+    ,m_availabilityStartTime(other.m_availabilityStartTime)
+    ,m_availabilityEndTime(other.m_availabilityEndTime)
     ,m_receivedTime(other.m_receivedTime)
     ,m_created(other.m_created)
     ,m_modified(other.m_modified)
@@ -108,7 +111,10 @@ ObjectStore::Metadata::Metadata(Metadata &&other)
     ,m_compressedSend(other.m_compressedSend)
     ,m_objIngestBaseUrl(std::move(other.m_objIngestBaseUrl))
     ,m_objDistributionBaseUrl(std::move(other.m_objDistributionBaseUrl))
+    ,m_entityTag(std::move(other.m_entityTag))
     ,m_cacheExpires(std::move(other.m_cacheExpires))
+    ,m_availabilityStartTime(std::move(other.m_availabilityStartTime))
+    ,m_availabilityEndTime(std::move(other.m_availabilityEndTime))
     ,m_receivedTime(std::move(other.m_receivedTime))
     ,m_created(std::move(other.m_created))
     ,m_modified(std::move(other.m_modified))
@@ -128,7 +134,10 @@ ObjectStore::Metadata &ObjectStore::Metadata::operator=(const ObjectStore::Metad
     m_compressedSend = other.m_compressedSend;
     m_objIngestBaseUrl = other.m_objIngestBaseUrl;
     m_objDistributionBaseUrl = other.m_objDistributionBaseUrl;
+    m_entityTag = other.m_entityTag;
     m_cacheExpires = other.m_cacheExpires;
+    m_availabilityStartTime = other.m_availabilityStartTime;
+    m_availabilityEndTime = other.m_availabilityEndTime;
     m_receivedTime = other.m_receivedTime;
     m_created = other.m_created;
     m_modified = other.m_modified;
@@ -149,7 +158,10 @@ ObjectStore::Metadata &ObjectStore::Metadata::operator=(ObjectStore::Metadata &&
     m_compressedSend = other.m_compressedSend;
     m_objIngestBaseUrl = std::move(other.m_objIngestBaseUrl);
     m_objDistributionBaseUrl = std::move(other.m_objDistributionBaseUrl);
+    m_entityTag = std::move(other.m_entityTag);
     m_cacheExpires = std::move(other.m_cacheExpires);
+    m_availabilityStartTime = std::move(other.m_availabilityStartTime);
+    m_availabilityEndTime = std::move(other.m_availabilityEndTime);
     m_receivedTime = std::move(other.m_receivedTime);
     m_created = std::move(other.m_created);
     m_modified = std::move(other.m_modified);
@@ -193,17 +205,24 @@ ObjectStore::~ObjectStore()
 }
 
 void ObjectStore::addObject(const std::string& object_id, ObjectData &&object, Metadata &&metadata, bool synchronous_event) {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
-    try {
-        std::shared_ptr<Object> obj(new std::pair(std::move(object), std::move(metadata)));
-        m_store.insert_or_assign(object_id, obj);
-    } catch (const std::bad_alloc& e) {
-        ogs_error("memory allocation failed: %s", e.what());
+        try {
+            std::shared_ptr<Object> obj(new std::pair(std::move(object), std::move(metadata)));
+            m_store.insert_or_assign(object_id, obj);
+        } catch (const std::bad_alloc& e) {
+            ogs_error("memory allocation failed: %s", e.what());
 
+        }
     }
 
-    /* send event */
+    /* Dispatched with m_mutex released. sendEventSynchronous() runs each subscriber's
+       processEvent() inline, and a subscriber takes its own locks: ObjectManifestController
+       takes m_manifestHandlerMutex, which its scheduled-pull worker already holds while it
+       calls back into this store. Holding m_mutex across the callback closes that cycle and
+       deadlocks both threads. Nothing here needs the store locked: the event carries only the
+       object id, and every subscriber looks the object up through this class, which locks. */
     std::shared_ptr<Event> event(new ObjectStore::ObjectAddedEvent(object_id));
     if (synchronous_event) {
         sendEventSynchronous(*event);
@@ -214,16 +233,23 @@ void ObjectStore::addObject(const std::string& object_id, ObjectData &&object, M
 
 void ObjectStore::updateMetadata(const std::string& object_id, Metadata &&metadata, bool synchronous_event)
 {
-    std::lock_guard<decltype(m_mutex)> lock(m_mutex);
+    {
+        std::lock_guard<decltype(m_mutex)> lock(m_mutex);
 
-    auto it = m_store.find(object_id);
-    if (it == m_store.end()) {
-        throw std::out_of_range(std::format("Attempt to update Object {}, but it is not in the ObjectStore", object_id));
+        auto it = m_store.find(object_id);
+        if (it == m_store.end()) {
+            throw std::out_of_range(std::format("Attempt to update Object {}, but it is not in the ObjectStore", object_id));
+        }
+
+        it->second->second = std::move(metadata);
     }
 
-    it->second->second = std::move(metadata);
-
-    /* send event */
+    /* Dispatched with m_mutex released. sendEventSynchronous() runs each subscriber's
+       processEvent() inline, and a subscriber takes its own locks: ObjectManifestController
+       takes m_manifestHandlerMutex, which its scheduled-pull worker already holds while it
+       calls back into this store. Holding m_mutex across the callback closes that cycle and
+       deadlocks both threads. Nothing here needs the store locked: the event carries only the
+       object id, and every subscriber looks the object up through this class, which locks. */
     std::shared_ptr<Event> event(new ObjectStore::ObjectUpdatedEvent(object_id));
     if (synchronous_event) {
         sendEventSynchronous(*event);
@@ -253,6 +279,37 @@ const ObjectStore::ObjectData& ObjectStore::getObjectData(const std::string& obj
 ObjectStore::ObjectData& ObjectStore::getObjectData(const std::string& object_id) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     return m_store.at(object_id)->first;
+}
+
+ObjectStore::Metadata ObjectStore::takeMetadataForIngest(const std::string& object_id, bool keep_after_send,
+                                                          bool compress_send) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    Metadata &metadata = m_store.at(object_id)->second;
+    metadata.keepAfterSend(keep_after_send).compressedSend(compress_send);
+    return metadata;   // copied while the lock is still held
+}
+
+std::optional<ObjectStore::Metadata> ObjectStore::tryGetMetadata(const std::string& object_id) const {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_store.find(object_id);
+    if (it == m_store.end()) return std::nullopt;
+    return it->second->second;   // copied while the lock is still held
+}
+
+void ObjectStore::markForFetch(const std::string& object_id, bool keep_after_send, bool compress_send) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    Metadata &metadata = m_store.at(object_id)->second;   // throws out_of_range when absent
+    if (!metadata.keepAfterSend()) metadata.keepAfterSend(keep_after_send);
+    metadata.compressedSend(compress_send);
+}
+
+bool ObjectStore::deleteUnlessKeptAfterSend(const std::string& object_id) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_store.find(object_id);
+    if (it == m_store.end()) return false;
+    if (it->second->second.keepAfterSend()) return false;
+    deleteObject(object_id);   // m_mutex is recursive, so this re-locks harmlessly
+    return true;
 }
 
 const ObjectStore::Metadata& ObjectStore::getMetadata(const std::string& object_id) const {
@@ -329,14 +386,15 @@ bool ObjectStore::removeObjects(const std::list<std::string>& object_ids) {
     return true;
 }
 
-const ObjectStore::Metadata *ObjectStore::findMetadataByURL(const std::string &url) const
+std::optional<ObjectStore::Metadata> ObjectStore::findMetadataByURL(const std::string &url) const
 {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     auto it = std::find_if(m_store.begin(), m_store.end(), [&url](const decltype(m_store)::value_type &obj){
             auto &metadata = obj.second->second;
             return metadata.getOriginalUrl() == url || metadata.getFetchedUrl() == url;
         });
-    if (it != m_store.end()) return &it->second->second;
-    return nullptr;
+    if (it != m_store.end()) return it->second->second;   // copied while the lock is still held
+    return std::nullopt;
 }
 
 void ObjectStore::reconfigureMetadatas(const std::optional<std::string> &ingest_base_url,

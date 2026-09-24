@@ -36,6 +36,7 @@
 #include "ObjectStore.hh"
 #include "openapi/model/Object.h"
 
+#include "FecOtiHelper.hh"
 #include "ObjectCarouselPackager.hh"
 
 using namespace std::literals::chrono_literals;
@@ -154,8 +155,9 @@ ObjectCarouselPackager::ObjectCarouselPackager(const std::shared_ptr<ObjectStore
 
 ObjectCarouselPackager::ObjectCarouselPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
                                        const SsmPort &ssm_port, uint32_t rate_limit, unsigned short mtu,
-                                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
-    :ObjectPackager(object_store, controller, ssm_port, rate_limit, mtu, tunnel_address, tunnel_port)
+                                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port,
+                                       const std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> &fec_information)
+    :ObjectPackager(object_store, controller, ssm_port, rate_limit, mtu, tunnel_address, tunnel_port, fec_information)
     ,m_packageItemsMutex(new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems()
     ,m_packagingUpdateCondVar()
@@ -258,22 +260,69 @@ void ObjectCarouselPackager::ensureTransmitter()
     if (!m_transmitter) {
         const auto &ssm_port = ssmPort();
         if (!ssm_port) return;
+        /* The Distribution Session's own requested AL-FEC configuration, converted to the
+           Transmitter-level FEC OTI. Without this the session is sent unprotected however it was
+           provisioned. fecOtiFromFecConfig() rejects a scheme the MBMS Download Profile does not
+           admit, which is a packaging failure for this session rather than a reason to send it
+           without the protection it asked for. */
+        std::optional<LibFlute::FecOti> content_fec_oti;
+        uint32_t fec_redundancy_level = LibFlute::kDefaultFecRedundancyLevel;
+        try {
+            std::tie(content_fec_oti, fec_redundancy_level) = fecOtiFromFecConfig(fecInformation());
+        } catch (const std::runtime_error &err) {
+            ogs_error("Cannot apply the Distribution Session's FEC configuration, not transmitting: %s",
+                      err.what());
+            return;
+        }
         m_transmitter.reset(new LibFlute::Transmitter(ssm_port.destinationAddress(), static_cast<short>(ssm_port.port()), tsi(), mtu(),
                                                       rateLimit(), m_io, m_tunnelEndpoint,
                                                       LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005, true,
-                                                      ssm_port.sourceAddress()));
+                                                      ssm_port.sourceAddress(),
+                                                      content_fec_oti,
+                                                      LibFlute::Profile::Ts26517,
+                                                      fec_redundancy_level));
         m_transmitter->register_completion_callback(
             [this](uint32_t toi) {
                 ogs_debug("Object with TOI %d completed", toi);
+                std::string toi_str(std::to_string(toi));
                 try {
                     /* find stream containing current object with toi */
                     streamsRemoveToi(toi);
                 } catch (std::out_of_range &ex) {
                     errorInCarousel(ex.what(), ObjectPackager::PackagingFailedEvent::RESOURCE_NOT_AVAILABLE);
                 }
+                bool queue_empty;
+                {
+                    std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+                    queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
+                }
+                /* objectSendCompletion() was declared on this class (see the header) since it was
+                   first written from ObjectListPackager's template for issue #51, but nothing here
+                   ever called it: this completion callback only removed the finished stream and
+                   returned. Established from git blame and left unfixed until now, per rule 14 --
+                   without it, DistributionSession::haveEmptyQueue() is never called for a carousel,
+                   so deactivate() below returning false (queue not yet empty at the moment it was
+                   called) left nothing to ever finish the job; the Distribution Session would sit
+                   in DEACTIVATING forever. */
+                objectSendCompletion(toi_str, queue_empty);
+                if (m_deactivating && queue_empty) {
+                    ogs_debug("Deactivating FLUTE stream on last file");
+                    {
+                        std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+                        m_transmitter->deactivate();
+                    }
+                    abort();
+                    m_deactivating = false;
+                }
             }
         );
     }
+}
+
+void ObjectCarouselPackager::objectSendCompletion(std::string &object_id, bool queue_empty)
+{
+    std::shared_ptr<Event> event(new ObjectPackager::ObjectSendCompleted(object_id, queue_empty));
+    sendEventAsynchronous(event);
 }
 
 void ObjectCarouselPackager::flushQueue()
@@ -439,6 +488,15 @@ void ObjectCarouselPackager::scheduleCarousel()
         if (streamsAllocateToi([this,&pkg_item]() -> std::pair<uint32_t, std::shared_ptr<ObjectStore::Object> > {
                 std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
                 ensureTransmitter();
+                /* ensureTransmitter() leaves m_transmitter unset when the session's own FEC
+                   configuration was rejected (see its own comment above), logging the reason
+                   there. Throwing here, rather than falling through to m_transmitter->send()
+                   below, hands this attempt to streamsAllocateToi()'s existing catch, which
+                   already treats a failed get_toi_fn() as "try this item again next cycle"
+                   rather than crashing the scheduler. */
+                if (!m_transmitter) {
+                    throw std::runtime_error("no FLUTE Transmitter available for this session");
+                }
                 auto &metadata = pkg_item.object()->second;
                 auto &file_desc = metadata.fluteFileDescription();
                 std::string location;
@@ -464,7 +522,7 @@ void ObjectCarouselPackager::scheduleCarousel()
                 }
 
                 /* set compression according to the object metadata */
-                if (metadata.compressedSend()) {
+                if (m_transmitter->can_compress_objects() && metadata.compressedSend()) {
                     file_desc->set_compression(LibFlute::Transmitter::FileDescription::CompressionAlgorithm::COMPRESSION_GZIP);
                 } else {
                     file_desc->set_compression(LibFlute::Transmitter::FileDescription::CompressionAlgorithm::COMPRESSION_NONE);

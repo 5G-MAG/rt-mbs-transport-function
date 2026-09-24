@@ -187,7 +187,7 @@ bool ObjectManifestHandler::update(const std::shared_ptr<ObjectStore::Object> &n
         if (new_it == new_objects.end()) {
             /* object removed from carousel */
             auto &object_store = m_controller->objectStore();
-            auto *metadata = object_store->findMetadataByURL(old_it->value()->getLocator());
+            auto metadata = object_store->findMetadataByURL(old_it->value()->getLocator());
             if (metadata) {
                 object_store->removeObject(metadata->objectId());
             }
