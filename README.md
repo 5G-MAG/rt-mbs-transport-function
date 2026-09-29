@@ -95,7 +95,7 @@ ninja -C build
 
 Errors during `meson build` are usually caused by missing dependencies, or by a network problem while
 retrieving the API files and the `openapi-generator` JAR file. The details are in
-`~/rt-mbs-transport-function/build/meson-logs/meson-log.txt`; search it for `generator-libspdc` to
+`~/rt-mbs-transport-function/build/meson-logs/meson-log.txt`; search it for `generator-mbstf` to
 find the start of the API fetch sequence.
 
 ## Installing
