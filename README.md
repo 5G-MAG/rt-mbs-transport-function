@@ -28,7 +28,7 @@
 
 |  |  |
 |---|---|
-| **Implements** | [3GPP TS 29.581 V18.5.0](https://www.3gpp.org/DynaReport/29581.htm), the interfaces designated as Nmb2, Nmb8 and Nmb9 |
+| **Implements** | [3GPP TS 29.581 V18.6.0](https://www.3gpp.org/DynaReport/29581.htm), the interfaces designated as Nmb2, Nmb8 and Nmb9 |
 | **Part of** | [5G Multicast Broadcast Services (MBS)](https://www.5g-mag.com/reference-tools/5g-mbs/), alongside [open5gs](https://github.com/5G-MAG/open5gs), [rt-5gc-service-consumers](https://github.com/5G-MAG/rt-5gc-service-consumers), [rt-libflute](https://github.com/5G-MAG/rt-libflute), [rt-mbs-application](https://github.com/5G-MAG/rt-mbs-application), [rt-mbs-application-provider](https://github.com/5G-MAG/rt-mbs-application-provider), [rt-mbs-client](https://github.com/5G-MAG/rt-mbs-client), [rt-mbs-examples](https://github.com/5G-MAG/rt-mbs-examples), [rt-mbs-function](https://github.com/5G-MAG/rt-mbs-function), [rt-media-origin](https://github.com/5G-MAG/rt-media-origin), [rt-srsRAN_Project](https://github.com/5G-MAG/rt-srsRAN_Project), [srsRAN_4G](https://github.com/5G-MAG/srsRAN_4G), [srsRAN_4G_mbs](https://github.com/5G-MAG/srsRAN_4G_mbs) and [srsRAN_Project_mbs](https://github.com/5G-MAG/srsRAN_Project_mbs) |
 
 ## Introduction
@@ -37,18 +37,23 @@ The MBS Transport Function is the network function of the MBS User Services that
 and sends it out for multicast and broadcast delivery. The MBS Function
 ([rt-mbs-function](https://github.com/5G-MAG/rt-mbs-function)) controls it through Nmbstf
 distribution sessions. It ingests objects, by pull or push, or packets, and uses
-[rt-libflute](https://github.com/5G-MAG/rt-libflute) to send objects over FLUTE. Like the MBS
-Function, it is built as an [Open5GS](https://open5gs.org/) network function that registers with a
-5G Core NRF.
+[rt-libflute](https://github.com/5G-MAG/rt-libflute) to send objects over FLUTE on the MBS session
+the MBS Function has established, broadcast or multicast. Like the MBS Function, it is built as an
+[Open5GS](https://open5gs.org/) network function that registers with a 5G Core NRF.
 
 More information is on the [project page](https://www.5g-mag.com/reference-tools/5g-mbs/).
 
 ## Specification
 
-Built against 3GPP TS 29.581 V18.5.0. The API bindings are generated at build time from the 3GPP 5G
-APIs, by default at tag `TSG111-Rel18` (build options `fiveg_api_release` and `fiveg_api_approval`
-in `meson_options.txt`): the TS 29.581 Nmbstf distribution session API and the TS 26.517 object
-manifest model.
+Built against these versions:
+
+- **3GPP TS 29.581 V18.6.0**, the Nmbstf distribution session API
+- **3GPP TS 26.502 V18.6.0**, the MBS User Service architecture
+- **3GPP TS 26.346 V18.2.0**, for the FLUTE and FDT profiling
+
+The API bindings are generated at build time from the 3GPP 5G APIs, by default at tag `TSG111-Rel18`
+(build options `fiveg_api_release` and `fiveg_api_approval` in `meson_options.txt`): the TS 29.581
+Nmbstf distribution session API and the TS 26.517 object manifest model.
 
 Clause-by-clause coverage, and what is still absent, is recorded on the project page rather than
 here: <https://www.5g-mag.com/reference-tools/5g-mbs/>
@@ -69,6 +74,25 @@ sudo sh -c 'for i in cpp g++ gcc gcc-ar gcc-nm gcc-ranlib gcov gcov-dump gcov-to
 sudo python3 -m pip install --break-system-packages --upgrade meson
 ```
 
+### The build fetches the 5G APIs
+
+The OpenAPI bindings are generated at configure time from the 3GPP 5G APIs, which the build clones
+from `forge.3gpp.org`. The build therefore needs network access to that host, and Java, which is
+why `default-jdk` is in the list above.
+
+That host currently serves an incomplete certificate chain: it sends its own certificate but not the
+Sectigo intermediate that signs it. A browser fetches the missing intermediate by itself, but `git`
+and `curl` do not, so the clone fails with:
+
+```
+fatal: unable to access 'https://forge.3gpp.org/rep/all/5G_APIs.git/':
+  SSL certificate verification failed: certificate signer not trusted
+```
+
+If you see that, install the missing intermediate rather than disabling verification. On Debian and
+Ubuntu, fetch *Sectigo Public Server Authentication CA OV R36* from <https://crt.sh/>, put the PEM in
+`/usr/local/share/ca-certificates/` with a `.crt` extension, and run `sudo update-ca-certificates`.
+
 ## Downloading
 
 Release tar files are available from <https://github.com/5G-MAG/rt-mbs-transport-function/releases>.
@@ -77,9 +101,22 @@ Alternatively, clone the repository with its submodules. The default branch hold
 release:
 
 ```bash
-cd ~
 git clone --recurse-submodules https://github.com/5G-MAG/rt-mbs-transport-function.git
+cd rt-mbs-transport-function
 ```
+
+`--recurse-submodules` is required: `rt-common-shared` is a submodule and the build fails without
+it. If you have already cloned without it, run `git submodule update --init --recursive`.
+
+### 5G-MAG libraries fetched by the build
+
+Two 5G-MAG libraries are fetched automatically. They are listed because a version mismatch shows up
+as a compile or link error rather than as a missing dependency.
+
+| Dependency | How | What it supplies |
+|---|---|---|
+| `rt-common-shared` | git submodule | the HTTP server and the shared Open5GS tooling, including the OpenAPI generator this build runs |
+| `rt-libflute` | meson wrap | the FLUTE transmitter, the TS 26.346 annex L.6 profiled FDT schema, the scheme-specific FEC OTI and the RFC 5053 Raptor scheme |
 
 ## Building
 
@@ -88,23 +125,21 @@ The build needs a working Internet connection, because the API files are retriev
 To build the MBS Transport Function from source:
 
 ```bash
-cd ~/rt-mbs-transport-function
-meson build
+meson setup build
 ninja -C build
 ```
 
-Errors during `meson build` are usually caused by missing dependencies, or by a network problem while
-retrieving the API files and the `openapi-generator` JAR file. The details are in
-`~/rt-mbs-transport-function/build/meson-logs/meson-log.txt`; search it for `generator-mbstf` to
-find the start of the API fetch sequence.
+Errors during `meson setup build` are usually caused by missing dependencies, or by a network problem
+while retrieving the API files and the `openapi-generator` JAR file. The details are in
+`build/meson-logs/meson-log.txt`; search it for `generator-mbstf` to find the start of the API fetch
+sequence.
 
 ## Installing
 
 To install the MBS Transport Function as a system process:
 
 ```bash
-cd ~/rt-mbs-transport-function/build
-sudo meson install --no-rebuild
+sudo meson install -C build --no-rebuild
 ```
 
 ## Running
@@ -124,6 +159,13 @@ then start the MBS Transport Function, for example:
 sudo /usr/local/bin/open5gs-mbstfd &
 ```
 
+## Configuration
+
+The configuration is a YAML file in the Open5GS style, installed as
+`/usr/local/etc/open5gs/mbstf.yaml`; when running from a build tree, pass it with `-c`. The sections
+that matter are `nrf`, which must point at a reachable NRF, and the MBS Transport Function's own
+section, which sets its SBI, distribution session API and ingest addresses.
+
 ## Development
 
 This project follows the
@@ -136,7 +178,6 @@ a new feature.
 To run the unit tests:
 
 ```bash
-cd ~/rt-mbs-transport-function
 meson test -C build --suite rt-mbs-transport-function
 ```
 
