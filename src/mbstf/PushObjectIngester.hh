@@ -92,6 +92,9 @@ public:
         void completed(struct MHD_Connection *connection, enum MHD_RequestTerminationCode term_code);
         virtual void waitClose() {};
         void requestHandler(struct MHD_Connection *connection);
+        /* Answer a request refused before its body was read, with the status and detail setError()
+           recorded, or 500 if nothing was recorded. */
+        MHD_Result queueRefusal(struct MHD_Connection *connection);
         typedef bool (*HeaderProcessingCallback)(const std::string &key, const std::string &value, void *data);
         void processRequestHeader(HeaderProcessingCallback callback, void *data) const;
 

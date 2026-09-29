@@ -226,6 +226,22 @@ void PushObjectIngester::Request::requestHandler(struct MHD_Connection *connecti
     MHD_destroy_response(m_mhdResponse);
 }
 
+MHD_Result PushObjectIngester::Request::queueRefusal(struct MHD_Connection *connection)
+{
+    std::lock_guard<std::recursive_mutex> lock(*m_mutex);
+    if (m_statusCode < 400) setError(500, "Internal Server Error", "the push was refused");
+    /* Same body rule as requestHandler(): the recorded detail as plain text, copied so it outlives
+       this call. */
+    struct MHD_Response *response = MHD_create_response_from_buffer(m_errorDetail.size(),
+                                                                    const_cast<char*>(m_errorDetail.data()),
+                                                                    MHD_RESPMEM_MUST_COPY);
+    if (!m_errorDetail.empty()) MHD_add_response_header(response, "Content-Type", "text/plain");
+    ogs_info("Refusing push of %s with %u %s", m_urlPath.c_str(), m_statusCode, m_errorReason.c_str());
+    MHD_Result rv = MHD_queue_response(connection, m_statusCode, response);
+    MHD_destroy_response(response);
+    return rv;
+}
+
 std::string PushObjectIngester::Request::reprString() const
 {
     std::ostringstream oss;
@@ -759,7 +775,10 @@ static MHD_Result handle_request(void *cls, struct MHD_Connection *connection, c
         std::shared_ptr<PushObjectIngester::Request> *req_ptr = new std::shared_ptr<PushObjectIngester::Request>(req);
         *con_cls = req_ptr;
         if(ingester->addRequest(*req_ptr)) return MHD_YES;
-        return MHD_NO;
+        /* An ObjectPushStart handler refused the push, having recorded why with setError(), as the
+           URL check does with 400. Returning MHD_NO here made MHD drop the connection instead ("Application
+           reported internal error, closing connection"), so the pushing client got no status at all. */
+        return (*req_ptr)->queueRefusal(connection);
     }
 
     std::shared_ptr<PushObjectIngester::Request> req = *reinterpret_cast<std::shared_ptr<PushObjectIngester::Request>*>(*con_cls);
