@@ -532,8 +532,12 @@ void PushObjectIngester::removeRequest(const std::shared_ptr<PushObjectIngester:
 void PushObjectIngester::doObjectIngest() {
     if (workerCancelled()) return;
     if (start()) {
-        // Once we've started the Push server we don't need this thread anymore
-        abort();
+        /* The worker thread is no longer needed once the push server runs, but the event thread is:
+           the server reports push failures through it (requestHandler() emits IngestFailedEvent
+           asynchronously), and abort() stopped it, so every failure reported after a successful start
+           was dropped and none reached the MBSF as DATA_INGEST_FAILURE. The destructor's abort() still
+           stops it at teardown. */
+        endWorkerLoop();
         return;
     }
     /* start() failed: MHD would not start a daemon for this ingest point. ObjectIngester::workerLoop()
