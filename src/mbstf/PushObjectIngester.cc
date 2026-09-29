@@ -375,7 +375,7 @@ std::string PushObjectIngester::joinSharedDaemon()
         memcpy(&s_sharedSockaddr, &srv->node.addr, sizeof(s_sharedSockaddr));
 
         s_sharedDaemon = MHD_start_daemon(
-                                    MHD_USE_SELECT_INTERNALLY,
+                                    MHD_USE_SELECT_INTERNALLY | MHD_USE_ERROR_LOG,
                                     0,
                                     NULL, NULL,
                                     handle_request, nullptr,
@@ -439,8 +439,10 @@ bool PushObjectIngester::start()
 
     {
         std::lock_guard<std::recursive_mutex> lock(m_mtx);
+        /* MHD_USE_ERROR_LOG: without it MHD_start_daemon() fails silently, returning NULL with no
+           reason given, which left a refusal to start indistinguishable from any other. */
         m_mhdDaemon = MHD_start_daemon(
-                                    MHD_USE_SELECT_INTERNALLY,
+                                    MHD_USE_SELECT_INTERNALLY | MHD_USE_ERROR_LOG,
                                     0,
                                     NULL, NULL,
                                     handle_request, this,
@@ -512,10 +514,29 @@ void PushObjectIngester::removeRequest(const std::shared_ptr<PushObjectIngester:
 }
 
 void PushObjectIngester::doObjectIngest() {
-    if (!workerCancelled() && start()) {
+    if (workerCancelled()) return;
+    if (start()) {
         // Once we've started the Push server we don't need this thread anymore
         abort();
+        return;
     }
+    /* start() failed: MHD would not start a daemon for this ingest point. ObjectIngester::workerLoop()
+       calls this again at once, so returning here retried without pause, for ever: the thread spun at
+       full load, the process stopped answering in time, and its NRF registration lapsed, so every MBSF
+       then reported "No MBSTF was found in the network". Nothing sets a retry interval or a retry
+       limit, so rather than invent one this reports the failure and stops. */
+    ogs_error("PushObjectIngester[%p]: could not start the push ingest server; reporting the ingest as "
+              "failed rather than retrying", this);
+    emitObjectIngestFailedEvent(std::string(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
+    {
+        /* getIngestServerPrefix() is waiting for a daemon that will now never exist, on the thread
+           setting up the Distribution Session; without this it waited for ever and the MBSTF stopped
+           serving altogether, which is what the MBSF then reported as no MBSTF in the network. */
+        std::lock_guard<std::recursive_mutex> lock(m_mtx);
+        m_startFailed = true;
+        m_condVar.notify_all();
+    }
+    endWorkerLoop();
 }
 
 void PushObjectIngester::addedBodyBlock(const std::shared_ptr<Request> &request, std::vector<unsigned char>::size_type block_size,
@@ -564,7 +585,11 @@ const std::string &PushObjectIngester::getIngestServerPrefix()
         {
             // Wait for microhttpd to start up
             std::lock_guard<std::recursive_mutex> lock(m_mtx);
-            while(!m_mhdDaemon) m_condVar.wait(m_mtx);
+            while(!m_mhdDaemon && !m_startFailed) m_condVar.wait(m_mtx);
+        }
+        if (!m_mhdDaemon) {
+            ogs_error("PushObjectIngester[%p]: no push ingest server, so no ingest URL to offer", this);
+            return m_urlPrefix;
         }
 
         // Get the server details from microhttpd

@@ -14,6 +14,7 @@
 
 #include <list>
 #include <map>
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -258,6 +259,8 @@ private:
     std::string m_sharedPathSegment;  //!< this ingester's UUID segment, empty when not shared
 
     struct MHD_Daemon *m_mhdDaemon;
+    // Set when start() could not bring up a daemon, so getIngestServerPrefix() stops waiting for one.
+    std::atomic<bool> m_startFailed{false};
     struct sockaddr_storage m_sockaddr;
     std::list<std::shared_ptr<Request> > m_activeRequests;
     //std::vector<Request*>  m_connections;

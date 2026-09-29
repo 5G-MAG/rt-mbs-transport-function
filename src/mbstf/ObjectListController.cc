@@ -229,7 +229,12 @@ void ObjectListController::initPushObjectIngester()
 
     PushObjectIngester *pushIngester = new PushObjectIngester(objectStore(), *this);
 
-    distributionSession().setObjectIngestBaseUrl(pushIngester->getIngestServerPrefix());
+    {
+        /* Empty when the push ingest server could not start; that failure has been reported as an
+           ingest failure, and an empty base URL would be handed on as if it were one. */
+        const std::string &ingest_base_url = pushIngester->getIngestServerPrefix();
+        if (!ingest_base_url.empty()) distributionSession().setObjectIngestBaseUrl(ingest_base_url);
+    }
     subscribeTo({"ObjectPushStart"}, *pushIngester);
     pushObjectIngester(pushIngester);
 }

@@ -86,6 +86,10 @@ public:
     bool workerCancelled() const { return m_workerCancel; };
 
 protected:
+    /* Leave workerLoop() after the current doObjectIngest() returns, without abort()'s
+       stopAsyncEvents(), so an event the worker has just sent is still delivered. */
+    void endWorkerLoop() { m_workerCancel = true; }
+
     std::shared_ptr<ObjectStore> &objectStore() { return m_objectStore; }
     const std::shared_ptr<ObjectStore> &objectStore() const { return m_objectStore; }
     ObjectController &controller() { return m_controller; }
