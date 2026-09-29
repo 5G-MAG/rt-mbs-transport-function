@@ -104,6 +104,9 @@ protected:
     bool removePullObjectIngester(std::shared_ptr<PullObjectIngester> &);
     bool removeAllPullObjectIngesters();
     const std::shared_ptr<PushObjectIngester> &pushObjectIngester() const { return m_pushIngester; };
+    /* The push ingest server reports a failed start while the controller is still waiting for its
+       ingest URL, which is before the controller or the Distribution Session subscribe to it. */
+    virtual bool ingestFailedDuringSetUp() const;
     const std::shared_ptr<PushObjectIngester> &pushObjectIngester(PushObjectIngester* pushIngester);
     bool removePushObjectIngester();
     const std::shared_ptr<ObjectPackager> &packager() const { return m_packager; };

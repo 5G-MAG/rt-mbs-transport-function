@@ -1180,6 +1180,12 @@ void DistributionSession::_apiSessionCreate(Open5GSSBIStream &stream, Open5GSSBI
 
     // Subscribe to Events from the Controller - to be forwarded to DistributionSessionSubscriptions
     distributionSession->subscribeTo({ObjectIngester::IngestFailedEvent::event_name, ObjectPackager::PackagingFailedEvent::event_name}, *distributionSession->m_controller);
+    /* A failure during set-up was announced before the subscription above existed and reached
+       nobody, so it is recorded here instead, in time for the notifications sent next.
+       TS 29.581 V18.6.0 clause 5.2.2.8.1, step 1: "report a DATA_INGEST_FAILURE event when the MBSTF failed to ingest data from the AF/AS;" */
+    if (distributionSession->m_controller->ingestFailedDuringSetUp()) {
+        distributionSession->m_eventTimestamps.registerEvent(DistributionSessionEvents::DATA_INGEST_FAILURE);
+    }
     distributionSession->_sendSubscriptionNotifications();
 
     CJson create_rsp_data_json(distributionSession->json(false, true));

@@ -220,6 +220,7 @@ public:
     //void addConnection(Request *request);
     //void removeConnection(Request *request);
     const std::string &getIngestServerPrefix();
+    bool startFailed() const { return m_startFailed; };
 
     virtual ~PushObjectIngester();
 

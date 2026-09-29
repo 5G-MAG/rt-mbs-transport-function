@@ -45,6 +45,10 @@ public:
      */
     virtual void abortIngest() { stopAsyncEvents(); };
 
+    /* Whether ingest already failed while this controller was being built, before anything could
+       subscribe to its events. The Distribution Session asks once its subscriptions exist. */
+    virtual bool ingestFailedDuringSetUp() const { return false; };
+
     virtual void establishInactiveInputs() = 0; /* Inactive state for DistSession */
     virtual void establishActiveInputs() = 0;   /* Established state for DistSession */
     virtual void activateOutput() = 0;          /* Active state for DistSession */

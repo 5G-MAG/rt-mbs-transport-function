@@ -94,6 +94,11 @@ const std::shared_ptr<PushObjectIngester> &ObjectController::pushObjectIngester(
     return m_pushIngester;
 }
 
+bool ObjectController::ingestFailedDuringSetUp() const
+{
+    return m_pushIngester && m_pushIngester->startFailed();
+}
+
 void ObjectController::processEvent(Event &event, SubscriptionService &event_service)
 {
     if (event.eventName() == "ObjectSendCompleted") {
