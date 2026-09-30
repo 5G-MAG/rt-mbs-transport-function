@@ -456,6 +456,11 @@ void ObjectCarouselPackager::scheduleCarousel()
     }
     if (total_bit_rate > mbr) {
         errorInCarousel(std::format("Carousel maximum bit rate exceeded: allocated {} bps, requires {} bps", mbr, total_bit_rate), ObjectPackager::PackagingFailedEvent::BIT_RATE_OVERFLOW);
+        /* Waits for a change, as for an empty schedule: nothing will fit until the carousel's content or
+           rate changes. Returning at once re-reported the same overflow on every pass of the scheduler,
+           each report a notification queued for the event thread, until the queue filled and that
+           thread blocked pushing into it: the MBSTF stopped answering and did not exit on SIGTERM. */
+        m_packagingUpdateCondVar.wait(*m_packageItemsMutex);
         return;
     }
 
