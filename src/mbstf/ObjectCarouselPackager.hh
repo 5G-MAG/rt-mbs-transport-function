@@ -94,6 +94,9 @@ public:
                            const std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> &fec_information = std::nullopt);
     virtual ~ObjectCarouselPackager();
 
+    /* The scheduler thread sends through the Transmitter as well, so it is stopped with the worker. */
+    virtual void abortOutput() override { abort(); abortScheduler(); stopAsyncEvents(); };
+
     bool add(const PackageItem &item);
     bool add(PackageItem &&item);
     bool remove(const PackageItem &item);

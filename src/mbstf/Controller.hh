@@ -45,6 +45,10 @@ public:
      */
     virtual void abortIngest() { stopAsyncEvents(); };
 
+    /* Stops the output threads (the packager's worker and anything it runs) for shutdown, for the
+       reason given for abortIngest(): left to the destructors, they outlive the teardown. */
+    virtual void abortOutput() {};
+
     /* Whether ingest already failed while this controller was being built, before anything could
        subscribe to its events. The Distribution Session asks once its subscriptions exist. */
     virtual bool ingestFailedDuringSetUp() const { return false; };

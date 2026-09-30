@@ -68,6 +68,9 @@ extern "C" void app_terminate(void)
        leaves them running throughout the teardown, using objects that are being destroyed around
        them. */
     if (self && self->context()) self->context()->abortAllIngest();
+    /* The same for the packager threads, which run the FLUTE Transmitter: still sending when the
+       process exits, they use memory the open5gs core has already released. */
+    if (self && self->context()) self->context()->abortAllOutput();
 
     if (event_handler) {
         self->registerEventHandler(nullptr);

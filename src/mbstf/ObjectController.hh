@@ -56,6 +56,7 @@ public:
      * the worker cancelled and no longer joinable, so the later reset and clear repeat nothing.
      */
     virtual void abortIngest();
+    virtual void abortOutput() override { if (m_packager) m_packager->abortOutput(); };
 
     virtual ~ObjectController() {
         m_pushIngester.reset();

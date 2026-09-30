@@ -147,6 +147,11 @@ public:
         }
     };
 
+    /* Stops every thread this packager runs, for shutdown: the worker, which runs the FLUTE
+       Transmitter's event loop, and the event thread that reports completed sends. A subclass with
+       further threads stops those too. */
+    virtual void abortOutput() { abort(); stopAsyncEvents(); };
+
     virtual ~ObjectPackager();
 
     ObjectPackager& setSsmPort(const SsmPort &ssm_port);

@@ -65,6 +65,8 @@ public:
      * objects the teardown is already dismantling.
      */
     void abortAllIngest();
+    /* The same, for each session's output threads. */
+    void abortAllOutput();
     const std::shared_ptr<DistributionSession> &findDistributionSession(const std::string &distributionSessionid);
 
     enum ServerType {

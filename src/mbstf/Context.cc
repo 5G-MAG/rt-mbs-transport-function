@@ -226,6 +226,15 @@ void Context::abortAllIngest()
     }
 }
 
+void Context::abortAllOutput()
+{
+    for (auto &entry : distributionSessions) {
+        if (!entry.second) continue;
+        const std::shared_ptr<Controller> &controller = entry.second->controller();
+        if (controller) controller->abortOutput();
+    }
+}
+
 void Context::deleteDistributionSession(const std::string &distributionSessionid)
 {
     auto it = distributionSessions.find(distributionSessionid);
