@@ -122,9 +122,16 @@ static bool address_is_local(const ogs_sockaddr_t &sock_addr)
 int get_path_mtu(const ogs_sockaddr_t &sock_addr, int minus_level_hdrs, bool *via_loopback)
 {
     if (via_loopback) *via_loopback = false;
-    ogs_sock_t *sock = ogs_sock_socket(sock_addr.ogs_sa_family, SOCK_DGRAM, 0);
-    ogs_sock_connect(sock, const_cast<ogs_sockaddr_t*>(&sock_addr));
     int mtu = 1500;
+    ogs_sock_t *sock = ogs_sock_socket(sock_addr.ogs_sa_family, SOCK_DGRAM, 0);
+    if (!sock) {
+        /* ogs_sock_connect() asserts on a null socket, which ended the process when descriptors
+           ran out. Without a socket nothing can be measured, so return what an unanswered
+           getsockopt() below leaves. */
+        ogs_error("Cannot open a socket to measure the path MTU, using %d", mtu);
+        return mtu;
+    }
+    ogs_sock_connect(sock, const_cast<ogs_sockaddr_t*>(&sock_addr));
     socklen_t mtu_size = sizeof(mtu);
     if (sock_addr.ogs_sa_family == AF_INET) {
         getsockopt(sock->fd, IPPROTO_IP, IP_MTU, &mtu, &mtu_size);
