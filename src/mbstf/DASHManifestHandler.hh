@@ -46,6 +46,8 @@ public:
     virtual bool compressManifestOnSend() const;
 
     static unsigned int factoryPriority() { return 100; };
+    static const char *manifestHandlerTypeName();
+    virtual const char *manifestHandlerType() const override { return manifestHandlerTypeName(); };
     static bool parseConfiguration(const std::string &section_name, Open5GSYamlIter &iter);
     static void tidyConfiguration();
 

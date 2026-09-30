@@ -88,6 +88,8 @@ protected:
     virtual std::string nextObjectId();
     virtual void objectAddOrUpdateEvent(const std::shared_ptr<ObjectStore::Object> &object) {};
     virtual bool includeManifest() { return false; };
+    /* The ManifestHandlerSuitability flags of the handlers this mode may use; carousel by default. */
+    virtual unsigned int manifestHandlerSuitability() const;
     virtual bool checkObjectActiveInManifest(const std::shared_ptr<ObjectStore::Object> &object) { return true; };
     virtual void finishRequestInManifestHandler(const std::shared_ptr<ObjectStore::Object> &object) {};
     virtual void sendToPackager(const std::shared_ptr<ObjectStore::Object> &object) = 0;

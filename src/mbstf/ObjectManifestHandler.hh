@@ -65,6 +65,8 @@ public:
     virtual std::string nextObjectId();
 
     static unsigned int factoryPriority() { return 100; };
+    static const char *manifestHandlerTypeName();
+    virtual const char *manifestHandlerType() const override { return manifestHandlerTypeName(); };
     const reftools::mbstf::ObjectManifest::ObjectsType &getObjects() const;
     std::list<std::shared_ptr<reftools::mbstf::Object> > getActiveObjects() const;
 

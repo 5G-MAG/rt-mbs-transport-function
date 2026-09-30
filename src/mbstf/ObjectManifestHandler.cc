@@ -367,9 +367,15 @@ std::string ObjectManifestHandler::generateUUID() {
 
 /* ManifestHandler registration */
 
-static bool g_registered1 = ManifestHandlerFactory::registerManifestHandler("application/3gpp-mbs-object-manifest+json", new ManifestHandlerConstructorClass<ObjectManifestHandler>());
-static bool g_registered2 = ManifestHandlerFactory::registerManifestHandler("application/3gpp-mbs-object-manifest+json;version=Rel17", new ManifestHandlerConstructorClass<ObjectManifestHandler>());
-static bool g_registered3 = ManifestHandlerFactory::registerManifestHandler("application/3gpp-mbs-object-manifest+json;version=\"Rel17\"", new ManifestHandlerConstructorClass<ObjectManifestHandler>());
+const char *ObjectManifestHandler::manifestHandlerTypeName()
+{
+    static const char *const type = "3GPP MBS object manifest";
+    return type;
+}
+
+static bool g_registered1 = ManifestHandlerFactory::registerManifestHandler("application/3gpp-mbs-object-manifest+json", new ManifestHandlerConstructorClass<ObjectManifestHandler>(), SUITABLE_FOR_CAROUSEL);
+static bool g_registered2 = ManifestHandlerFactory::registerManifestHandler("application/3gpp-mbs-object-manifest+json;version=Rel17", new ManifestHandlerConstructorClass<ObjectManifestHandler>(), SUITABLE_FOR_CAROUSEL);
+static bool g_registered3 = ManifestHandlerFactory::registerManifestHandler("application/3gpp-mbs-object-manifest+json;version=\"Rel17\"", new ManifestHandlerConstructorClass<ObjectManifestHandler>(), SUITABLE_FOR_CAROUSEL);
 
 /* local functions */
 

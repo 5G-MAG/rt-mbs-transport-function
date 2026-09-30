@@ -14,6 +14,7 @@
 #include <exception>
 #include <list>
 #include <memory>
+#include <set>
 
 #include "common.hh"
 #include "ObjectStore.hh"
@@ -38,8 +39,10 @@ namespace {
     }
 }
 
-bool ManifestHandlerFactory::registerManifestHandler(const std::string &content_type_str, ManifestHandlerConstructor *manifest_handler_constructor)
+bool ManifestHandlerFactory::registerManifestHandler(const std::string &content_type_str, ManifestHandlerConstructor *manifest_handler_constructor,
+                                                     unsigned int suitability)
 {
+    manifest_handler_constructor->suitability(suitability);
     // Find the prioritised list for the content_type, make new list of one doesn't exist
     MimeContentType content_type(content_type_str);
     std::list<std::unique_ptr<ManifestHandlerConstructor> > &list = constructorsByContentType()[content_type];
@@ -51,7 +54,7 @@ bool ManifestHandlerFactory::registerManifestHandler(const std::string &content_
     return true;
 }
 
-ManifestHandler *ManifestHandlerFactory::makeManifestHandler(const std::shared_ptr<ObjectStore::Object> &object, ObjectController *controller, bool pull_distribution)
+ManifestHandler *ManifestHandlerFactory::makeManifestHandler(const std::shared_ptr<ObjectStore::Object> &object, ObjectController *controller, bool pull_distribution, unsigned int suitability)
 {
     MimeContentType media_type(object->second.mediaType());
     ogs_debug("%s", std::format("Looking for manifest handler for \"{}\" media", media_type).c_str());
@@ -62,6 +65,7 @@ ManifestHandler *ManifestHandlerFactory::makeManifestHandler(const std::shared_p
             std::list<std::unique_ptr<ManifestHandlerConstructor> > &list = it->second;
             ogs_debug("Trying %zi manifest handlers", list.size());
             for (const auto &mhc : list) {
+                if (!(mhc->suitability() & suitability)) continue;
                 try {
                     return mhc->makeManifestHandler(object, controller, pull_distribution);
                 } catch (std::runtime_error &ex) {
@@ -76,6 +80,17 @@ ManifestHandler *ManifestHandlerFactory::makeManifestHandler(const std::shared_p
         media_type.clear();
     }
     return nullptr;
+}
+
+size_t ManifestHandlerFactory::numberOfManifestHandlerTypes(unsigned int suitability)
+{
+    std::set<const char*> types;
+    for (const auto &[mime_type, constructors] : constructorsByContentType()) {
+        for (const auto &constructor : constructors) {
+            if (constructor->suitability() & suitability) types.insert(constructor->manifestHandlerType());
+        }
+    }
+    return types.size();
 }
 
 bool ManifestHandlerFactory::parseConfiguration(const std::string &section_name, Open5GSYamlIter &iter)

@@ -155,7 +155,8 @@ void ObjectCollectionController::processEvent(Event &event, SubscriptionService 
                         return;
                     }
                 } else {
-                    std::shared_ptr<ManifestHandler> manifest_handler(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL"));
+                    std::shared_ptr<ManifestHandler> manifest_handler(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL",
+                                                                                                                    manifestHandlerSuitability()));
                     if (!manifest_handler) {
                         // No registered handler recognises this object's media type as a
                         // manifest: the ingest source served an unexpected Content-Type, or the

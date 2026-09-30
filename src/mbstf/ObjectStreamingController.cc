@@ -163,6 +163,11 @@ static const struct init {
 } g_init;
 }
 
+unsigned int ObjectStreamingController::manifestHandlerSuitability() const
+{
+    return SUITABLE_FOR_STREAMING;
+}
+
 static void validate_distribution_session(DistributionSession &distribution_session)
 {
     if (distribution_session.getObjectDistributionOperatingMode() != "STREAMING") {

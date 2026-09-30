@@ -462,7 +462,13 @@ DASHManifestHandler::SegmentEntry &DASHManifestHandler::SegmentEntry::operator=(
     return *this;
 }
 
-static bool g_registered = ManifestHandlerFactory::registerManifestHandler("application/dash+xml", new ManifestHandlerConstructorClass<DASHManifestHandler>());
+const char *DASHManifestHandler::manifestHandlerTypeName()
+{
+    static const char *const type = "DASH MPD";
+    return type;
+}
+
+static bool g_registered = ManifestHandlerFactory::registerManifestHandler("application/dash+xml", new ManifestHandlerConstructorClass<DASHManifestHandler>(), SUITABLE_FOR_STREAMING);
 
 static LIBMPDPP_NAMESPACE_CLASS(MPD) ingest_manifest(const std::shared_ptr<ObjectStore::Object> &new_manifest)
 {

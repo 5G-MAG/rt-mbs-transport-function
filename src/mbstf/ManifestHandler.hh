@@ -64,6 +64,9 @@ public:
     virtual bool update(const std::shared_ptr<ObjectStore::Object> &new_manifest) = 0;
     virtual void startedFetch(const PullObjectIngester::IngestItem &item) {};
     virtual bool compressManifestOnSend() const { return false; };
+    /* A fixed string naming the manifest type handled, the same pointer for every handler of a class,
+       so types compare by pointer. Also for logging. */
+    virtual const char *manifestHandlerType() const = 0;
 
     //static bool parseConfiguration(const std::string &section_name, Open5GSYamlIter &iter);
     //static void tidyConfiguration();

@@ -68,6 +68,11 @@ ObjectManifestController::ObjectManifestController(DistributionSession &dist_ses
     validate_push_acquisition_method(dist_session);
 };
 
+unsigned int ObjectManifestController::manifestHandlerSuitability() const
+{
+    return SUITABLE_FOR_CAROUSEL;
+}
+
 void ObjectManifestController::processEvent(Event &event, SubscriptionService &event_service)
 {
     if (event.eventName() == ObjectStore::ObjectAddedEvent::event_name ||
@@ -104,7 +109,8 @@ void ObjectManifestController::processEvent(Event &event, SubscriptionService &e
                             throw std::runtime_error(ex.what());
                         }
                     } else {
-                        manifest_handler.reset(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL"));
+                        manifest_handler.reset(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL",
+                                                                                          manifestHandlerSuitability()));
                         if (!manifest_handler) {
                             object->second.keepAfterSend(false);
                             throw std::runtime_error("Could not find suitable manifest handler");
@@ -560,7 +566,7 @@ std::string ObjectManifestController::generateUUID()
    0..1 in table 6.1.6.2.5-1. */
 static const char *acquisition_id_rule(const std::string &operating_mode)
 {
-    if (operating_mode == "STREAMING") return "one Application Service Entry Point (a DASH MPD); other types are not implemented";
+    if (operating_mode == "STREAMING") return "at most one Application Service Entry Point per manifest type this MBSTF implements";
     return "a single object manifest URL (TS 26.502 V18.6.0 table 6.1-1)";
 }
 
@@ -576,8 +582,15 @@ static void validate_pull_acquisition_method(DistributionSession &distributionSe
     if (distributionSession.getObjectAcquisitionMethod() == "PULL") {
         const std::string &mode = distributionSession.getObjectDistributionOperatingMode();
         auto &pull_urls = distributionSession.getObjectAcquisitionPullUrls();
-        if (!pull_urls.has_value() || pull_urls->size() != 1) {
-            throw ModelException(std::string("must contain exactly one item for objDistributionOperatingMode ") + mode + ": " +
+        /* STREAMING takes one identifier per Application Service Entry Point type
+           (TS 26.502 V18.6.0 table 6.1-1, OBJECT_STREAMING: "shall cite a single Application Service Entry Point URL of each type"),
+           so no more than the manifest types registered as suitable for streaming. */
+        const size_t max_ids = (mode == "STREAMING") ?
+                ManifestHandlerFactory::numberOfManifestHandlerTypes(SUITABLE_FOR_STREAMING) : 1;
+        if (!pull_urls.has_value() || pull_urls->empty() || pull_urls->size() > max_ids) {
+            throw ModelException(std::string(mode == "STREAMING" ? "must contain between one and " + std::to_string(max_ids) + " items"
+                                                                 : std::string("must contain exactly one item")) +
+                                 " for objDistributionOperatingMode " + mode + ": " +
                                  acquisition_id_rule(mode), "ObjDistributionData",
                                  "distSession.objDistributionData.objAcquisitionIdsPull",
                                  pull_urls.has_value() ? ProblemCause::MANDATORY_IE_INCORRECT : ProblemCause::MANDATORY_IE_MISSING);
