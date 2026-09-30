@@ -185,9 +185,9 @@ DistributionSessionSubscription::DistributionSessionSubscription(DistributionSes
     ,m_subscriptionId(std::move(other.m_subscriptionId))
     ,m_eventTypes(std::move(other.m_eventTypes))
     ,m_distSessionSubscription(std::move(other.m_distSessionSubscription))
+    ,m_expiryTime(std::move(other.m_expiryTime))
     ,m_expiryTimer(std::move(other.m_expiryTimer))
     ,m_expiryTimerFunc(std::move(other.m_expiryTimerFunc))
-    ,m_expiryTime(std::move(other.m_expiryTime))
     ,m_cache(other.m_cache)
 {
     other.m_cache = nullptr;
