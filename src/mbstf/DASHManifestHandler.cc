@@ -36,6 +36,7 @@
 #include "DistributionSession.hh"
 #include "ManifestHandler.hh"
 #include "ManifestHandlerFactory.hh"
+#include "MimeContentType.hh"
 #include "ObjectController.hh"
 #include "ObjectStore.hh"
 #include "Open5GSYamlIter.hh"
@@ -472,7 +473,8 @@ static bool g_registered = ManifestHandlerFactory::registerManifestHandler("appl
 
 static LIBMPDPP_NAMESPACE_CLASS(MPD) ingest_manifest(const std::shared_ptr<ObjectStore::Object> &new_manifest)
 {
-    if ( new_manifest->second.mediaType() != "application/dash+xml" ){
+    static const MimeContentType expected_type("application/dash+xml");
+    if (expected_type != MimeContentType(new_manifest->second.mediaType())){
          throw std::invalid_argument("Does not look like a DASH Manifest as the media type is invalid. Expected media type: application/dash+xml");
     }
     return LIBMPDPP_NAMESPACE_CLASS(MPD) (new_manifest->first, new_manifest->second.getFetchedUrl());
