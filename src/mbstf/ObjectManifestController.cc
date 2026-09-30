@@ -36,6 +36,8 @@
 #include "SubscriptionService.hh"
 #include "utilities.hh"
 #include "openapi/model/DistSessionState.h"
+#include "openapi/model/ModelException.hh"
+#include "openapi/model/ProblemCause.hh"
 
 #include <algorithm>
 
@@ -44,6 +46,8 @@
 #include "ObjectManifestController.hh"
 
 using reftools::mbstf::DistSessionState;
+using fiveg_mag_reftools::ModelException;
+using fiveg_mag_reftools::ProblemCause;
 
 MBSTF_NAMESPACE_START
 
@@ -545,33 +549,64 @@ std::string ObjectManifestController::generateUUID()
 
 /* local functions */
 
+/* The operating modes this controller serves (COLLECTION, CAROUSEL, STREAMING) each take exactly one
+   object acquisition identifier, for either acquisition method.
+
+   TS 26.502 V18.6.0 table 6.1-1, rows OBJECT_COLLECTION and OBJECT_CAROUSEL, of the MBS Distribution
+   Session parameters: "shall cite a single object manifest URL in Object acquisition identifiers."
+
+   OBJECT_STREAMING allows one Application Service Entry Point per type, but only DASH is implemented,
+   so one is accepted. TS 29.581 V18.6.0 can carry only one for PUSH anyway: objAcquisitionIdPush is
+   0..1 in table 6.1.6.2.5-1. */
+static const char *acquisition_id_rule(const std::string &operating_mode)
+{
+    if (operating_mode == "STREAMING") return "one Application Service Entry Point (a DASH MPD); other types are not implemented";
+    return "a single object manifest URL (TS 26.502 V18.6.0 table 6.1-1)";
+}
+
+/* These checks run in the base constructor, before a derived controller has refused a session of
+   another operating mode, so they apply only to the modes this controller serves. */
+static bool is_manifest_operating_mode(const std::string &operating_mode)
+{
+    return operating_mode == "COLLECTION" || operating_mode == "CAROUSEL" || operating_mode == "STREAMING";
+}
+
 static void validate_pull_acquisition_method(DistributionSession &distributionSession) {
+    if (!is_manifest_operating_mode(distributionSession.getObjectDistributionOperatingMode())) return;
     if (distributionSession.getObjectAcquisitionMethod() == "PULL") {
+        const std::string &mode = distributionSession.getObjectDistributionOperatingMode();
         auto &pull_urls = distributionSession.getObjectAcquisitionPullUrls();
-        if (pull_urls.has_value() && pull_urls->size() != 1) {
-            throw std::runtime_error("objAcquisitionIdsPull must contain exactly one item when objDistributionOperatingMode is set to " + distributionSession.getObjectDistributionOperatingMode());
+        if (!pull_urls.has_value() || pull_urls->size() != 1) {
+            throw ModelException(std::string("must contain exactly one item for objDistributionOperatingMode ") + mode + ": " +
+                                 acquisition_id_rule(mode), "ObjDistributionData",
+                                 "distSession.objDistributionData.objAcquisitionIdsPull",
+                                 pull_urls.has_value() ? ProblemCause::MANDATORY_IE_INCORRECT : ProblemCause::MANDATORY_IE_MISSING);
         }
         std::optional<std::string> object_acquisition_push_id = distributionSession.getObjectAcquisitionPushId();
         if (object_acquisition_push_id.has_value()) {
-
-            throw std::runtime_error("objAcquisitionIdPush must not be present when objAcquisitionMethod is set to " + distributionSession.getObjectAcquisitionMethod());
+            throw ModelException("must not be present when objAcquisitionMethod is PULL", "ObjDistributionData",
+                                 "distSession.objDistributionData.objAcquisitionIdPush", ProblemCause::MANDATORY_IE_INCORRECT);
         }
     }
 }
 
 static bool validate_push_acquisition_method(DistributionSession &distributionSession) {
+    if (!is_manifest_operating_mode(distributionSession.getObjectDistributionOperatingMode())) return false;
     if (distributionSession.getObjectAcquisitionMethod() == "PUSH") {
+        const std::string &mode = distributionSession.getObjectDistributionOperatingMode();
         auto &pull_urls = distributionSession.getObjectAcquisitionPullUrls();
         if (pull_urls.has_value()) {
-            throw std::runtime_error("objAcquisitionIdsPull must not be present when objAcquisitionMethod is set to " + distributionSession.getObjectAcquisitionMethod());
-        } else {
-            std::optional<std::string> object_acquisition_push_id = distributionSession.getObjectAcquisitionPushId();
-            if (!object_acquisition_push_id.has_value()) {
-                std::optional<std::string> id = "manifest";
-                distributionSession.setObjectAcquisitionIdPush(id);
-            }
-            return true;
+            throw ModelException("must not be present when objAcquisitionMethod is PUSH", "ObjDistributionData",
+                                 "distSession.objDistributionData.objAcquisitionIdsPull", ProblemCause::MANDATORY_IE_INCORRECT);
         }
+        /* Previously a missing identifier was defaulted to "manifest", which the table above does not
+           allow, and which refused every push to any other path without saying why. */
+        if (!distributionSession.getObjectAcquisitionPushId().has_value()) {
+            throw ModelException(std::string("must be present for objDistributionOperatingMode ") + mode + ": " +
+                                 acquisition_id_rule(mode), "ObjDistributionData",
+                                 "distSession.objDistributionData.objAcquisitionIdPush", ProblemCause::MANDATORY_IE_MISSING);
+        }
+        return true;
     }
     return false;
 }

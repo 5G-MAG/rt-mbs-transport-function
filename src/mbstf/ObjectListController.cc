@@ -309,6 +309,17 @@ static int validate_distribution_session(DistributionSession &distribution_sessi
             return 0;
         }
     }
+    /* TS 26.502 V18.6.0 table 6.1-1, row OBJECT_SINGLE, for the pull-based object acquisition method:
+       "shall cite a set of one or more object URLs as Object acquisition identifiers." Without one,
+       nothing is ever pulled. */
+    if (distribution_session.getObjectAcquisitionMethod() == "PULL") {
+        const auto &pull_urls = distribution_session.getObjectAcquisitionPullUrls();
+        if (!pull_urls.has_value() || pull_urls->empty()) {
+            throw ModelException("must cite one or more object URLs for objDistributionOperatingMode SINGLE with PULL",
+                                 "ObjDistributionData", "distSession.objDistributionData.objAcquisitionIdsPull",
+                                 ProblemCause::MANDATORY_IE_MISSING);
+        }
+    }
     ObjectController::validateDistributionSession(distribution_session);
 
     return 1;
