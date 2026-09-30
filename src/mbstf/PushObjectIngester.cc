@@ -237,6 +237,13 @@ MHD_Result PushObjectIngester::Request::queueRefusal(struct MHD_Connection *conn
                                                                     MHD_RESPMEM_MUST_COPY);
     if (!m_errorDetail.empty()) MHD_add_response_header(response, "Content-Type", "text/plain");
     ogs_info("Refusing push of %s with %u %s", m_urlPath.c_str(), m_statusCode, m_errorReason.c_str());
+    /* Reported as requestHandler() reports a failed push, so a refused push also counts toward
+       mbstf.consecutiveIngestFailuresBeforeDeactivate. */
+    if (m_statusCode >= 400 && m_statusCode <= 499) {
+        m_pushObjectIngester.emitObjectIngestFailedEvent(m_urlPath, ObjectIngester::IngestFailedEvent::CLIENT_ERROR);
+    } else if (m_statusCode >= 500 && m_statusCode <= 599) {
+        m_pushObjectIngester.emitObjectIngestFailedEvent(m_urlPath, ObjectIngester::IngestFailedEvent::SERVER_ERROR);
+    }
     MHD_Result rv = MHD_queue_response(connection, m_statusCode, response);
     MHD_destroy_response(response);
     return rv;
