@@ -57,7 +57,8 @@ int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::str
  *
  * Where the route is loopback, which is what get_path_mtu() reports through via_loopback, there is
  * no path to measure: the MBSTF and the ingress point are co-located and the kernel answers with
- * the loopback MTU. Context::pathMtu is used instead, set by mbstf.pathMtu.
+ * the loopback MTU. Context::pathMtu is used instead when set by mbstf.pathMtu, else
+ * Context::kDefaultPathMtu. A configured Context::pathMtu also caps a discovered value.
  */
 int flute_path_mtu(int discovered_mtu, bool discovered_via_loopback);
 std::shared_ptr<struct sockaddr> make_shared_sockaddr(int family_hint, const std::string &hostname, in_port_t port);

@@ -154,41 +154,33 @@ int get_path_mtu(const ogs_sockaddr_t &sock_addr, int minus_level_hdrs, bool *vi
 
 int flute_path_mtu(int discovered_mtu, bool discovered_via_loopback)
 {
-    /* The configured path MTU governs, and a measurement may only narrow it.
+    /* The measured MTU of the first hop is used, and mbstf.pathMtu, when set, caps it.
 
-       What get_tunnelled_path_mtu() measures is the first hop, not the path: where a tunnel is
-       configured the datagram is re-encapsulated and forwarded over a path this function cannot see.
-       So a first hop narrower than the configured value is a real constraint and is taken, while a
-       wider one says nothing about the rest of the path and is not: sizing symbols for a 9000 byte
-       first hop because the local interface offers jumbo frames produces datagrams that whatever
-       follows has to fragment or drop.
+       Unset, the interface MTU governs, so jumbo frames configured between the MB-UPF and the gNB
+       are used, as review on 5G-MAG/rt-mbs-transport-function#71 asked. Set, it caps the measurement,
+       for a deployment whose downlink carries less than the outgoing interface: what is measured is
+       the first hop, not the whole path.
 
-       This is what Context.hh and mbstf.yaml have always documented, and what issue #34 asked for,
-       "if a configuration for an MTU has been given in the configuration file then that MTU is
-       used, otherwise the MTU of the interface". The code took the discovered value outright
-       whenever the route was not loopback, including where it was larger, which review on
-       5G-MAG/rt-mbs-transport-function#71 reported as contradicting both.
+       A loopback route is not a path at all: where the MBSTF and the ingress point are co-located
+       the kernel answers with the loopback MTU, 65536, so the configured value, or the default, is
+       used instead. */
+    const std::optional<int> &configured_mtu = App::self().context()->pathMtu;
 
-       A loopback route is not a path at all. Where the MBSTF and the ingress point are co-located
-       the kernel answers with the loopback MTU, 65536, and there is nothing to measure, so the
-       configured value stands alone. */
-    const int path_mtu = App::self().context()->pathMtu;
-
-    if (discovered_via_loopback) {
-        ogs_info("The route to this session's ingress is loopback, so its %d byte MTU is not the "
-                 "path to a receiver; sizing FLUTE symbols for the configured %d byte path MTU "
-                 "instead (mbstf.pathMtu)", discovered_mtu, path_mtu);
-        return path_mtu;
+    if (discovered_via_loopback || discovered_mtu <= 0) {
+        const int mtu = configured_mtu.value_or(Context::kDefaultPathMtu);
+        ogs_info("No path to a receiver could be measured for this session's ingress (%s); sizing FLUTE "
+                 "symbols for %s %d byte path MTU", discovered_via_loopback ? "loopback route" : "no measurement",
+                 configured_mtu ? "the configured" : "the default", mtu);
+        return mtu;
     }
 
-    if (discovered_mtu > 0 && discovered_mtu < path_mtu) {
-        ogs_info("The first hop to this session's ingress carries %d bytes, narrower than the "
-                 "configured %d byte path MTU; sizing FLUTE symbols for the measured value",
-                 discovered_mtu, path_mtu);
-        return discovered_mtu;
+    if (configured_mtu && discovered_mtu > configured_mtu.value()) {
+        ogs_info("The first hop to this session's ingress carries %d bytes; sizing FLUTE symbols for the "
+                 "configured %d byte path MTU (mbstf.pathMtu)", discovered_mtu, configured_mtu.value());
+        return configured_mtu.value();
     }
 
-    return path_mtu;
+    return discovered_mtu;
 }
 
 int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port, int minus_level_hdrs, bool *via_loopback)

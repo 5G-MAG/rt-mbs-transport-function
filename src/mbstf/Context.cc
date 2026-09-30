@@ -49,7 +49,7 @@ Context::Context()
     ,servers()
     ,cacheControl({60, 60})
     ,totalMaxBitRateSoftLimit(100)
-    ,pathMtu(kDefaultPathMtu)
+    ,pathMtu(std::nullopt)
     ,consecutiveIngestFailuresBeforeDeactivate(5)
     ,notifyRetryAttempts(5)
     ,notifyRetryDelay(5)
@@ -129,10 +129,11 @@ bool Context::parseConfig()
                     if (mtu_iter.type() == YAML_SCALAR_NODE) {
                         std::string num_val(mtu_iter.value());
                         size_t idx = 0;
-                        pathMtu = std::stoi(num_val, &idx);
-                        if (idx != num_val.size() || pathMtu <= 0) {
+                        const int mtu = std::stoi(num_val, &idx);
+                        if (idx != num_val.size() || mtu <= 0) {
                             throw std::out_of_range("Bad configuration value at mbstf.pathMtu");
                         }
+                        pathMtu = mtu;
                     } else {
                         throw std::out_of_range("Bad configuration node at mbstf.pathMtu");
                     }

@@ -99,14 +99,14 @@ public:
      * datagram is re-encapsulated and forwarded over a path the MBSTF cannot measure at all. The
      * measurement is therefore a ceiling on the first hop, never a description of the whole path.
      *
-     * kDefaultPathMtu is the default and the operator overrides it with mbstf.pathMtu. The
-     * discovered value is used in place of it only when it is smaller, since a first hop narrower
-     * than the stated path MTU is a real constraint while a wider one says nothing about the rest
-     * of the path.
+     * Optional. When unset, the measured MTU of a route that leaves the host is used, so jumbo
+     * frames configured on the interfaces are used too. When set, it caps the measured value, for a
+     * deployment whose downlink carries less than the outgoing interface. Where nothing can be
+     * measured (loopback, or no socket), this value is used, or kDefaultPathMtu when unset.
      */
-    int pathMtu;
+    std::optional<int> pathMtu;
 
-    /**< The path MTU assumed when the operator does not state one, in bytes.
+    /**< The path MTU assumed where none can be measured and the operator states none, in bytes.
      *
      * The conventional Ethernet MTU. No clause fixes it: it is a documented default, and a
      * deployment whose path differs sets mbstf.pathMtu. Sizing symbols below the path MTU costs

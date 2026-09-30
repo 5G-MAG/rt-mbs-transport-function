@@ -218,9 +218,12 @@ sbi:
 # o The MTU, in bytes, of the path a distribution session's packets travel to the receiver. FLUTE encoding symbols are sized
 #   from it, so a value larger than the path carries puts every multi-symbol object into datagrams that never arrive.
 #
-# o The MBSTF can only measure the first hop, and where it is co-located with the ingress point that hop is loopback and
-#   measures 65536. The default of 1500, the conventional Ethernet MTU, is used instead unless the first hop measures less.
-#   Set this to the real figure for a path that carries more, or less, than an Ethernet frame.
+# o Optional. Unset, the measured MTU of the outgoing interface is used, so jumbo frames configured on the interfaces are
+#   used too. Set, it caps the measured value: set it where the path to the receiver carries less than the outgoing
+#   interface. The MBSTF can only measure the first hop.
+#
+# o Where the first hop is loopback (the MBSTF co-located with the ingress point, which measures 65536), or nothing can be
+#   measured, this value is used, or 1500, the conventional Ethernet MTU, when it is unset.
 #
 mbstf:
     sbi:
@@ -236,7 +239,7 @@ mbstf:
       - addr: 127.0.0.61
         port: 0 # ephemeral
     totalMaxBitRateSoftLimit: 1000 # 1Gbps
-    pathMtu: 1500
+    #pathMtu: 1500
     consecutiveIngestFailuresBeforeDeactivate: 5
     packetModeSchedulingQueueSize: 131072 # 128KB queue per packet mode DistSession
     # The most PullObjectIngester instances one Distribution Session may run at once, each
