@@ -128,6 +128,10 @@ private:
     std::atomic_bool m_schedulingRunning;
     std::atomic_bool m_schedulingCancel;
     size_t m_maxStreams;
+    /* Why the Transmitter could not be created, guarded by m_transmitterMutex. Once set, creation
+       is not retried; the worker reports it once, outside the lock. */
+    std::optional<std::string> m_transmitterFailure;
+    std::atomic_bool m_transmitterFailureReported{false};
 };
 
 MBSTF_NAMESPACE_STOP

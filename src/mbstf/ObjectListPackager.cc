@@ -227,6 +227,10 @@ void ObjectListPackager::doObjectPackage() {
                 abort();
                 return;
             }
+            /* Opening the Transmitter's socket and event loop throws when descriptors or memory run out.
+               Uncaught on this worker thread, that ended the process. Reported like the FEC rejection
+               above, so the Distribution Session is marked INACTIVE, and the worker stops. */
+            try {
             m_transmitter.reset(new LibFlute::Transmitter(
                     ssm_port.destinationAddress(),
                     static_cast<short>(ssm_port.port()),
@@ -241,6 +245,14 @@ void ObjectListPackager::doObjectPackage() {
                     content_fec_oti,
                     LibFlute::Profile::Ts26517,
                     fec_redundancy_level));
+            } catch (const std::exception &err) {
+                ogs_error("Cannot create the FLUTE Transmitter, not transmitting: %s", err.what());
+                ObjectPackager::PackagingFailedEvent packaging_failed(
+                        err.what(), ObjectPackager::PackagingFailedEvent::RESOURCE_NOT_AVAILABLE);
+                sendEventSynchronous(packaging_failed);
+                abort();
+                return;
+            }
             m_transmitter->register_completion_callback(
                     [this](uint32_t toi) {
                         ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", m_transmitter->number_of_files(), m_packageItems.size());
@@ -402,15 +414,18 @@ bool ObjectListPackager::deactivate()
     bool queue_empty;
     {
         std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-        ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", m_transmitter->number_of_files(), m_packageItems.size());
-        queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
+        /* No Transmitter when it could not be created or the FEC configuration was rejected; both
+           report a packaging failure, which deactivates the session and so reaches here. */
+        const size_t transmitter_files = m_transmitter ? m_transmitter->number_of_files() : 0;
+        ogs_debug("FLUTE Transmitter has %zu files left, packager has %zu files left", transmitter_files, m_packageItems.size());
+        queue_empty = (transmitter_files + m_packageItems.size() == 0);
     }
     if (queue_empty) {
         ogs_debug("Deactivating FLUTE stream, no files to purge");
         abort();
         {
             std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-            m_transmitter->deactivate();
+            if (m_transmitter) m_transmitter->deactivate();
         }
         m_deactivating = false;
         return true;

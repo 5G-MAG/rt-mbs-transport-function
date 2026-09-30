@@ -251,13 +251,28 @@ bool ObjectCarouselPackager::updateFluteInfo(const SsmPort &ssm_port, uint32_t r
 
 void ObjectCarouselPackager::doObjectPackage() {
     ensureTransmitter();
+    std::optional<std::string> failure;
+    {
+        std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+        failure = m_transmitterFailure;
+    }
+    if (failure) {
+        /* Reported here and not where it happened: ensureTransmitter() runs under the transmitter
+           lock, sometimes taken by its caller, and the report deactivates the session, which joins
+           the threads that wait on that lock. */
+        abort(); // on the worker thread this stops the loop without joining
+        if (!m_transmitterFailureReported.exchange(true)) {
+            errorInCarousel(failure.value(), ObjectPackager::PackagingFailedEvent::RESOURCE_NOT_AVAILABLE);
+        }
+        return;
+    }
     m_io.run_one();
 }
 
 void ObjectCarouselPackager::ensureTransmitter()
 {
     std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-    if (!m_transmitter) {
+    if (!m_transmitter && !m_transmitterFailure) {
         const auto &ssm_port = ssmPort();
         if (!ssm_port) return;
         /* The Distribution Session's own requested AL-FEC configuration, converted to the
@@ -274,6 +289,10 @@ void ObjectCarouselPackager::ensureTransmitter()
                       err.what());
             return;
         }
+        /* Opening the Transmitter's socket and event loop throws when descriptors or memory run out.
+           Uncaught, that ended the process. Recorded here and reported by doObjectPackage(), which
+           marks the Distribution Session INACTIVE; the scheduler stops now. */
+        try {
         m_transmitter.reset(new LibFlute::Transmitter(ssm_port.destinationAddress(), static_cast<short>(ssm_port.port()), tsi(), mtu(),
                                                       rateLimit(), m_io, m_tunnelEndpoint,
                                                       LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005, true,
@@ -281,6 +300,12 @@ void ObjectCarouselPackager::ensureTransmitter()
                                                       content_fec_oti,
                                                       LibFlute::Profile::Ts26517,
                                                       fec_redundancy_level));
+        } catch (const std::exception &err) {
+            m_transmitterFailure = std::string("Cannot create the FLUTE Transmitter, not transmitting: ") + err.what();
+            m_schedulingCancel = true;
+            m_packagingUpdateCondVar.notify_all();
+            return;
+        }
         m_transmitter->register_completion_callback(
             [this](uint32_t toi) {
                 ogs_debug("Object with TOI %d completed", toi);
