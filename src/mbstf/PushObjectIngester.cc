@@ -552,9 +552,12 @@ void PushObjectIngester::doObjectIngest() {
        full load, the process stopped answering in time, and its NRF registration lapsed, so every MBSF
        then reported "No MBSTF was found in the network". Nothing sets a retry interval or a retry
        limit, so rather than invent one this reports the failure and stops. */
-    ogs_error("PushObjectIngester[%p]: could not start the push ingest server; reporting the ingest as "
-              "failed rather than retrying", this);
-    emitObjectIngestFailedEvent(std::string(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
+    ogs_error("PushObjectIngester[%p]: could not start the push ingest server; reporting the session as "
+              "failed to start rather than retrying", this);
+    /* Not reported as a failed ingest: no data was ingested or refused, the session could not start.
+       The Distribution Session reads startFailed() once set-up completes and records
+       SERVICE_MANAGEMENT_FAILURE. An IngestFailedEvent here raced that, and when it arrived after the
+       subscriptions also reported DATA_INGEST_FAILURE. */
     {
         /* getIngestServerPrefix() is waiting for a daemon that will now never exist, on the thread
            setting up the Distribution Session; without this it waited for ever and the MBSTF stopped
