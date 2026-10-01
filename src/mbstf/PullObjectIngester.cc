@@ -282,7 +282,11 @@ void PullObjectIngester::doObjectIngest() {
                    5G-MAG/rt-mbs-transport-function#74, which had this MBSTF inferring the type
                    before this. */
                 std::string media_type = m_curl->getContentType();
-                if (media_type.empty()) {
+                /* Only a response carrying content needs one. A 304 carries none and normally no
+                   Content-Type either, and the stored object's type is kept for it below.
+                   RFC 9110 section 15.4.5: "a sender SHOULD NOT generate representation metadata other than the above listed fields" */
+                const long content_response_code = m_curl->getResponseCode();
+                if (media_type.empty() && content_response_code >= 200 && content_response_code <= 299) {
                     ogs_warn("Ingest of [%s] failed: the origin sent no Content-Type; an object with "
                              "no media type cannot be carried in a conformant FDT",
                              item.url().c_str());
