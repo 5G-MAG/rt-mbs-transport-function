@@ -38,6 +38,9 @@ public:
     /* Applies new output parameters (rate, tunnel, SSM) to the running output only, for a change made
        together with a state change, whose state functions rebuild the inputs themselves. */
     virtual void reconfigureOutput() {};
+    /* Checks the session's current parameters with the rules applied when it was created, so an
+       update is held to them too. Throws ModelException when they are broken. */
+    virtual void validateUpdate() {};
 
     /** Stop every ingest worker this controller runs, without destroying anything.
      *

@@ -855,6 +855,15 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
 
     /* New CreateReqData is valid, replace old one */
     m_createReqData = new_create_req_data;
+    if (m_controller) {
+        try {
+            m_controller->validateUpdate();
+        } catch (ModelException &err) {
+            m_createReqData = old_create_req_data;
+            ex.addInvalidParameter(err.parameter, err.what());
+            throw ex;
+        }
+    }
 
     /* Make sure we are in the right state */
     //const auto &old_state = old_dist_session->getDistSessionState();

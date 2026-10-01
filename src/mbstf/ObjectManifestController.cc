@@ -68,6 +68,14 @@ ObjectManifestController::ObjectManifestController(DistributionSession &dist_ses
     validate_push_acquisition_method(dist_session);
 };
 
+void ObjectManifestController::validateUpdate()
+{
+    /* The object acquisition identifier rules are rules on the provisioned parameters, however they came
+       to be provisioned, so an update that breaks them is refused as a create that breaks them is. */
+    validate_pull_acquisition_method(distributionSession());
+    validate_push_acquisition_method(distributionSession());
+}
+
 unsigned int ObjectManifestController::manifestHandlerSuitability() const
 {
     return SUITABLE_FOR_CAROUSEL;
