@@ -200,7 +200,21 @@ void ObjectCarouselController::updateCarousel()
     for (const auto &pkg_item : packager_items) {
         /* this object is no longer in the carousel, so remove it */
         packager->remove(pkg_item);
+        /* and from the store, which keeps carousel objects after sending (objectAddOrUpdateEvent())
+           only for as long as the manifest lists them */
+        auto object_store = objectStore();
+        if (object_store && pkg_item.object()) object_store->deleteObject(pkg_item.object()->second.objectId());
     }
+}
+
+void ObjectCarouselController::manifestUpdated()
+{
+    /* The carousel is the set the manifest now lists, so an update is reconciled against it: objects it
+       no longer lists leave the carousel. Reconciled only when the packager was made and when it is
+       reactivated, a rotating carousel kept every object it had ever listed, and the rate it needed grew
+       until it exceeded the session's maximum bit rate and the session was deactivated.
+       TS 26.517 V18.6.0 clause 6.2.3.4: “The list of objects described in the manifest may be updated over time by providing a replacement object manifest.” */
+    if (getObjectCarouselPackager()) updateCarousel();
 }
 
 bool ObjectCarouselController::checkObjectActiveInManifest(const std::shared_ptr<ObjectStore::Object> &object)

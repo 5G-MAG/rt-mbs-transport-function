@@ -61,6 +61,7 @@ protected:
     virtual void activateObjectPackager();
     virtual void deactivateObjectPackager();
     virtual void objectAddOrUpdateEvent(const std::shared_ptr<ObjectStore::Object> &object);
+    virtual void manifestUpdated() override;
     virtual bool checkObjectActiveInManifest(const std::shared_ptr<ObjectStore::Object> &object);
     virtual void finishRequestInManifestHandler(const std::shared_ptr<ObjectStore::Object> &object);
     virtual void sendToPackager(const std::shared_ptr<ObjectStore::Object> &object);

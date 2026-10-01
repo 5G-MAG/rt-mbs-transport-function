@@ -87,6 +87,8 @@ protected:
     const std::shared_ptr<ManifestHandler> &manifestHandler() const;
     virtual std::string nextObjectId();
     virtual void objectAddOrUpdateEvent(const std::shared_ptr<ObjectStore::Object> &object) {};
+    /* Called once the manifest handler has taken a new version of the manifest. */
+    virtual void manifestUpdated() {};
     virtual bool includeManifest() { return false; };
     /* The ManifestHandlerSuitability flags of the handlers this mode may use; carousel by default. */
     virtual unsigned int manifestHandlerSuitability() const;

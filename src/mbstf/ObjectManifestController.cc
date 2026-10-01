@@ -100,6 +100,7 @@ void ObjectManifestController::processEvent(Event &event, SubscriptionService &e
                                 throw std::runtime_error("Failed to update Manifest");
                             }
                             startWorker();
+                            manifestUpdated();
                             if (includeManifest()) sendToPackager(object);
                         } catch (std::exception &ex) {
                             ogs_error("Invalid Manifest update: %s", ex.what());
