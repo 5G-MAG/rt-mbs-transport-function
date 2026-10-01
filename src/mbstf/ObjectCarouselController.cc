@@ -102,6 +102,10 @@ void ObjectCarouselController::setObjectPackager()
 void ObjectCarouselController::activateObjectPackager() {
     packager()->activate();
     startWorker();
+    /* Deactivation emptied the carousel and an unchanged manifest raises no event to refill it, so it
+       is refilled here, as when the packager is first made.
+       TS 26.502 V18.6.0 clause 4.6.1, step 3: "As a result, the MBSTF shall commence sending MBS data packets to the MBUPF at reference point Nmb9" */
+    updateCarousel();
 }
 
 void ObjectCarouselController::deactivateObjectPackager() {

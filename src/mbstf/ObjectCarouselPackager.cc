@@ -371,27 +371,16 @@ void ObjectCarouselPackager::flushQueue()
 
 bool ObjectCarouselPackager::deactivate()
 {
-    m_deactivating = true;
-    bool queue_empty;
+    /* A carousel repeats until it is stopped, so its queue never drains and waiting for it left the
+       session DEACTIVATING, still sending, with new items refused ever after. It is halted now.
+       TS 26.502 V18.6.0 clause 4.6.1, step 4b: "As a result, the MBSTF shall cease sending MBS data packets to the MBUPF at reference point Nmb9" */
+    abort();
     {
         std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-        if (!m_transmitter) {
-            queue_empty = (m_packageItems.size() == 0);
-        } else {
-            queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
-        }
+        if (m_transmitter) m_transmitter->deactivate();
     }
-    if (queue_empty) {
-        ogs_debug("Deactivating FLUTE stream, no files to purge");
-        abort();
-        {
-            std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-            if (m_transmitter) m_transmitter->deactivate();
-        }
-        m_deactivating = false;
-        return true;
-    }
-    return false;
+    m_deactivating = false;
+    return true;
 }
 
 bool ObjectCarouselPackager::streamsAllocateToi(const std::function<std::pair<uint32_t, std::shared_ptr<ObjectStore::Object> >()> &get_toi_fn)
