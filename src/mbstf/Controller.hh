@@ -35,6 +35,9 @@ public:
     const DistributionSession &distributionSession() const {return m_distributionSession;};
 
     virtual void reconfigure() {};
+    /* Applies new output parameters (rate, tunnel, SSM) to the running output only, for a change made
+       together with a state change, whose state functions rebuild the inputs themselves. */
+    virtual void reconfigureOutput() {};
 
     /** Stop every ingest worker this controller runs, without destroying anything.
      *

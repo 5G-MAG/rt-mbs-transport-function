@@ -847,6 +847,23 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
         throw ex;
     }
 
+    /* The new values take effect on the running session.
+       TS 29.581 V18.6.0 clause 5.2.2.3.1: "The Update service operation shall be used to update an existing MBS Distribution Session within the MBSTF"
+       A state change already rebuilds the inputs (the input states make new ingesters), so then only
+       the output is reconfigured, since activateOutput() reuses an existing packager as it is;
+       reconfiguring everything as well would rebuild the inputs twice. A change that keeps the state
+       rebuilds nothing, so everything is reconfigured. Compared in the request view so write-only
+       attributes such as mbr count. */
+    DistSession old_with_new_state(*old_dist_session);
+    old_with_new_state.setDistSessionState(new_dist_session->getDistSessionState());
+    if (m_controller && old_with_new_state.toJSON(true).serialise() != new_dist_session->toJSON(true).serialise()) {
+        if (new_state_enum == old_dist_session->getDistSessionState()->getValue()) {
+            m_controller->reconfigure();
+        } else {
+            m_controller->reconfigureOutput();
+        }
+    }
+
     /* Update the last-used and hash values to reflect the new CreateReqData */
     _setLastUsed();
     _setHash();

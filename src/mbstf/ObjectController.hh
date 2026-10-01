@@ -86,6 +86,7 @@ public:
         this->reconfigurePullObjectIngesters();
         this->reconfigureObjectPackager();
     };
+    virtual void reconfigureOutput() override { reconfigureObjectPackager(); };
     virtual void reconfigureObjectStore();
     virtual void reconfigurePushObjectIngester() = 0;
     virtual void reconfigurePullObjectIngesters() = 0;
