@@ -129,17 +129,13 @@ void ObjectController::processEvent(Event &event, SubscriptionService &event_ser
         sendEventSynchronous(event); /* repeat ingest failure event to subscribers of this ObjectController */
         auto max_failures = App::self().context()->consecutiveIngestFailuresBeforeDeactivate;
         if (max_failures != 0 && m_consecutiveIngestFailures >= max_failures) {
-            DistSessionState inactive_state;
-            inactive_state = DistSessionState::VAL_INACTIVE;
-            distributionSession().setState(inactive_state);
+            distributionSession().requestInactive();
         }
     } else if (event.eventName() == ObjectPackager::PackagingFailedEvent::event_name) {
         ObjectPackager::PackagingFailedEvent &packaging_failed_event = dynamic_cast<ObjectPackager::PackagingFailedEvent&>(event);
         ogs_debug("Object packaging failed: reason = (%i) %s", packaging_failed_event.failureType(), packaging_failed_event.reason().c_str());
         sendEventSynchronous(event); /* repeat packaging failure event to subscribers of this ObjectController */
-        DistSessionState inactive_state;
-        inactive_state = DistSessionState::VAL_INACTIVE;
-        distributionSession().setState(inactive_state);
+        distributionSession().requestInactive();
     } else if (event.eventName() == ObjectStore::ObjectAddedEvent::event_name ||
                event.eventName() == ObjectStore::ObjectUpdatedEvent::event_name) {
         /* object successfully added/updated to the object store */

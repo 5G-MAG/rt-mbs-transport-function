@@ -98,6 +98,11 @@ public:
 
     const reftools::mbstf::DistSessionState &getState() const;
     DistributionSession &setState(const reftools::mbstf::DistSessionState &state);
+    /* Makes this session INACTIVE from the event thread rather than the calling one, for a failure
+       found on a packager or ingester thread: becoming INACTIVE stops those threads, which cannot be
+       done from one of them, nor while it holds the locks they wait on.
+       TS 26.502 V18.6.0 clause 5.5.1, step 9: "the state of the MBS Distribution Session in the MBSTF may transition through DEACTIVATING to INACTIVE (see step 4 in clause 4.6.1) in case of a severe fault." */
+    void requestInactive();
     const reftools::mbstf::ObjDistributionData::ObjAcquisitionIdsPullType &getObjectAcquisitionPullUrls() const;
     const std::string &getObjectDistributionOperatingMode() const;
     const SsmPort getSsmPort() const;

@@ -31,7 +31,8 @@ public:
         SEND_NOTIFICATION = OGS_MAX_NUM_OF_PROTO_EVENT+1000,
         RELEASE_SUBSCRIPTION_SVC,
         SUBSCRIPTION_EXPIRED,
-        NOTIFICATION_RETRY
+        NOTIFICATION_RETRY,
+        DEACTIVATE_SESSION
     } LocalEventIds;
 
     static const char *getEventName(Open5GSEvent &event) {
@@ -40,6 +41,7 @@ public:
         if (event.id() == RELEASE_SUBSCRIPTION_SVC) return "RELEASE_SUBSCRIPTION_SVC";
         if (event.id() == SUBSCRIPTION_EXPIRED) return "SUBSCRIPTION_EXPIRED";
         if (event.id() == NOTIFICATION_RETRY) return "NOTIFICATION_RETRY";
+        if (event.id() == DEACTIVATE_SESSION) return "DEACTIVATE_SESSION";
         return "Unknown event";
     };
 };

@@ -504,6 +504,18 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
         }
         return true;
 
+    case LocalEvents::DEACTIVATE_SESSION:
+        {
+            /* Pushed by requestInactive(); the session may have been deleted since. */
+            std::unique_ptr<std::string> dist_session_id(reinterpret_cast<std::string*>(event.sbiData()));
+            const auto &dist_session = App::self().context()->findDistributionSession(*dist_session_id);
+            if (dist_session) {
+                DistSessionState inactive_state;
+                inactive_state = DistSessionState::VAL_INACTIVE;
+                dist_session->setState(inactive_state);
+            }
+            return true;
+        }
     case LocalEvents::SUBSCRIPTION_EXPIRED:
         {
             /* Pushed by a subscription's expiry timer (SubscriptionExpiryTimerFunc in
@@ -541,6 +553,19 @@ const DistSessionState &DistributionSession::getState() const
     }
     static const DistSessionState no_val = DistSessionState();
     return no_val;
+}
+
+void DistributionSession::requestInactive()
+{
+    std::shared_ptr<Open5GSEvent> event(new Open5GSEvent(new ogs_event_t));
+    event->ogsEvent()->id = LocalEvents::DEACTIVATE_SESSION;
+    event->setSbiData(new std::string(distributionSessionId()));
+    try {
+        App::self().ogsApp()->pushEvent(event);
+    } catch (std::exception &ex) {
+        ogs_error("Failed to push DEACTIVATE_SESSION event for Distribution Session %s: %s",
+                  distributionSessionId().c_str(), ex.what());
+    }
 }
 
 DistributionSession &DistributionSession::setState(const DistSessionState &dist_sess_state)
