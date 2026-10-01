@@ -211,6 +211,19 @@ bool ObjectCarouselPackager::remove(const PackageItem &item) {
 bool ObjectCarouselPackager::updateFluteInfo(const SsmPort &ssm_port, uint32_t rate_limit,
                                              const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
 {
+    /* The scheduler sizes the carousel from rateLimit(), not from the Transmitter, so a new rate is
+       set there too and the scheduler woken to re-check it: a carousel refused for exceeding its rate
+       is scheduled again once the rate allows. Done before the Transmitter lock is taken, since the
+       scheduler takes the package items lock first and the Transmitter lock inside it. */
+    if (rate_limit != rateLimit()) {
+        ogs_debug("Carousel rate changed from %u to %u kbps; re-checking the schedule", rateLimit(), rate_limit);
+        {
+            std::lock_guard<decltype(m_packageItemsMutex)::element_type> pkg_lock(*m_packageItemsMutex);
+            setRateLimit(rate_limit);
+        }
+        m_packagingUpdateCondVar.notify_all();
+    }
+
     std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
 
     /* Do nothing if we don't have a Transmitter */
