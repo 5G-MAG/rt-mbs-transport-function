@@ -65,6 +65,17 @@ ObjectCarouselController::ObjectCarouselController(DistributionSession &distribu
 
 ObjectCarouselController::~ObjectCarouselController()
 {
+    /* Dropped before anything else: this object is still subscribed to the object store, and an
+       event delivered once the derived part is gone reaches ObjectManifestController::processEvent
+       through a vtable that no longer has sendToPackager(), which ends the process with "pure
+       virtual method called". ~Subscriber() unsubscribes too, but it runs after every derived
+       destructor, which is exactly too late. */
+    /* Stopped before anything else: the ingest workers this controller owns are held by its
+       ObjectController base, so destruction alone stops them last, after every derived destructor
+       has run. abort() below joins a scheduled pull that can take tens of seconds, and the workers
+       keep ingesting throughout, using objects the teardown is already dismantling. */
+    abortIngest();
+    unsubscribeFromAll();
     abort();
 }
 
@@ -74,8 +85,14 @@ void ObjectCarouselController::setObjectPackager()
     const std::optional<std::string> &tunnel_addr = distributionSession().getTunnelAddr();
     uint32_t rate_limit = distributionSession().getRateLimit();
     in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
-    unsigned short mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port, GET_MTU_ETHERNET_PAYLOAD) - GTP_HEADER_SIZE;
-    packager(new ObjectCarouselPackager(objectStore(), *this, ssm_port, rate_limit, mtu, tunnel_addr, tunnel_port));
+    bool mtu_via_loopback = false;
+    /* Sequenced, not nested: the order arguments are evaluated in is unspecified, so reading
+       mtu_via_loopback in the same call that fills it would read it before it is set. */
+    const int discovered_mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port,
+                                                     GET_MTU_ETHERNET_PAYLOAD, &mtu_via_loopback);
+    unsigned short mtu = flute_path_mtu(discovered_mtu, mtu_via_loopback) - GTP_HEADER_SIZE;
+    packager(new ObjectCarouselPackager(objectStore(), *this, ssm_port, rate_limit, mtu, tunnel_addr, tunnel_port,
+                                        distributionSession().getFecInformation()));
     auto pkgr = getObjectCarouselPackager();
     subscribeToService(*pkgr);
     startWorker();
@@ -85,6 +102,10 @@ void ObjectCarouselController::setObjectPackager()
 void ObjectCarouselController::activateObjectPackager() {
     packager()->activate();
     startWorker();
+    /* Deactivation emptied the carousel and an unchanged manifest raises no event to refill it, so it
+       is refilled here, as when the packager is first made.
+       TS 26.502 V18.6.0 clause 4.6.1, step 3: "As a result, the MBSTF shall commence sending MBS data packets to the MBUPF at reference point Nmb9" */
+    updateCarousel();
 }
 
 void ObjectCarouselController::deactivateObjectPackager() {
@@ -179,7 +200,21 @@ void ObjectCarouselController::updateCarousel()
     for (const auto &pkg_item : packager_items) {
         /* this object is no longer in the carousel, so remove it */
         packager->remove(pkg_item);
+        /* and from the store, which keeps carousel objects after sending (objectAddOrUpdateEvent())
+           only for as long as the manifest lists them */
+        auto object_store = objectStore();
+        if (object_store && pkg_item.object()) object_store->deleteObject(pkg_item.object()->second.objectId());
     }
+}
+
+void ObjectCarouselController::manifestUpdated()
+{
+    /* The carousel is the set the manifest now lists, so an update is reconciled against it: objects it
+       no longer lists leave the carousel. Reconciled only when the packager was made and when it is
+       reactivated, a rotating carousel kept every object it had ever listed, and the rate it needed grew
+       until it exceeded the session's maximum bit rate and the session was deactivated.
+       TS 26.517 V18.6.0 clause 6.2.3.4: “The list of objects described in the manifest may be updated over time by providing a replacement object manifest.” */
+    if (getObjectCarouselPackager()) updateCarousel();
 }
 
 bool ObjectCarouselController::checkObjectActiveInManifest(const std::shared_ptr<ObjectStore::Object> &object)

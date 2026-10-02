@@ -52,6 +52,15 @@ public:
     std::list<const char*> subscribedEvents(Subscriber &subscriber); // get the list of named events a Subscriber is subscribed to. nullptr in return means subscribed to all events. empty list means Subscriber is not subscribed.
     std::string reprString() const;
 
+    /** Stop this service's asynchronous event thread, destroying nothing.
+     *
+     * That thread allocates events from the open5gs memory pools, so it has to be stopped
+     * before a teardown that will take those pools away. The destructor stops it too, which is
+     * too late when the teardown is what is running. Safe to call more than once, and safe to
+     * call from the thread itself, which then simply does not join.
+     */
+    void stopAsyncEvents() { stopAsyncLoop(); };
+
 protected:
     bool sendEventSynchronous(Event &event);
 

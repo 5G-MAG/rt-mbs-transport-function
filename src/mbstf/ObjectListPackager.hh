@@ -59,9 +59,56 @@ public:
         PackageItem &deadline(const time_type &deadline) { m_deadline = deadline; return *this; }
         PackageItem &deadline(time_type &&deadline) { m_deadline = std::move(deadline); return *this; }
 
+
+        /** Transmission order for the packaging queue.
+         *
+         * TS 26.517 V18.6.0 clause 6.2.3.5: "The MBSTF shall transmit each object in the object
+         * list such that the last packet of the delivered FLUTE transmission object (including any
+         * FEC recovery packets, when configured) is available at the MBSTF Client no later than its
+         * availability start time."
+         *
+         * The deadline carried by a PackageItem is that availability start time, so ordering the
+         * queue by it is what implements the clause. An item with no deadline sorts after every
+         * item that has one: nothing is known about when it must arrive, so it cannot be allowed to
+         * displace an object that does have a stated time.
+         *
+         * A named predicate rather than an inline comparator so that the ordering can be tested
+         * directly, the queue itself being private and fed only through a live packager.
+         */
+        static bool earlierDeadlineFirst(const PackageItem &a, const PackageItem &b) {
+            if (a.m_deadline.has_value() && b.m_deadline.has_value()) {
+                return a.m_deadline < b.m_deadline;
+            }
+            return a.m_deadline.has_value();
+        };
     private:
         std::shared_ptr<ObjectStore::Object> m_object;
         std::optional<time_type> m_deadline;
+    };
+
+    /** The File@Expires value for an object, per TS 26.517 V18.6.0 clause 6.2.3.5.
+     *
+     * The clause makes the object's latest availability start time a ceiling, not another
+     * candidate: "-The File@Expires attribute for each object shall be set such that it is equal to
+     * or earlier than its latest availability start time." An ingest response's Cache-Control can
+     * sit either side of it, so the earlier of the two is taken whenever both are known.
+     *
+     * A named rule rather than inline arithmetic so that it can be tested directly; the call site
+     * sits inside the send path, which needs a live FLUTE transmitter and its sockets.
+     *
+     * \param cache_expires      Expiry derived from the ingest response, if any.
+     * \param availability_start The object's latest availability start time, if known.
+     * \param fallback           Used when the ingest response carried no expiry.
+     * \return the File@Expires value to write.
+     */
+    static time_type fileExpiryTime(const std::optional<time_type> &cache_expires,
+                                    const std::optional<time_type> &availability_start,
+                                    const time_type &fallback) {
+        time_type expires_at = cache_expires.value_or(fallback);
+        if (availability_start && *availability_start < expires_at) {
+            expires_at = *availability_start;
+        }
+        return expires_at;
     };
 
     ObjectListPackager() = delete;
@@ -73,7 +120,8 @@ public:
                        const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
     ObjectListPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller, const SsmPort &ssm_port,
                        uint32_t rateLimit, unsigned short mtu, const std::optional<std::string> &tunnel_address,
-                       in_port_t tunnel_port);
+                       in_port_t tunnel_port,
+                       const std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> &fec_information = std::nullopt);
     virtual ~ObjectListPackager();
 
     bool add(const PackageItem &item);

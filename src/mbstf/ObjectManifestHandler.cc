@@ -187,7 +187,7 @@ bool ObjectManifestHandler::update(const std::shared_ptr<ObjectStore::Object> &n
         if (new_it == new_objects.end()) {
             /* object removed from carousel */
             auto &object_store = m_controller->objectStore();
-            auto *metadata = object_store->findMetadataByURL(old_it->value()->getLocator());
+            auto metadata = object_store->findMetadataByURL(old_it->value()->getLocator());
             if (metadata) {
                 object_store->removeObject(metadata->objectId());
             }
@@ -367,9 +367,15 @@ std::string ObjectManifestHandler::generateUUID() {
 
 /* ManifestHandler registration */
 
-static bool g_registered1 = ManifestHandlerFactory::registerManifestHandler("application/3gpp-mbs-object-manifest+json", new ManifestHandlerConstructorClass<ObjectManifestHandler>());
-static bool g_registered2 = ManifestHandlerFactory::registerManifestHandler("application/3gpp-mbs-object-manifest+json;version=Rel17", new ManifestHandlerConstructorClass<ObjectManifestHandler>());
-static bool g_registered3 = ManifestHandlerFactory::registerManifestHandler("application/3gpp-mbs-object-manifest+json;version=\"Rel17\"", new ManifestHandlerConstructorClass<ObjectManifestHandler>());
+const char *ObjectManifestHandler::manifestHandlerTypeName()
+{
+    static const char *const type = "3GPP MBS object manifest";
+    return type;
+}
+
+static bool g_registered1 = ManifestHandlerFactory::registerManifestHandler("application/3gpp-mbs-object-manifest+json", new ManifestHandlerConstructorClass<ObjectManifestHandler>(), SUITABLE_FOR_CAROUSEL);
+static bool g_registered2 = ManifestHandlerFactory::registerManifestHandler("application/3gpp-mbs-object-manifest+json;version=Rel17", new ManifestHandlerConstructorClass<ObjectManifestHandler>(), SUITABLE_FOR_CAROUSEL);
+static bool g_registered3 = ManifestHandlerFactory::registerManifestHandler("application/3gpp-mbs-object-manifest+json;version=\"Rel17\"", new ManifestHandlerConstructorClass<ObjectManifestHandler>(), SUITABLE_FOR_CAROUSEL);
 
 /* local functions */
 

@@ -36,11 +36,33 @@ public:
     ObjectManifestController(ObjectManifestController&&) = delete;
 
     void abort() {
-        m_scheduledPullCancel = true;
+        {
+            /* The scheduled pull spends almost all of its time parked in
+               m_manifestHandlerChange.wait_until(), whose deadline is the next manifest fetch.
+               Setting the flag alone leaves it there until that deadline arrives, so the join
+               below waited out a whole fetch interval, which is what made terminating the
+               process take tens of seconds. The mutex is held while the flag is set so the
+               waiter cannot miss the notification, and released before the join so the thread
+               can reacquire it on the way out. */
+            std::lock_guard<std::recursive_mutex> lock(m_manifestHandlerMutex);
+            m_scheduledPullCancel = true;
+            m_manifestHandlerChange.notify_all();
+        }
         if (m_scheduledPullThread.get_id() != std::this_thread::get_id() && m_scheduledPullThread.joinable()) {
             m_scheduledPullThread.join();
         }
 
+    }
+
+    /** Stop the scheduled pull as well as the ingest workers.
+     *
+     * The scheduled pull is this controller's own thread and it writes into controller state, so
+     * a teardown that stops only the ingest workers leaves it running against objects that are
+     * being destroyed. abort() is idempotent once the thread has been joined.
+     */
+    virtual void abortIngest() override {
+        abort();
+        ObjectController::abortIngest();
     }
 
     virtual ~ObjectManifestController() {
@@ -65,7 +87,12 @@ protected:
     const std::shared_ptr<ManifestHandler> &manifestHandler() const;
     virtual std::string nextObjectId();
     virtual void objectAddOrUpdateEvent(const std::shared_ptr<ObjectStore::Object> &object) {};
+    /* Called once the manifest handler has taken a new version of the manifest. */
+    virtual void manifestUpdated() {};
+    virtual void validateUpdate() override;
     virtual bool includeManifest() { return false; };
+    /* The ManifestHandlerSuitability flags of the handlers this mode may use; carousel by default. */
+    virtual unsigned int manifestHandlerSuitability() const;
     virtual bool checkObjectActiveInManifest(const std::shared_ptr<ObjectStore::Object> &object) { return true; };
     virtual void finishRequestInManifestHandler(const std::shared_ptr<ObjectStore::Object> &object) {};
     virtual void sendToPackager(const std::shared_ptr<ObjectStore::Object> &object) = 0;

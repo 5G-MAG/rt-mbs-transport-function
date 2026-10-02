@@ -46,6 +46,18 @@ public:
     ObjectController(const ObjectController &) = delete;
     ObjectController(ObjectController &&) = delete;
 
+    /** Stop every ingest worker this controller owns.
+     *
+     * The workers are owned by this base, so destruction alone stops them last, after every
+     * derived destructor has run. ObjectManifestController::abort() joins a scheduled pull that
+     * can take tens of seconds, and the workers keep ingesting throughout, using objects the
+     * teardown is already dismantling. Calling this first in a most-derived destructor stops
+     * them before anything they depend on goes away. Idempotent: ObjectIngester::abort() leaves
+     * the worker cancelled and no longer joinable, so the later reset and clear repeat nothing.
+     */
+    virtual void abortIngest();
+    virtual void abortOutput() override { if (m_packager) m_packager->abortOutput(); };
+
     virtual ~ObjectController() {
         m_pushIngester.reset();
         std::lock_guard<decltype(m_pullObjectIngestersMutex)> lock(m_pullObjectIngestersMutex);
@@ -74,6 +86,7 @@ public:
         this->reconfigurePullObjectIngesters();
         this->reconfigureObjectPackager();
     };
+    virtual void reconfigureOutput() override { reconfigureObjectPackager(); };
     virtual void reconfigureObjectStore();
     virtual void reconfigurePushObjectIngester() = 0;
     virtual void reconfigurePullObjectIngesters() = 0;
@@ -93,6 +106,9 @@ protected:
     bool removePullObjectIngester(std::shared_ptr<PullObjectIngester> &);
     bool removeAllPullObjectIngesters();
     const std::shared_ptr<PushObjectIngester> &pushObjectIngester() const { return m_pushIngester; };
+    /* The push ingest server reports a failed start while the controller is still waiting for its
+       ingest URL, which is before the controller or the Distribution Session subscribe to it. */
+    virtual bool ingestFailedDuringSetUp() const;
     const std::shared_ptr<PushObjectIngester> &pushObjectIngester(PushObjectIngester* pushIngester);
     bool removePushObjectIngester();
     const std::shared_ptr<ObjectPackager> &packager() const { return m_packager; };

@@ -68,6 +68,17 @@ ObjectListController::ObjectListController(DistributionSession &distributionSess
 
 ObjectListController::~ObjectListController()
 {
+    /* Dropped before anything else: this object is still subscribed to the object store, and an
+       event delivered once the derived part is gone reaches ObjectManifestController::processEvent
+       through a vtable that no longer has sendToPackager(), which ends the process with "pure
+       virtual method called". ~Subscriber() unsubscribes too, but it runs after every derived
+       destructor, which is exactly too late. */
+    /* Stopped before anything else: the ingest workers this controller owns are held by its
+       ObjectController base, so destruction alone stops them last, after every derived destructor
+       has run. abort() below joins a scheduled pull that can take tens of seconds, and the workers
+       keep ingesting throughout, using objects the teardown is already dismantling. */
+    abortIngest();
+    unsubscribeFromAll();
 }
 
 void ObjectListController::setObjectPackager() {
@@ -77,9 +88,15 @@ void ObjectListController::setObjectPackager() {
         std::optional<std::string> tunnel_addr = distributionSession().getTunnelAddr();
         uint32_t rate_limit = distributionSession().getRateLimit();
         in_port_t tunnel_port = distributionSession().getTunnelPortNumber();
-        unsigned short mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port, GET_MTU_ETHERNET_PAYLOAD) - GTP_HEADER_SIZE;
+        bool mtu_via_loopback = false;
+        /* Sequenced, not nested: the order arguments are evaluated in is unspecified, so reading
+           mtu_via_loopback in the same call that fills it would read it before it is set. */
+        const int discovered_mtu = get_tunnelled_path_mtu(ssm_port, tunnel_addr, tunnel_port,
+                                                         GET_MTU_ETHERNET_PAYLOAD, &mtu_via_loopback);
+        unsigned short mtu = flute_path_mtu(discovered_mtu, mtu_via_loopback) - GTP_HEADER_SIZE;
         const auto &obj_list = object_store->getObjects();
-        packager(new ObjectListPackager(object_store, *this, ssm_port, rate_limit, mtu, tunnel_addr, tunnel_port));
+        packager(new ObjectListPackager(object_store, *this, ssm_port, rate_limit, mtu, tunnel_addr, tunnel_port,
+                                        distributionSession().getFecInformation()));
         // Send all objects that are in the ObjectStore
         for (const auto &[obj_id, object] : obj_list) {
             sendToPackager(object);
@@ -188,7 +205,7 @@ void ObjectListController::initPullObjectIngesters()
 
                 }
 
-                const auto *metadata = objectStore()->findMetadataByURL(obj_ingest_url);
+                const auto metadata = objectStore()->findMetadataByURL(obj_ingest_url);
                 if (metadata) {
                     /* refetch existing object */
                     urls.emplace_back(*metadata);
@@ -212,7 +229,12 @@ void ObjectListController::initPushObjectIngester()
 
     PushObjectIngester *pushIngester = new PushObjectIngester(objectStore(), *this);
 
-    distributionSession().setObjectIngestBaseUrl(pushIngester->getIngestServerPrefix());
+    {
+        /* Empty when the push ingest server could not start; that failure has been reported as an
+           ingest failure, and an empty base URL would be handed on as if it were one. */
+        const std::string &ingest_base_url = pushIngester->getIngestServerPrefix();
+        if (!ingest_base_url.empty()) distributionSession().setObjectIngestBaseUrl(ingest_base_url);
+    }
     subscribeTo({"ObjectPushStart"}, *pushIngester);
     pushObjectIngester(pushIngester);
 }
@@ -285,6 +307,17 @@ static int validate_distribution_session(DistributionSession &distribution_sessi
         std::optional<std::string> object_acquisition_push_id = distribution_session.getObjectAcquisitionPushId();
         if (object_acquisition_push_id.has_value()) {
             return 0;
+        }
+    }
+    /* TS 26.502 V18.6.0 table 6.1-1, row OBJECT_SINGLE, for the pull-based object acquisition method:
+       "shall cite a set of one or more object URLs as Object acquisition identifiers." Without one,
+       nothing is ever pulled. */
+    if (distribution_session.getObjectAcquisitionMethod() == "PULL") {
+        const auto &pull_urls = distribution_session.getObjectAcquisitionPullUrls();
+        if (!pull_urls.has_value() || pull_urls->empty()) {
+            throw ModelException("must cite one or more object URLs for objDistributionOperatingMode SINGLE with PULL",
+                                 "ObjDistributionData", "distSession.objDistributionData.objAcquisitionIdsPull",
+                                 ProblemCause::MANDATORY_IE_MISSING);
         }
     }
     ObjectController::validateDistributionSession(distribution_session);
