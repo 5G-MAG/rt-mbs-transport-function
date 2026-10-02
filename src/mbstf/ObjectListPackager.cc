@@ -243,7 +243,7 @@ void ObjectListPackager::doObjectPackage() {
                     true,
                     ssm_port.sourceAddress(),
                     content_fec_oti,
-                    LibFlute::Profile::Ts26517,
+                    LibFlute::Profile::MBS,
                     fec_redundancy_level));
             } catch (const std::exception &err) {
                 ogs_error("Cannot create the FLUTE Transmitter, not transmitting: %s", err.what());

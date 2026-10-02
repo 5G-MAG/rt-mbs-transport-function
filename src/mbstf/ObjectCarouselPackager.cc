@@ -311,7 +311,7 @@ void ObjectCarouselPackager::ensureTransmitter()
                                                       LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005, true,
                                                       ssm_port.sourceAddress(),
                                                       content_fec_oti,
-                                                      LibFlute::Profile::Ts26517,
+                                                      LibFlute::Profile::MBS,
                                                       fec_redundancy_level));
         } catch (const std::exception &err) {
             m_transmitterFailure = std::string("Cannot create the FLUTE Transmitter, not transmitting: ") + err.what();
