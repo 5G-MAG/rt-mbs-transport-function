@@ -230,6 +230,7 @@ void ObjectController::reconfigureObjectStore()
 
 void ObjectController::establishInactiveInputs()
 {
+    std::lock_guard<decltype(m_pullObjectIngestersMutex)> guard(m_pullObjectIngestersMutex);
     m_pullIngesters.clear();
     if (distributionSession().getObjectAcquisitionMethod() == "PUSH" && !m_pushIngester) initPushObjectIngester();
 }
