@@ -1,0 +1,28 @@
+{
+    "distSession": {
+        "distSessionId": "5a1f0e2c-7b3d-4f61-9c2e-1d4b8a6f3e01",
+        "distSessionState": "ACTIVE",
+        "mbUpfTunAddr": {
+            "ipv4Addr": "127.0.0.7",
+            "portNumber": 5678
+        },
+        "upTrafficFlowInfo": {
+            "transportSessionId": 1234,
+            "srcIpAddr": { "ipv4Addr": "127.0.0.7" },
+            "destIpAddr": { "ipv4Addr": "232.0.0.1" },
+            "portNumber": 5000
+        },
+        "mbr": "10 Mbps",
+        "fecInformation": {
+            "fecScheme": "urn:ietf:rmt:fec:encoding:1",
+            "fecOverHead": 25
+        },
+        "objDistributionData": {
+            "objDistributionOperatingMode": "SINGLE",
+            "objAcquisitionMethod": "PULL",
+            "objAcquisitionIdsPull": ["fec-object"],
+            "objIngestBaseUrl": "http://127.0.0.1:3004/",
+            "objDistributionBaseUrl": "http://127.0.0.2/"
+        }
+    }
+}
