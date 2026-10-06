@@ -299,20 +299,6 @@ void ObjectListPackager::doObjectPackage() {
         items_empty = m_packageItems.empty();
     }
 
-    if (m_deactivating && items_empty) {
-        /* Once m_packageItems is empty and m_deactivating is set, add() above refuses every new
-           item (see add(), which checks m_deactivating first), so nothing else will ever reach
-           the Transmitter for this session. That makes it safe to hand the rest of the wait to
-           the Transmitter itself: it already knows exactly what it still has queued and when the
-           last of it goes out, which is what finish_file_transmissions exists for -- "This allows
-           applications to request deactivation without waiting for completion callbacks and
-           checking number_of_files()" (Transmitter.h). Calling this again on every loop iteration
-           until the completion callback below clears m_deactivating is harmless: deactivate() is a
-           no-op once the Transmitter is already inactive. */
-        std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-        if (m_transmitter) m_transmitter->deactivate(true);
-    }
-
     if (item) {
         std::string location;
         m_currentObject = item.object();
@@ -382,6 +368,23 @@ void ObjectListPackager::doObjectPackage() {
 
             m_queuedToi = m_transmitter->send(file_desc);
         }
+    }
+
+    /* After the send above: when items_empty is set the item just popped is the last one, and a
+       Transmitter told to defer-deactivate while it holds no file deactivates at once, which
+       would drop that object. */
+    if (m_deactivating && items_empty) {
+        /* Once m_packageItems is empty and m_deactivating is set, add() above refuses every new
+           item (see add(), which checks m_deactivating first), so nothing else will ever reach
+           the Transmitter for this session. That makes it safe to hand the rest of the wait to
+           the Transmitter itself: it already knows exactly what it still has queued and when the
+           last of it goes out, which is what finish_file_transmissions exists for -- "This allows
+           applications to request deactivation without waiting for completion callbacks and
+           checking number_of_files()" (Transmitter.h). Calling this again on every loop iteration
+           until the completion callback below clears m_deactivating is harmless: deactivate() is a
+           no-op once the Transmitter is already inactive. */
+        std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+        if (m_transmitter) m_transmitter->deactivate(true);
     }
 
     m_io.run_one();
