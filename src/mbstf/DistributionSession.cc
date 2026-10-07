@@ -63,6 +63,7 @@
 #include "openapi/model/DistSessionState.h"
 #include "openapi/model/ObjDistributionData.h"
 #include "openapi/model/ObjAcquisitionMethod.h"
+#include "openapi/model/PktIngestMethod.h"
 #include "openapi/model/StatusSubscribeReqData.h"
 #include "openapi/model/StatusSubscribeRspData.h"
 #include "openapi/model/TunnelAddress.h"
@@ -87,6 +88,7 @@ using reftools::mbstf::ObjDistributionData;
 using reftools::mbstf::ObjAcquisitionMethod;
 using reftools::mbstf::ObjDistributionOperatingMode;
 using reftools::mbstf::PktDistributionOperatingMode;
+using reftools::mbstf::PktIngestMethod;
 using reftools::mbstf::StatusSubscribeReqData;
 using reftools::mbstf::StatusSubscribeRspData;
 using reftools::mbstf::TunnelAddress;
@@ -1666,6 +1668,28 @@ static void _validate(const std::shared_ptr<DistSession> &dist_session)
         }
     } else {
         const auto &pkt_distr_mode = pkt_distr_data.value()->getPktDistributionOperatingMode();
+        const auto &pkt_ingest_method = pkt_distr_data.value()->getPktIngestMethod();
+        // TS 29.581 V18.6.0 Table 6.1.6.2.6-1: pktIngestMethod “shall be present if operating mode of the packet distribution
+        // method is set to "PACKET_PROXY"”.
+        if (*pkt_distr_mode == PktDistributionOperatingMode::VAL_PACKET_PROXY && !pkt_ingest_method) {
+            throw ModelException("pktDistributionData.pktIngestMethod must be present if "
+                                 "pktDistributionData.pktDistributionOperatingMode is PACKET_PROXY", "DistributionSession",
+                                 "distSession.pktDistributionData.pktIngestMethod", ProblemCause::MANDATORY_IE_MISSING);
+        }
+        // TS 29.581 V18.6.0 Table 6.1.6.2.14-1: afEgressTunAddr “shall be included if the packet distribution method is used and
+        // when the operating mode is set to "PACKET_FORWARD_ONLY", or when the operating mode is set to "PACKET_PROXY"
+        // while the packet ingest method is set to "UNICAST"”.
+        if (*pkt_distr_mode == PktDistributionOperatingMode::VAL_PACKET_FORWARD_ONLY ||
+                pkt_ingest_method.value()->getValue() == PktIngestMethod::VAL_UNICAST) {
+            const auto &mb_stf_ingest_addr = pkt_distr_data.value()->getMbStfIngestAddr();
+            if (!mb_stf_ingest_addr || !mb_stf_ingest_addr->getAfEgressTunAddr()) {
+                throw ModelException("pktDistributionData.mbStfIngestAddr.afEgressTunAddr must be present if "
+                                     "pktDistributionData.pktDistributionOperatingMode is PACKET_FORWARD_ONLY, or is "
+                                     "PACKET_PROXY with pktIngestMethod UNICAST", "DistributionSession",
+                                     "distSession.pktDistributionData.mbStfIngestAddr.afEgressTunAddr",
+                                     ProblemCause::MANDATORY_IE_MISSING);
+            }
+        }
         if (up_traffic_flow_info) {
             const auto &src_ip = up_traffic_flow_info.value()->getSrcIpAddr();
             if (*pkt_distr_mode == PktDistributionOperatingMode::VAL_PACKET_FORWARD_ONLY) {
