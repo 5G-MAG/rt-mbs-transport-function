@@ -134,6 +134,7 @@ private:
     /* Why the Transmitter could not be created, guarded by m_transmitterMutex. Once set, creation
        is not retried; the worker reports it once, outside the lock. */
     std::optional<std::string> m_transmitterFailure;
+    ObjectPackager::PackagingFailedEvent::FailureType m_transmitterFailureType = ObjectPackager::PackagingFailedEvent::RESOURCE_NOT_AVAILABLE;
     std::atomic_bool m_transmitterFailureReported{false};
 };
 

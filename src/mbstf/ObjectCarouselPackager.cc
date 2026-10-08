@@ -275,7 +275,7 @@ void ObjectCarouselPackager::doObjectPackage() {
            the threads that wait on that lock. */
         abort(); // on the worker thread this stops the loop without joining
         if (!m_transmitterFailureReported.exchange(true)) {
-            errorInCarousel(failure.value(), ObjectPackager::PackagingFailedEvent::RESOURCE_NOT_AVAILABLE);
+            errorInCarousel(failure.value(), m_transmitterFailureType);
         }
         return;
     }
@@ -300,6 +300,14 @@ void ObjectCarouselPackager::ensureTransmitter()
         } catch (const std::runtime_error &err) {
             ogs_error("Cannot apply the Distribution Session's FEC configuration, not transmitting: %s",
                       err.what());
+            /* The session's own configuration was rejected, which no later pass resolves, so it is recorded as
+               the failure it is and reported by doObjectPackage(), which marks the Distribution Session
+               INACTIVE, as for a Transmitter that cannot be created. Returning with nothing recorded left the
+               scheduler trying again on every cycle for ever. */
+            m_transmitterFailure = std::string("Cannot apply the Distribution Session's FEC configuration, not transmitting: ") + err.what();
+            m_transmitterFailureType = ObjectPackager::PackagingFailedEvent::FEC_CONFIGURATION_REJECTED;
+            m_schedulingCancel = true;
+            m_packagingUpdateCondVar.notify_all();
             return;
         }
         /* Opening the Transmitter's socket and event loop throws when descriptors or memory run out.
