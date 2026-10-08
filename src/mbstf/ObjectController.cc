@@ -112,10 +112,13 @@ void ObjectController::refetchFailedPull(Event &event)
             auto &ingester = ingesters.front();
             auto &item = pull_ingest_failed_event.item();
 
-            // TS 26.517 V18.6.0 clause 6.1.2, object manifest parameter latestFetchTime:
-            // "The MBSTF shall fetch the object no later than this UTC timestamp." Once that
-            // time has passed the object must not be fetched again, however many attempts have
-            // been made, so a retry past it is refused rather than issued and failed.
+            // The item's deadline is set by the manifest handler. For an object manifest (CAROUSEL and
+            // COLLECTION) it is the manifest's latestFetchTime, and TS 26.517 V18.6.0 clause 6.1.2 governs it:
+            // "The MBSTF shall fetch the object no later than this UTC timestamp." For DASH STREAMING it is
+            // the segment's availability end time from the MPD, the point after which a live segment is
+            // considered late, so no clause governs it: the object could still be fetched, but a client would by
+            // then have asked the MBS AS for it. In both cases a retry past the deadline is refused rather than
+            // issued and failed, however many attempts have been made.
             const bool past_latest_fetch_time =
                 item.hasDeadline() && std::chrono::system_clock::now() > item.getDeadline();
 
