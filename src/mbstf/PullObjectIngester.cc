@@ -153,6 +153,11 @@ bool PullObjectIngester::fetch(const std::string &object_id, const std::optional
     return true;
 }
 
+bool PullObjectIngester::hasPendingFetches() const {
+    std::lock_guard<std::recursive_mutex> lock(*m_ingestItemsMutex);
+    return m_fetchInProgress || !m_fetchList.empty();
+}
+
 bool PullObjectIngester::fetch(const IngestItem &item) {
     return fetch(std::move(IngestItem(item)));
 }
@@ -214,6 +219,7 @@ void PullObjectIngester::doObjectIngest() {
             // Make the GET request and get the number of bytes received
             auto item = m_fetchList.front();
             m_fetchList.pop_front();
+            m_fetchInProgress = true;
             m_ingestItemsMutex->unlock(); // temp unlock while we fetch
             /* A copy taken under the store lock, not a reference into the store. This is read
                again further down, after the fetch below has run with the ingest list unlocked, and a
@@ -233,6 +239,7 @@ void PullObjectIngester::doObjectIngest() {
                         emitObjectPullIngestFailedEvent(item, item.url(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
                     }
                     m_ingestItemsMutex->lock(); // lock so that the lock_guard can release properly
+                    m_fetchInProgress = false;
                     return;
                 }
                 const auto &file_desc = old_meta->fluteFileDescription();
@@ -293,6 +300,7 @@ void PullObjectIngester::doObjectIngest() {
                     emitObjectPullIngestFailedEvent(item, item.url(),
                                                     ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
                     m_ingestItemsMutex->lock(); // lock so that the lock_guard can release properly
+                    m_fetchInProgress = false;
                     return;
                 }
 
@@ -356,6 +364,7 @@ void PullObjectIngester::doObjectIngest() {
                 emitObjectPullIngestFailedEvent(item, item.url(), ObjectIngester::IngestFailedEvent::GENERAL_ERROR);
             }
             m_ingestItemsMutex->lock();
+            m_fetchInProgress = false;
             if (m_fetchList.empty()) sendEventAsynchronous(new ObjectPullQueueExhaustedEvent);
         }
     }

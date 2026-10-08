@@ -167,6 +167,9 @@ public:
 
     virtual ~PullObjectIngester();
 
+    /** Whether an item is waiting to be fetched or is being fetched now. A fetch in flight is no longer in the
+     *  list, so the list alone says the queue is empty while a retry is still under way. */
+    bool hasPendingFetches() const;
     bool fetch(const IngestItem &item);
     bool fetch(IngestItem &&item);
     bool fetch(const std::string &object_id, const std::optional<time_type> &download_deadline, bool force_recache,
@@ -183,6 +186,7 @@ protected:
 private:
     void sortListByPolicy();
     std::list<IngestItem> m_fetchList;
+    bool m_fetchInProgress = false; //< an item taken from m_fetchList is being fetched; guarded by m_ingestItemsMutex
     std::unique_ptr<std::recursive_mutex> m_ingestItemsMutex;
     std::condition_variable_any m_ingestItemsCondVar;
     std::shared_ptr<Curl> m_curl;

@@ -109,6 +109,10 @@ protected:
     /* The push ingest server reports a failed start while the controller is still waiting for its
        ingest URL, which is before the controller or the Distribution Session subscribe to it. */
     virtual bool ingestFailedDuringSetUp() const;
+    /** Fetch a failed pull again, a failed item going to the back of the ingester's list so the others are
+     *  fetched first, until the item's own failures reach consecutiveIngestFailuresBeforeDeactivate or its
+     *  latest fetch time has passed. */
+    void refetchFailedPull(Event &event);
     const std::shared_ptr<PushObjectIngester> &pushObjectIngester(PushObjectIngester* pushIngester);
     bool removePushObjectIngester();
     const std::shared_ptr<ObjectPackager> &packager() const { return m_packager; };

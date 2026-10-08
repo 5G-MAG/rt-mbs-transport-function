@@ -152,14 +152,31 @@ void ObjectListController::processEvent(Event &event, SubscriptionService &event
         /* this is a PULL list and we've finished it, so go INACTIVE */
         try {
             dynamic_cast<ObjectListController&>(event_service);
-            DistSessionState inactive_state;
-            inactive_state = DistSessionState::VAL_INACTIVE;
-            distributionSession().setState(inactive_state);
+            /* A failed object is fetched again (refetchFailedPull() below), so an empty list can be followed by
+               a retry that is queued or already under way: the list is finished only when no ingester has one. */
+            bool retry_pending = false;
+            {
+                std::lock_guard<std::recursive_mutex> lock(m_pullObjectIngestersMutex);
+                for (const auto &ingester : getPullObjectIngesters()) {
+                    if (ingester && ingester->hasPendingFetches()) retry_pending = true;
+                }
+            }
+            if (!retry_pending) {
+                DistSessionState inactive_state;
+                inactive_state = DistSessionState::VAL_INACTIVE;
+                distributionSession().setState(inactive_state);
+            }
         } catch (std::bad_cast &ex) {
             /* event came from one of my PullObjectIngesters, so resend to ourselves to avoid deleting active PullObjectIngester */
             sendEventAsynchronous(event.newClone());
         }
         event.preventDefault();
+    } else if (event.eventName() == ObjectIngester::IngestFailedEvent::event_name) {
+        /* Consistent with the manifest modes: a failed pull is retried, up to the configured number of
+           consecutive failures, the failed object going to the back of the list so the others are fetched
+           first. TS 26.502 does not say the objects must be sent in the order of the acquisition
+           identifiers. The retry is not specified by 3GPP; it is an MBSTF feature. */
+        refetchFailedPull(event);
     }
     ObjectController::processEvent(event, event_service);
 
