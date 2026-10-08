@@ -111,6 +111,7 @@ static void send_model_params_error(const ModelParamsException &err, Open5GSSBIS
                                     const std::optional<NfServer::InterfaceMetadata> &api, const std::string &no_cause_reason,
                                     const std::string &log_prefix);
 static void _validate(const std::shared_ptr<DistSession> &dist_session);
+static void _refuseFecOnPacketSession(const std::shared_ptr<DistSession> &dist_session);
 static bool request_too_large(Open5GSSBIRequest &request, Open5GSSBIStream &stream, int path_segments,
                               Open5GSSBIMessage &message, const NfServer::AppMetadata &app_meta,
                               const std::optional<NfServer::InterfaceMetadata> &api);
@@ -848,6 +849,12 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
                 *old_obj_distribution_data.value()->getObjDistributionOperatingMode()) {
         ex.addInvalidParameter("distSession.objDistributionData.objDistributionOperatingMode",
                                 std::format("Cannot change objDistributionOperatingMode ({} != {})", new_obj_distribution_data.value()->getObjDistributionOperatingMode()->getString(), old_obj_distribution_data.value()->getObjDistributionOperatingMode()->getString()));
+    }
+
+    try {
+        _refuseFecOnPacketSession(new_dist_session);
+    } catch (ModelException &err) {
+        ex.addInvalidParameter(err.parameter, err.what());
     }
 
     /* If errors then report them */
@@ -1606,6 +1613,22 @@ static void send_model_params_error(const ModelParamsException &err, Open5GSSBIS
     ogs_error("%s: %s", log_prefix.c_str(), oss.str().c_str());
 }
 
+/* No FEC is applied to a Packet Distribution Session: the packet controllers' setPacketFEC() hooks are empty.
+ * TS 29.581 V18.6.0 Table 6.1.6.2.2-1 defines fecInformation as an optional attribute, “Configuration for FEC information
+ * added by the MBSTF to protect this MBS Distribution Session.”, and says nothing that withholds it from the Packet
+ * Distribution Method, so this is a limit of this implementation and not a clause. A request that would be accepted and then
+ * sent unprotected is refused instead, which lets the MBSF roll its own state back and report the failure to the MBS
+ * Application Provider.
+ */
+static void _refuseFecOnPacketSession(const std::shared_ptr<DistSession> &dist_session)
+{
+    if (dist_session->getPktDistributionData() && dist_session->getFecInformation()) {
+        throw ModelException("fecInformation is not supported with pktDistributionData: this MBSTF applies no FEC to a "
+                             "Packet Distribution Session", "DistributionSession", "distSession.fecInformation",
+                             ProblemCause::OPTIONAL_IE_INCORRECT);
+    }
+}
+
 static void _validate(const std::shared_ptr<DistSession> &dist_session)
 {
     /* check for DistSession irregularities that are not caught by the OpenAPI model classes */
@@ -1646,6 +1669,7 @@ static void _validate(const std::shared_ptr<DistSession> &dist_session)
         throw ModelException("DistSession must have one of pktDistributionData or objDistributionData", "DistributionSession",
                              "distSession", ProblemCause::MANDATORY_IE_MISSING);
     }
+    _refuseFecOnPacketSession(dist_session);
 
     const auto &up_traffic_flow_info = dist_session->getUpTrafficFlowInfo();
     if (obj_distr_data) {
