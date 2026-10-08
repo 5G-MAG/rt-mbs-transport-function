@@ -58,6 +58,7 @@ Open5GSSBIClient::Open5GSSBIClient(const std::string &url)
      }
      m_ogsClient = ogs_sbi_client_add(scheme, addr);
      ogs_assert(m_ogsClient);
+     m_ownsClient = true;
      ogs_freeaddrinfo(addr);
 }
 
@@ -80,12 +81,27 @@ Open5GSSBIClient::Open5GSSBIClient(const char *hostname, int port)
 
     m_ogsClient = ogs_sbi_client_add(scheme, addr);
     ogs_assert(m_ogsClient);
+    m_ownsClient = true;
 
     ogs_freeaddrinfo(addr);
 }
 
 Open5GSSBIClient::~Open5GSSBIClient()
 {
+    /* A client is allocated from a pool of a fixed size (max.peer) for each one created, and nothing else
+       frees it, so a long-running process that creates one per notification address runs the pool dry and
+       ogs_sbi_client_add() then ends the process. The registry is checked first: ogs_sbi_client_remove_all()
+       at shutdown removes the clients itself, and removing one twice would free it twice. */
+    if (m_ownsClient && m_ogsClient) {
+        ogs_sbi_client_t *registered = nullptr, *next = nullptr;
+        ogs_list_for_each_safe(&ogs_sbi_self()->client_list, next, registered) {
+            if (registered == m_ogsClient) {
+                ogs_sbi_client_remove(m_ogsClient);
+                break;
+            }
+        }
+    }
+    m_ogsClient = nullptr;
 }
 
 bool Open5GSSBIClient::sendRequest(ogs_sbi_client_cb_f client_notify_cb,  std::shared_ptr<Open5GSSBIRequest> request, void *data)
