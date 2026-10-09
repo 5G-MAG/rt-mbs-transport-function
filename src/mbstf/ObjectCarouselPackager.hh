@@ -90,8 +90,12 @@ public:
                            unsigned short mtu, const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
     ObjectCarouselPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller, const SsmPort &ssm_port,
                            uint32_t rateLimit, unsigned short mtu,
-                           const std::optional<std::string> &tunnel_address, in_port_t tunnel_port);
+                           const std::optional<std::string> &tunnel_address, in_port_t tunnel_port,
+                           const std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> &fec_information = std::nullopt);
     virtual ~ObjectCarouselPackager();
+
+    /* The scheduler thread sends through the Transmitter as well, so it is stopped with the worker. */
+    virtual void abortOutput() override { abort(); abortScheduler(); stopAsyncEvents(); };
 
     bool add(const PackageItem &item);
     bool add(PackageItem &&item);
@@ -127,6 +131,11 @@ private:
     std::atomic_bool m_schedulingRunning;
     std::atomic_bool m_schedulingCancel;
     size_t m_maxStreams;
+    /* Why the Transmitter could not be created, guarded by m_transmitterMutex. Once set, creation
+       is not retried; the worker reports it once, outside the lock. */
+    std::optional<std::string> m_transmitterFailure;
+    ObjectPackager::PackagingFailedEvent::FailureType m_transmitterFailureType = ObjectPackager::PackagingFailedEvent::RESOURCE_NOT_AVAILABLE;
+    std::atomic_bool m_transmitterFailureReported{false};
 };
 
 MBSTF_NAMESPACE_STOP

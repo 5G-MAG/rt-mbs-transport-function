@@ -35,6 +35,29 @@ public:
     const DistributionSession &distributionSession() const {return m_distributionSession;};
 
     virtual void reconfigure() {};
+    /* Applies new output parameters (rate, tunnel, SSM) to the running output only, for a change made
+       together with a state change, whose state functions rebuild the inputs themselves. */
+    virtual void reconfigureOutput() {};
+    /* Checks the session's current parameters with the rules applied when it was created, so an
+       update is held to them too. Throws ModelException when they are broken. */
+    virtual void validateUpdate() {};
+
+    /** Stop every ingest worker this controller runs, without destroying anything.
+     *
+     * Called before teardown begins so that no worker is running while the objects it uses are
+     * being destroyed. Destruction alone is too late: the workers belong to a base class, so they
+     * would stop only after every derived destructor had run, and one of those joins a scheduled
+     * pull that can take tens of seconds.
+     */
+    virtual void abortIngest() { stopAsyncEvents(); };
+
+    /* Stops the output threads (the packager's worker and anything it runs) for shutdown, for the
+       reason given for abortIngest(): left to the destructors, they outlive the teardown. */
+    virtual void abortOutput() {};
+
+    /* Whether ingest already failed while this controller was being built, before anything could
+       subscribe to its events. The Distribution Session asks once its subscriptions exist. */
+    virtual bool ingestFailedDuringSetUp() const { return false; };
 
     virtual void establishInactiveInputs() = 0; /* Inactive state for DistSession */
     virtual void establishActiveInputs() = 0;   /* Established state for DistSession */

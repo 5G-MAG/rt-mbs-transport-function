@@ -45,6 +45,15 @@ public:
     }
 
 protected:
+    /** Drop every subscription this subscriber holds.
+     *
+     * ~Subscriber() does this too, but a base destructor runs after every derived one, by which
+     * time the derived vtable is gone: an event delivered in that window reaches a pure virtual
+     * through the base and ends the process. A derived destructor calls this first so no event can
+     * arrive once it has started tearing itself down.
+     */
+    void unsubscribeFromAll();
+
     bool subscribeTo(SubscriptionService &service); // subscribe to all events
     bool subscribeTo(std::initializer_list<const char*> events_list, SubscriptionService &service); // subscribe to specific events
     bool isSubscribedTo(SubscriptionService &service) const; // Check if we are subscribed in any way to service

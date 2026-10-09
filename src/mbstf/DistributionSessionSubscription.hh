@@ -42,6 +42,8 @@ MBSTF_NAMESPACE_START
 
 class DistributionSession;
 class Open5GSEvent;
+class Open5GSTimer;
+class TimerFunc;
 
 class DistributionSessionSubscription {
 public:
@@ -90,11 +92,19 @@ public:
      */
     void sendNotifications() const;
 
+    /** Schedule a re-offer of the events a 5xx-rejected notification carried, after @p delay_seconds. */
+    void startRetryTimer(int delay_seconds);
+
     bool processClientResponse(const Open5GSEvent &event);
 
 private:
     void _setEventFlags();
     void _setExpiryTime();
+    /** (Re)schedule, or cancel when no expiryTime is set, the timer that removes this
+     * subscription once its expiryTime passes. Call after any change to m_expiryTime. */
+    void _scheduleExpiryTimer();
+    /** Cancel and release any currently scheduled expiry timer. */
+    void _cancelExpiryTimer();
     void _setSubscriptionId();
 
     std::weak_ptr<DistributionSession> m_distributionSession; /* Parent distribution session */
@@ -103,6 +113,15 @@ private:
     int m_eventTypes; /* ORed EventTypeBitMask */
     reftools::mbstf::DistSessionSubscription m_distSessionSubscription;
     std::optional<DateTime> m_expiryTime;
+    /* Timer that removes this subscription once m_expiryTime passes; absent when no expiryTime is
+       set. TS 29.581's DistSessionSubscription carries expiryTime, and without this the value is
+       parsed and stored but never acted on. */
+    std::shared_ptr<Open5GSTimer> m_expiryTimer;
+    std::unique_ptr<TimerFunc> m_expiryTimerFunc;
+    /* Waits out mbstf.notifyRetryDelay before a 5xx-rejected notification is offered again. Its own
+       timer rather than the expiry one, which must keep running while a retry is pending. */
+    std::shared_ptr<Open5GSTimer> m_retryTimer;
+    std::unique_ptr<TimerFunc> m_retryTimerFunc;
     std::optional<std::string> m_subscriptionLocation;
 
     struct CacheType {
@@ -113,6 +132,13 @@ private:
         CacheType &operator=(CacheType &&other) {lastReportedEventTimes = std::move(other.lastReportedEventTimes); client = std::move(other.client); return *this; };
         DistributionSessionEvents lastReportedEventTimes;
         std::unique_ptr<Open5GSSBIClient> client;
+        /* Holds the client for a 307 Temporary Redirect hop. Separate from `client` because a
+           temporary redirect must not change where later notifications go: repointing `client` would
+           persist the move that 307 says is not permanent. A 308 updates `client` instead. */
+        std::unique_ptr<Open5GSSBIClient> redirectClient;
+        /* How many times the events currently being offered have been answered 5xx. Reset once a
+           notification is accepted, so the budget applies per set of events rather than per session. */
+        int notifyAttempts = 0;
     } *m_cache;
 };
 

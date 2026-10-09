@@ -36,6 +36,7 @@
 #include "ObjectStore.hh"
 #include "openapi/model/Object.h"
 
+#include "FecOtiHelper.hh"
 #include "ObjectCarouselPackager.hh"
 
 using namespace std::literals::chrono_literals;
@@ -154,8 +155,9 @@ ObjectCarouselPackager::ObjectCarouselPackager(const std::shared_ptr<ObjectStore
 
 ObjectCarouselPackager::ObjectCarouselPackager(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller,
                                        const SsmPort &ssm_port, uint32_t rate_limit, unsigned short mtu,
-                                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
-    :ObjectPackager(object_store, controller, ssm_port, rate_limit, mtu, tunnel_address, tunnel_port)
+                                       const std::optional<std::string> &tunnel_address, in_port_t tunnel_port,
+                                       const std::optional<std::shared_ptr<reftools::mbstf::FECConfig>> &fec_information)
+    :ObjectPackager(object_store, controller, ssm_port, rate_limit, mtu, tunnel_address, tunnel_port, fec_information)
     ,m_packageItemsMutex(new decltype(m_packageItemsMutex)::element_type)
     ,m_packageItems()
     ,m_packagingUpdateCondVar()
@@ -209,6 +211,19 @@ bool ObjectCarouselPackager::remove(const PackageItem &item) {
 bool ObjectCarouselPackager::updateFluteInfo(const SsmPort &ssm_port, uint32_t rate_limit,
                                              const std::optional<std::string> &tunnel_address, in_port_t tunnel_port)
 {
+    /* The scheduler sizes the carousel from rateLimit(), not from the Transmitter, so a new rate is
+       set there too and the scheduler woken to re-check it: a carousel refused for exceeding its rate
+       is scheduled again once the rate allows. Done before the Transmitter lock is taken, since the
+       scheduler takes the package items lock first and the Transmitter lock inside it. */
+    if (rate_limit != rateLimit()) {
+        ogs_debug("Carousel rate changed from %u to %u kbps; re-checking the schedule", rateLimit(), rate_limit);
+        {
+            std::lock_guard<decltype(m_packageItemsMutex)::element_type> pkg_lock(*m_packageItemsMutex);
+            setRateLimit(rate_limit);
+        }
+        m_packagingUpdateCondVar.notify_all();
+    }
+
     std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
 
     /* Do nothing if we don't have a Transmitter */
@@ -249,31 +264,111 @@ bool ObjectCarouselPackager::updateFluteInfo(const SsmPort &ssm_port, uint32_t r
 
 void ObjectCarouselPackager::doObjectPackage() {
     ensureTransmitter();
+    std::optional<std::string> failure;
+    {
+        std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+        failure = m_transmitterFailure;
+    }
+    if (failure) {
+        /* Reported here and not where it happened: ensureTransmitter() runs under the transmitter
+           lock, sometimes taken by its caller, and the report deactivates the session, which joins
+           the threads that wait on that lock. */
+        abort(); // on the worker thread this stops the loop without joining
+        if (!m_transmitterFailureReported.exchange(true)) {
+            errorInCarousel(failure.value(), m_transmitterFailureType);
+        }
+        return;
+    }
     m_io.run_one();
 }
 
 void ObjectCarouselPackager::ensureTransmitter()
 {
     std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-    if (!m_transmitter) {
+    if (!m_transmitter && !m_transmitterFailure) {
         const auto &ssm_port = ssmPort();
         if (!ssm_port) return;
+        /* The Distribution Session's own requested AL-FEC configuration, converted to the
+           Transmitter-level FEC OTI. Without this the session is sent unprotected however it was
+           provisioned. fecOtiFromFecConfig() rejects a scheme the MBMS Download Profile does not
+           admit, which is a packaging failure for this session rather than a reason to send it
+           without the protection it asked for. */
+        std::optional<LibFlute::FecOti> content_fec_oti;
+        uint32_t fec_redundancy_level = LibFlute::kDefaultFecRedundancyLevel;
+        try {
+            std::tie(content_fec_oti, fec_redundancy_level) = fecOtiFromFecConfig(fecInformation());
+        } catch (const std::runtime_error &err) {
+            ogs_error("Cannot apply the Distribution Session's FEC configuration, not transmitting: %s",
+                      err.what());
+            /* The session's own configuration was rejected, which no later pass resolves, so it is recorded as
+               the failure it is and reported by doObjectPackage(), which marks the Distribution Session
+               INACTIVE, as for a Transmitter that cannot be created. Returning with nothing recorded left the
+               scheduler trying again on every cycle for ever. */
+            m_transmitterFailure = std::string("Cannot apply the Distribution Session's FEC configuration, not transmitting: ") + err.what();
+            m_transmitterFailureType = ObjectPackager::PackagingFailedEvent::FEC_CONFIGURATION_REJECTED;
+            m_schedulingCancel = true;
+            m_packagingUpdateCondVar.notify_all();
+            return;
+        }
+        /* Opening the Transmitter's socket and event loop throws when descriptors or memory run out.
+           Uncaught, that ended the process. Recorded here and reported by doObjectPackage(), which
+           marks the Distribution Session INACTIVE; the scheduler stops now. */
+        try {
         m_transmitter.reset(new LibFlute::Transmitter(ssm_port.destinationAddress(), static_cast<short>(ssm_port.port()), tsi(), mtu(),
                                                       rateLimit(), m_io, m_tunnelEndpoint,
                                                       LibFlute::FileDeliveryTable::FDT_NS_DRAFT_2005, true,
-                                                      ssm_port.sourceAddress()));
+                                                      ssm_port.sourceAddress(),
+                                                      content_fec_oti,
+                                                      LibFlute::Profile::MBS,
+                                                      fec_redundancy_level));
+        } catch (const std::exception &err) {
+            m_transmitterFailure = std::string("Cannot create the FLUTE Transmitter, not transmitting: ") + err.what();
+            m_schedulingCancel = true;
+            m_packagingUpdateCondVar.notify_all();
+            return;
+        }
         m_transmitter->register_completion_callback(
             [this](uint32_t toi) {
                 ogs_debug("Object with TOI %d completed", toi);
+                std::string toi_str(std::to_string(toi));
                 try {
                     /* find stream containing current object with toi */
                     streamsRemoveToi(toi);
                 } catch (std::out_of_range &ex) {
                     errorInCarousel(ex.what(), ObjectPackager::PackagingFailedEvent::RESOURCE_NOT_AVAILABLE);
                 }
+                bool queue_empty;
+                {
+                    std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+                    queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
+                }
+                /* objectSendCompletion() was declared on this class (see the header) since it was
+                   first written from ObjectListPackager's template for issue #51, but nothing here
+                   ever called it: this completion callback only removed the finished stream and
+                   returned. Established from git blame and left unfixed until now, per rule 14 --
+                   without it, DistributionSession::haveEmptyQueue() is never called for a carousel,
+                   so deactivate() below returning false (queue not yet empty at the moment it was
+                   called) left nothing to ever finish the job; the Distribution Session would sit
+                   in DEACTIVATING forever. */
+                objectSendCompletion(toi_str, queue_empty);
+                if (m_deactivating && queue_empty) {
+                    ogs_debug("Deactivating FLUTE stream on last file");
+                    {
+                        std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
+                        m_transmitter->deactivate();
+                    }
+                    abort();
+                    m_deactivating = false;
+                }
             }
         );
     }
+}
+
+void ObjectCarouselPackager::objectSendCompletion(std::string &object_id, bool queue_empty)
+{
+    std::shared_ptr<Event> event(new ObjectPackager::ObjectSendCompleted(object_id, queue_empty));
+    sendEventAsynchronous(event);
 }
 
 void ObjectCarouselPackager::flushQueue()
@@ -284,27 +379,16 @@ void ObjectCarouselPackager::flushQueue()
 
 bool ObjectCarouselPackager::deactivate()
 {
-    m_deactivating = true;
-    bool queue_empty;
+    /* A carousel repeats until it is stopped, so its queue never drains and waiting for it left the
+       session DEACTIVATING, still sending, with new items refused ever after. It is halted now.
+       TS 26.502 V18.6.0 clause 4.6.1, step 4b: "As a result, the MBSTF shall cease sending MBS data packets to the MBUPF at reference point Nmb9" */
+    abort();
     {
         std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-        if (!m_transmitter) {
-            queue_empty = (m_packageItems.size() == 0);
-        } else {
-            queue_empty = (m_transmitter->number_of_files() + m_packageItems.size() == 0);
-        }
+        if (m_transmitter) m_transmitter->deactivate();
     }
-    if (queue_empty) {
-        ogs_debug("Deactivating FLUTE stream, no files to purge");
-        abort();
-        {
-            std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
-            if (m_transmitter) m_transmitter->deactivate();
-        }
-        m_deactivating = false;
-        return true;
-    }
-    return false;
+    m_deactivating = false;
+    return true;
 }
 
 bool ObjectCarouselPackager::streamsAllocateToi(const std::function<std::pair<uint32_t, std::shared_ptr<ObjectStore::Object> >()> &get_toi_fn)
@@ -382,6 +466,11 @@ void ObjectCarouselPackager::scheduleCarousel()
     }
     if (total_bit_rate > mbr) {
         errorInCarousel(std::format("Carousel maximum bit rate exceeded: allocated {} bps, requires {} bps", mbr, total_bit_rate), ObjectPackager::PackagingFailedEvent::BIT_RATE_OVERFLOW);
+        /* Waits for a change, as for an empty schedule: nothing will fit until the carousel's content or
+           rate changes. Returning at once re-reported the same overflow on every pass of the scheduler,
+           each report a notification queued for the event thread, until the queue filled and that
+           thread blocked pushing into it: the MBSTF stopped answering and did not exit on SIGTERM. */
+        m_packagingUpdateCondVar.wait(*m_packageItemsMutex);
         return;
     }
 
@@ -439,6 +528,15 @@ void ObjectCarouselPackager::scheduleCarousel()
         if (streamsAllocateToi([this,&pkg_item]() -> std::pair<uint32_t, std::shared_ptr<ObjectStore::Object> > {
                 std::lock_guard<decltype(m_transmitterMutex)::element_type> lock(*m_transmitterMutex);
                 ensureTransmitter();
+                /* ensureTransmitter() leaves m_transmitter unset when the session's own FEC
+                   configuration was rejected (see its own comment above), logging the reason
+                   there. Throwing here, rather than falling through to m_transmitter->send()
+                   below, hands this attempt to streamsAllocateToi()'s existing catch, which
+                   already treats a failed get_toi_fn() as "try this item again next cycle"
+                   rather than crashing the scheduler. */
+                if (!m_transmitter) {
+                    throw std::runtime_error("no FLUTE Transmitter available for this session");
+                }
                 auto &metadata = pkg_item.object()->second;
                 auto &file_desc = metadata.fluteFileDescription();
                 std::string location;
@@ -464,7 +562,7 @@ void ObjectCarouselPackager::scheduleCarousel()
                 }
 
                 /* set compression according to the object metadata */
-                if (metadata.compressedSend()) {
+                if (m_transmitter->can_compress_objects() && metadata.compressedSend()) {
                     file_desc->set_compression(LibFlute::Transmitter::FileDescription::CompressionAlgorithm::COMPRESSION_GZIP);
                 } else {
                     file_desc->set_compression(LibFlute::Transmitter::FileDescription::CompressionAlgorithm::COMPRESSION_NONE);

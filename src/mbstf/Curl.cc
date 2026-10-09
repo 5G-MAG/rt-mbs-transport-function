@@ -94,7 +94,17 @@ long Curl::__get(const std::string& url, std::chrono::milliseconds timeout, cons
         curl_easy_setopt(m_curl, CURLOPT_WRITEDATA, &m_receivedData);
         curl_easy_setopt(m_curl, CURLOPT_WRITEFUNCTION, writeCallback);
         if (m_userAgent.empty()) {
-            curl_easy_setopt(m_curl, CURLOPT_USERAGENT, MBSTF_TYPE "/" MBSTF_VERSION);
+            /* The version after the product identifier is the specification's, not this
+               implementation's. TS 26.517 V18.6.0 clause 8.2.3.2.1: “The optional product-version
+               suffix shall be present and should indicate the version number of the present
+               document (without the leading "V") with which the client implementation complies and
+               shall, at minimum, indicate the 3GPP release number with which the implementation
+               complies.” MBSTF_VERSION is this component's own release number and says nothing
+               about either, so it moves to a vendor product identifier of its own, which the same
+               clause allows and its own EXAMPLE 1 shows. The Server response header these requests
+               are answered with already carries the release this way. */
+            curl_easy_setopt(m_curl, CURLOPT_USERAGENT,
+                             MBSTF_TYPE "/" FIVEG_API_RELEASE " " MBSTF_NAME "/" MBSTF_VERSION);
         } else {
             curl_easy_setopt(m_curl, CURLOPT_USERAGENT, m_userAgent.c_str());
         }

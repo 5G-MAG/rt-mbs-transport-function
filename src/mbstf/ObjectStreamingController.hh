@@ -32,6 +32,8 @@ class SubscriptionService;
 class ObjectManifestController;
 
 class ObjectStreamingController : public ObjectManifestController {
+protected:
+    virtual unsigned int manifestHandlerSuitability() const override;
 public:
     ObjectStreamingController() = delete;
     ObjectStreamingController(DistributionSession&);

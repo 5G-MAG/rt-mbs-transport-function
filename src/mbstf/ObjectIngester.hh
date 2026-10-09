@@ -73,6 +73,10 @@ public:
         if (m_workerThread.get_id() != std::this_thread::get_id() && m_workerThread.joinable()) {
             m_workerThread.join();
         }
+        /* The ingest worker emits its events asynchronously, so this service has a thread of its
+           own that outlives the worker. It allocates from the open5gs memory pools and has to
+           stop before a teardown takes them away. */
+        stopAsyncEvents();
     }
 
     virtual ~ObjectIngester() {
@@ -82,6 +86,10 @@ public:
     bool workerCancelled() const { return m_workerCancel; };
 
 protected:
+    /* Leave workerLoop() after the current doObjectIngest() returns, without abort()'s
+       stopAsyncEvents(), so an event the worker has just sent is still delivered. */
+    void endWorkerLoop() { m_workerCancel = true; }
+
     std::shared_ptr<ObjectStore> &objectStore() { return m_objectStore; }
     const std::shared_ptr<ObjectStore> &objectStore() const { return m_objectStore; }
     ObjectController &controller() { return m_controller; }

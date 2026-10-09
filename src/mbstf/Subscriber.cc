@@ -68,10 +68,16 @@ Subscriber::Subscriber(Subscriber &&other)
 
 Subscriber::~Subscriber()
 {
+    unsubscribeFromAll();
+}
+
+void Subscriber::unsubscribeFromAll()
+{
     /* Unsubscribe all */
     for (auto svc : m_subscriptions) {
         svc->unsubscribe(*this);
     }
+    m_subscriptions.clear();
 }
 
 Subscriber &Subscriber::operator=(const Subscriber &other)

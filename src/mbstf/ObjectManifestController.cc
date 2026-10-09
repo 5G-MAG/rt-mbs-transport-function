@@ -36,10 +36,18 @@
 #include "SubscriptionService.hh"
 #include "utilities.hh"
 #include "openapi/model/DistSessionState.h"
+#include "openapi/model/ModelException.hh"
+#include "openapi/model/ProblemCause.hh"
 
+#include <algorithm>
+
+#include "App.hh"
+#include "Context.hh"
 #include "ObjectManifestController.hh"
 
 using reftools::mbstf::DistSessionState;
+using fiveg_mag_reftools::ModelException;
+using fiveg_mag_reftools::ProblemCause;
 
 MBSTF_NAMESPACE_START
 
@@ -59,6 +67,19 @@ ObjectManifestController::ObjectManifestController(DistributionSession &dist_ses
     validate_pull_acquisition_method(dist_session);
     validate_push_acquisition_method(dist_session);
 };
+
+void ObjectManifestController::validateUpdate()
+{
+    /* The object acquisition identifier rules are rules on the provisioned parameters, however they came
+       to be provisioned, so an update that breaks them is refused as a create that breaks them is. */
+    validate_pull_acquisition_method(distributionSession());
+    validate_push_acquisition_method(distributionSession());
+}
+
+unsigned int ObjectManifestController::manifestHandlerSuitability() const
+{
+    return SUITABLE_FOR_CAROUSEL;
+}
 
 void ObjectManifestController::processEvent(Event &event, SubscriptionService &event_service)
 {
@@ -87,6 +108,7 @@ void ObjectManifestController::processEvent(Event &event, SubscriptionService &e
                                 throw std::runtime_error("Failed to update Manifest");
                             }
                             startWorker();
+                            manifestUpdated();
                             if (includeManifest()) sendToPackager(object);
                         } catch (std::exception &ex) {
                             ogs_error("Invalid Manifest update: %s", ex.what());
@@ -96,12 +118,14 @@ void ObjectManifestController::processEvent(Event &event, SubscriptionService &e
                             throw std::runtime_error(ex.what());
                         }
                     } else {
-                        manifest_handler.reset(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL"));
+                        manifest_handler.reset(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL",
+                                                                                          manifestHandlerSuitability()));
                         if (!manifest_handler) {
                             object->second.keepAfterSend(false);
                             throw std::runtime_error("Could not find suitable manifest handler");
                         }
                         manifestHandler(std::move(manifest_handler));
+                        manifestHandlerCreated();
                         if (includeManifest()) {
                             object->second.compressedSend(manifestHandler()->compressManifestOnSend());
                             sendToPackager(object);
@@ -131,23 +155,7 @@ void ObjectManifestController::processEvent(Event &event, SubscriptionService &e
     } else if (event.eventName() == ObjectIngester::IngestFailedEvent::event_name) {
         ObjectIngester::IngestFailedEvent &ingest_failed_event = dynamic_cast<ObjectIngester::IngestFailedEvent&>(event);
         ogs_debug("Failed ingest of %s, response code was %i", ingest_failed_event.url().c_str(), ingest_failed_event.failureType());
-        if (distributionSession().getObjectAcquisitionMethod() != "PUSH") {
-            // try fetch again
-            try {
-                PullObjectIngester::PullIngestFailedEvent &pull_ingest_failed_event = dynamic_cast<PullObjectIngester::PullIngestFailedEvent&>(event);
-                std::lock_guard<std::recursive_mutex> lock(m_pullObjectIngestersMutex);
-                auto &ingesters = getPullObjectIngesters();
-                if (!ingesters.empty()) {
-                    auto &ingester = ingesters.front();
-                    auto &item = pull_ingest_failed_event.item();
-                    item.forceRecache(true); // Force refetch on error
-                    ingester->fetch(item);
-                }
-            } catch (std::bad_cast &ex) {
-                // Should never happen, but just incase
-                ogs_error("Unable to refetch failed non-PUSH ingest");
-            }
-        }
+        refetchFailedPull(event);
     }
     ObjectController::processEvent(event, event_service);
 
@@ -259,7 +267,7 @@ std::list<PullObjectIngester::IngestItem> ObjectManifestController::getPullAcqui
                         }
                     }
 
-                    const auto *metadata = object_store->findMetadataByURL(obj_ingest_url);
+                    const auto metadata = object_store->findMetadataByURL(obj_ingest_url);
                     if (metadata) {
                         /* this is a refetch */
                         result.emplace_back(*metadata);
@@ -278,10 +286,25 @@ std::list<PullObjectIngester::IngestItem> ObjectManifestController::getPullAcqui
 
 void ObjectManifestController::startWorker()
 {
-    if (!m_scheduledPullRunning) {
-        if (m_scheduledPullThread.joinable()) m_scheduledPullThread.detach();
-        m_scheduledPullThread = std::thread(&ObjectManifestController::workerLoop, this);
-    }
+    /* The slot is claimed here, not by the worker once it runs.
+       m_scheduledPullRunning was set at the top of workerLoop(), so between this function creating
+       the thread and that thread being scheduled the flag was still false. A second call in that
+       window passed the check and started a second worker, and both then ran their own fetch
+       schedule against the same manifest -- one manifest refetched and resent several times in quick
+       succession, which is what reactivation produces: the manifest is processed again and this
+       function is reached more than once before the first worker has run.
+
+       compare_exchange_strong makes exactly one caller the starter. Every exit from workerLoop()
+       clears the flag before returning, so a genuinely finished worker still allows the next start.
+       code-derived, no spec claim. */
+    bool expected = false;
+    if (!m_scheduledPullRunning.compare_exchange_strong(expected, true)) return;
+
+    /* The previous thread has left workerLoop() by now, since it cleared the flag on its way out.
+       Detached rather than joined because this runs on the event loop, and a worker still inside a
+       fetch would stall it. */
+    if (m_scheduledPullThread.joinable()) m_scheduledPullThread.detach();
+    m_scheduledPullThread = std::thread(&ObjectManifestController::workerLoop, this);
 }
 
 void ObjectManifestController::initPullObjectIngesters()
@@ -300,7 +323,12 @@ void ObjectManifestController::initPushObjectIngester()
 
         PushObjectIngester *push_ingester = new PushObjectIngester(objectStore(), *this);
 
-        distributionSession().setObjectIngestBaseUrl(push_ingester->getIngestServerPrefix());
+        {
+        /* Empty when the push ingest server could not start; that failure has been reported as an
+           ingest failure, and an empty base URL would be handed on as if it were one. */
+        const std::string &ingest_base_url = push_ingester->getIngestServerPrefix();
+        if (!ingest_base_url.empty()) distributionSession().setObjectIngestBaseUrl(ingest_base_url);
+    }
         subscribeTo({"ObjectPushStart"}, *push_ingester);
         pushObjectIngester(push_ingester);
     }
@@ -404,7 +432,12 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
         if (object_store) {
             std::lock_guard<std::recursive_mutex> lock(controller->m_pullObjectIngestersMutex);
             auto &ingesters = controller->getPullObjectIngesters();
-            while (ingesters.size() < next_ingest_items.second.size()) {
+            /* Bounded by configuration rather than by whatever the content provider's manifest
+               happens to contain: see Context::maxConcurrentPullIngesters. The distribution below
+               hands every item to an ingester whether or not there is one per item. */
+            const std::size_t ceiling = App::self().context()->maxConcurrentPullIngesters;
+            const std::size_t wanted = std::min(next_ingest_items.second.size(), ceiling);
+            while (ingesters.size() < wanted) {
                 controller->addPullObjectIngester(new PullObjectIngester(object_store, *controller, urls));
             }
         }
@@ -438,8 +471,12 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
             std::lock_guard<std::recursive_mutex> lock(controller->m_pullObjectIngestersMutex);
             // Add the URLs to the PullObjectIngester instances
             auto &ingesters = controller->getPullObjectIngesters();
-            for (auto ingester_it = ingesters.begin(); ingester_it!= ingesters.end(); ++ingester_it) {
-                if (next_ingest_items.second.empty()) break;
+            /* Round robin over the ingesters rather than one item each: with a ceiling there can
+               be more items than ingesters, and stopping at the end of the list would silently
+               leave the remainder unfetched. Each ingester keeps its own deadline-sorted queue, so
+               a second item handed to one is fetched after its first, not instead of it. */
+            auto ingester_it = ingesters.begin();
+            while (!next_ingest_items.second.empty() && ingester_it != ingesters.end()) {
                 auto ingest_item = next_ingest_items.second.front();
                 next_ingest_items.second.pop_front();  // remove the item
                 //ingest_item.deadline(std::nullopt);
@@ -452,15 +489,22 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
                     if (controller->m_manifestHandler) {
                         controller->m_manifestHandler->startedFetch(ingest_item);
                     } else {
-                        // Manifest handler has disappeared, end scheduled pull
+                        /* Manifest handler has disappeared, end scheduled pull.
+                           return, not break: this sits inside the per-ingester for loop, so a break
+                           left the enclosing while running while the flag said no worker was running.
+                           The pull therefore did not end, and startWorker() was free to start a
+                           second worker alongside this one. Every other exit from this function
+                           clears the flag and returns; this was the one that did not. */
                         controller->m_scheduledPullRunning = false;
-                        break;
+                        return;
                     }
                 }
 
                 if (!(*ingester_it)->fetch(ingest_item)) {
                     ogs_debug("Failed to fetch item: %s", ingest_item.url().c_str());
                 }
+
+                if (++ingester_it == ingesters.end()) ingester_it = ingesters.begin();
             }
         }
     }
@@ -478,33 +522,71 @@ std::string ObjectManifestController::generateUUID()
 
 /* local functions */
 
+/* The operating modes this controller serves (COLLECTION, CAROUSEL, STREAMING) each take exactly one
+   object acquisition identifier, for either acquisition method.
+
+   TS 26.502 V18.6.0 table 6.1-1, rows OBJECT_COLLECTION and OBJECT_CAROUSEL, of the MBS Distribution
+   Session parameters: "shall cite a single object manifest URL in Object acquisition identifiers."
+
+   OBJECT_STREAMING allows one Application Service Entry Point per type, but only DASH is implemented,
+   so one is accepted. TS 29.581 V18.6.0 can carry only one for PUSH anyway: objAcquisitionIdPush is
+   0..1 in table 6.1.6.2.5-1. */
+static const char *acquisition_id_rule(const std::string &operating_mode)
+{
+    if (operating_mode == "STREAMING") return "at most one Application Service Entry Point per manifest type this MBSTF implements";
+    return "a single object manifest URL (TS 26.502 V18.6.0 table 6.1-1)";
+}
+
+/* These checks run in the base constructor, before a derived controller has refused a session of
+   another operating mode, so they apply only to the modes this controller serves. */
+static bool is_manifest_operating_mode(const std::string &operating_mode)
+{
+    return operating_mode == "COLLECTION" || operating_mode == "CAROUSEL" || operating_mode == "STREAMING";
+}
+
 static void validate_pull_acquisition_method(DistributionSession &distributionSession) {
+    if (!is_manifest_operating_mode(distributionSession.getObjectDistributionOperatingMode())) return;
     if (distributionSession.getObjectAcquisitionMethod() == "PULL") {
+        const std::string &mode = distributionSession.getObjectDistributionOperatingMode();
         auto &pull_urls = distributionSession.getObjectAcquisitionPullUrls();
-        if (pull_urls.has_value() && pull_urls->size() != 1) {
-            throw std::runtime_error("objAcquisitionIdsPull must contain exactly one item when objDistributionOperatingMode is set to " + distributionSession.getObjectDistributionOperatingMode());
+        /* STREAMING takes one identifier per Application Service Entry Point type
+           (TS 26.502 V18.6.0 table 6.1-1, OBJECT_STREAMING: "shall cite a single Application Service Entry Point URL of each type"),
+           so no more than the manifest types registered as suitable for streaming. */
+        const size_t max_ids = (mode == "STREAMING") ?
+                ManifestHandlerFactory::numberOfManifestHandlerTypes(SUITABLE_FOR_STREAMING) : 1;
+        if (!pull_urls.has_value() || pull_urls->empty() || pull_urls->size() > max_ids) {
+            throw ModelException(std::string(mode == "STREAMING" ? "must contain between one and " + std::to_string(max_ids) + " items"
+                                                                 : std::string("must contain exactly one item")) +
+                                 " for objDistributionOperatingMode " + mode + ": " +
+                                 acquisition_id_rule(mode), "ObjDistributionData",
+                                 "distSession.objDistributionData.objAcquisitionIdsPull",
+                                 pull_urls.has_value() ? ProblemCause::MANDATORY_IE_INCORRECT : ProblemCause::MANDATORY_IE_MISSING);
         }
         std::optional<std::string> object_acquisition_push_id = distributionSession.getObjectAcquisitionPushId();
         if (object_acquisition_push_id.has_value()) {
-
-            throw std::runtime_error("objAcquisitionIdPush must not be present when objAcquisitionMethod is set to " + distributionSession.getObjectAcquisitionMethod());
+            throw ModelException("must not be present when objAcquisitionMethod is PULL", "ObjDistributionData",
+                                 "distSession.objDistributionData.objAcquisitionIdPush", ProblemCause::MANDATORY_IE_INCORRECT);
         }
     }
 }
 
 static bool validate_push_acquisition_method(DistributionSession &distributionSession) {
+    if (!is_manifest_operating_mode(distributionSession.getObjectDistributionOperatingMode())) return false;
     if (distributionSession.getObjectAcquisitionMethod() == "PUSH") {
+        const std::string &mode = distributionSession.getObjectDistributionOperatingMode();
         auto &pull_urls = distributionSession.getObjectAcquisitionPullUrls();
         if (pull_urls.has_value()) {
-            throw std::runtime_error("objAcquisitionIdsPull must not be present when objAcquisitionMethod is set to " + distributionSession.getObjectAcquisitionMethod());
-        } else {
-            std::optional<std::string> object_acquisition_push_id = distributionSession.getObjectAcquisitionPushId();
-            if (!object_acquisition_push_id.has_value()) {
-                std::optional<std::string> id = "manifest";
-                distributionSession.setObjectAcquisitionIdPush(id);
-            }
-            return true;
+            throw ModelException("must not be present when objAcquisitionMethod is PUSH", "ObjDistributionData",
+                                 "distSession.objDistributionData.objAcquisitionIdsPull", ProblemCause::MANDATORY_IE_INCORRECT);
         }
+        /* Previously a missing identifier was defaulted to "manifest", which the table above does not
+           allow, and which refused every push to any other path without saying why. */
+        if (!distributionSession.getObjectAcquisitionPushId().has_value()) {
+            throw ModelException(std::string("must be present for objDistributionOperatingMode ") + mode + ": " +
+                                 acquisition_id_rule(mode), "ObjDistributionData",
+                                 "distSession.objDistributionData.objAcquisitionIdPush", ProblemCause::MANDATORY_IE_MISSING);
+        }
+        return true;
     }
     return false;
 }

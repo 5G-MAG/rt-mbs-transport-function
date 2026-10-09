@@ -1,23 +1,27 @@
 {
     "distSession": {
-        "distSessionId": "541ebbd2-ebf9-496b-a3b8-dcd1c17fbc9d",
-        "distSessionState": "INACTIVE",
+        "distSessionId": "5a1f0e2c-7b3d-4f61-9c2e-1d4b8a6f3e01",
+        "distSessionState": "ACTIVE",
         "mbUpfTunAddr": {
             "ipv4Addr": "127.0.0.7",
             "portNumber": 5678
         },
         "upTrafficFlowInfo": {
-            "transportSessionId": 1003,
+            "transportSessionId": 1234,
             "srcIpAddr": { "ipv4Addr": "127.0.0.7" },
             "destIpAddr": { "ipv4Addr": "232.0.0.1" },
             "portNumber": 5000
         },
         "mbr": "10 Mbps",
+        "fecInformation": {
+            "fecScheme": "urn:ietf:rmt:fec:encoding:1",
+            "fecOverHead": 25
+        },
         "objDistributionData": {
-            "objDistributionOperatingMode": "STREAMING",
+            "objDistributionOperatingMode": "SINGLE",
             "objAcquisitionMethod": "PULL",
-            "objIngestBaseUrl": "https://livesim2.dashif.org/livesim2/WAVE/vectors/cfhd_sets/12.5_25_50/t1/2022-10-17/",
-            "objAcquisitionIdsPull": ["stream.mpd"],
+            "objAcquisitionIdsPull": ["fec-object"],
+            "objIngestBaseUrl": "http://127.0.0.1:3004/",
             "objDistributionBaseUrl": "http://127.0.0.2/"
         }
     }
