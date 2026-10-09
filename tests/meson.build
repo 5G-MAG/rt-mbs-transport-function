@@ -44,3 +44,7 @@ test('test_push_object_ingester',
 test('test_entity_tag',
     executable('testEntityTag', 'test_EntityTag.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
    ,verbose: true, timeout: 600, protocol: 'exitcode')
+
+test('test_queued_object_set',
+    executable('testQueuedObjectSet', 'test_QueuedObjectSet.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
+   ,verbose: true, timeout: 600, protocol: 'exitcode')

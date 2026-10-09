@@ -130,6 +130,7 @@ libmbstf_dist_sources = files('''
     FecOtiHelper.hh
     ObjectCollectionController.cc
     ObjectCollectionController.hh
+    QueuedObjectSet.hh
     ObjectController.cc
     ObjectController.hh
     ObjectListController.cc

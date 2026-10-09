@@ -19,6 +19,7 @@
 #include "openapi/model/ObjDistributionData.h"
 #include "ObjectManifestController.hh"
 #include "ObjectStore.hh"
+#include "QueuedObjectSet.hh"
 
 MBSTF_NAMESPACE_START
 
@@ -58,8 +59,6 @@ public:
     static unsigned int factoryPriority() { return 50; };
 
     // Subscriber virtual methods
-    virtual void processEvent(Event &event, SubscriptionService &event_service);
-
     std::string reprString() const {
                 std::ostringstream os;
                 os << "ObjectCollectionController(controller =" << this << ")";
@@ -73,18 +72,26 @@ public:
     virtual void reconfigureObjectPackager();
 
 protected:
+    virtual void objectAddOrUpdateEvent(const std::shared_ptr<ObjectStore::Object> &object) override;
+    virtual void manifestUpdated() override;
+    virtual void manifestHandlerCreated() override;
+    virtual bool checkObjectActiveInManifest(const std::shared_ptr<ObjectStore::Object> &object) override;
+    virtual void finishRequestInManifestHandler(const std::shared_ptr<ObjectStore::Object> &object) override;
+    virtual void sendToPackager(const std::shared_ptr<ObjectStore::Object> &object) override;
     virtual void setObjectPackager();
     virtual void unsetObjectPackager();
     virtual void activateObjectPackager();
     virtual void deactivateObjectPackager();
 
 private:
-    void sendToPackager(const std::shared_ptr<ObjectStore::Object> &object);
     // Queues every object the manifest currently lists that has already been ingested. Unlike
     // Carousel's updateCarousel(), this never removes anything: the manifest is fetched once (per
     // the clause above), not periodically re-checked for changes, so there is nothing to diff
     // against on a later pass.
     void populateFromManifest();
+
+    /* The objects handed to the current packager; see QueuedObjectSet. */
+    QueuedObjectSet m_queuedObjects;
 };
 
 MBSTF_NAMESPACE_STOP

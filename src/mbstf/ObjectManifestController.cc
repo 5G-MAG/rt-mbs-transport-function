@@ -125,6 +125,7 @@ void ObjectManifestController::processEvent(Event &event, SubscriptionService &e
                             throw std::runtime_error("Could not find suitable manifest handler");
                         }
                         manifestHandler(std::move(manifest_handler));
+                        manifestHandlerCreated();
                         if (includeManifest()) {
                             object->second.compressedSend(manifestHandler()->compressManifestOnSend());
                             sendToPackager(object);

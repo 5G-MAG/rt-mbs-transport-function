@@ -51,9 +51,6 @@ using fiveg_mag_reftools::ProblemCause;
 MBSTF_NAMESPACE_START
 
 static void validate_distribution_session(DistributionSession &distribution_session);
-static bool check_if_object_added_is_manifest(const std::shared_ptr<ObjectStore::Object> &object, std::string &manifest_url);
-static bool check_if_object_is_active_in_manifest(const std::shared_ptr<ObjectStore::Object> &object, const std::shared_ptr<ManifestHandler> &manifest_handler);
-static void finish_request_in_manifest_handler(const std::shared_ptr<ObjectStore::Object> &object, const std::shared_ptr<ManifestHandler> &manifest_handler);
 
 ObjectCollectionController::ObjectCollectionController(DistributionSession &distribution_session)
     :ObjectManifestController(distribution_session)
@@ -83,6 +80,8 @@ ObjectCollectionController::~ObjectCollectionController()
 
 void ObjectCollectionController::setObjectPackager()
 {
+    /* A new packager has been sent nothing yet. */
+    m_queuedObjects.clear();
     auto ssm_port = distributionSession().getSsmPort();
     const std::optional<std::string> &tunnel_addr = distributionSession().getTunnelAddr();
     uint32_t rate_limit = distributionSession().getRateLimit();
@@ -126,80 +125,41 @@ std::shared_ptr<ObjectListPackager> ObjectCollectionController::getObjectListPac
     return std::dynamic_pointer_cast<ObjectListPackager>(packager());
 }
 
-void ObjectCollectionController::processEvent(Event &event, SubscriptionService &event_service)
+void ObjectCollectionController::objectAddOrUpdateEvent(const std::shared_ptr<ObjectStore::Object> &object)
 {
-    if (event.eventName() == ObjectStore::ObjectAddedEvent::event_name ||
-        event.eventName() == ObjectStore::ObjectUpdatedEvent::event_name) {
+    object->second.keepAfterSend(true); /* keep all objects; nothing here ever removes one */
+}
 
-        ObjectStore::ObjectChangedEvent &obj_added_event = dynamic_cast<ObjectStore::ObjectChangedEvent&>(event);
-        std::string object_id = obj_added_event.objectId();
-        ogs_debug("%s with ID: %s", event.eventName().c_str(), object_id.c_str());
-        try {
-            const std::shared_ptr<ObjectStore::Object> &object = (*objectStore())[object_id];
-            ogs_debug("Object location: %s", object->second.getFetchedUrl().c_str());
-            object->second.keepAfterSend(true); /* keep all objects; nothing here ever removes one */
-            if (check_if_object_added_is_manifest(object, getManifestUrl())) {
-                if (manifestHandler()) {
-                    try {
-                        if (!manifestHandler()->update(object)) {
-                            ogs_error("Failed to update Manifest");
-                            unsetObjectListPackager();
-                            event.stopProcessing();
-                            return;
-                        }
-                        startWorker();
-                    } catch (std::exception &ex) {
-                        ogs_error("Invalid Manifest update: %s", ex.what());
-                        unsetObjectListPackager();
-                        event.stopProcessing();
-                        return;
-                    }
-                } else {
-                    std::shared_ptr<ManifestHandler> manifest_handler(ManifestHandlerFactory::makeManifestHandler(object, this, distributionSession().getObjectAcquisitionMethod() == "PULL",
-                                                                                                                    manifestHandlerSuitability()));
-                    if (!manifest_handler) {
-                        // No registered handler recognises this object's media type as a
-                        // manifest: the ingest source served an unexpected Content-Type, or the
-                        // format is not one this build supports. The surrounding try catches only
-                        // std::out_of_range, so a std::runtime_error raised here would leave the
-                        // process and take down every other Distribution Session over one bad
-                        // ingest response for this one session. Give up on this session's manifest
-                        // the same way an update failure two branches above does.
-                        ogs_error("Could not find suitable manifest handler for object %s", object_id.c_str());
-                        unsetObjectListPackager();
-                        event.stopProcessing();
-                        return;
-                    }
-                    manifestHandler(std::move(manifest_handler));
-                }
-                populateFromManifest();
-            } else if (check_if_object_is_active_in_manifest(object, manifestHandler())) {
-                finish_request_in_manifest_handler(object, manifestHandler());
-                sendToPackager(object);
-            }
-        } catch (std::out_of_range &ex) {
-            ogs_error("Object %s is not in the ObjectStore", object_id.c_str());
-        }
+void ObjectCollectionController::manifestUpdated()
+{
+    populateFromManifest();
+}
 
-        /* Handled here, so the base class is not asked to handle it again.
+void ObjectCollectionController::manifestHandlerCreated()
+{
+    populateFromManifest();
+}
 
-           ObjectManifestController::processEvent() does the same work for these two events: it
-           calls the manifest handler's update(), starts the scheduled pull worker and sends the
-           object to the packager. Falling through to it ran all of that a second time for every
-           ObjectAdded and ObjectUpdated, so a manifest was applied twice and an object already
-           ingested was queued and sent again under a new TOI. On a broadcast bearer that is
-           transmission capacity spent on data the receiver already has.
+bool ObjectCollectionController::checkObjectActiveInManifest(const std::shared_ptr<ObjectStore::Object> &object)
+{
+    const auto object_manifest_hndlr = std::dynamic_pointer_cast<const ObjectManifestHandler>(manifestHandler());
+    if (!object_manifest_hndlr) {
+        ogs_error("Manifest handler is not an ObjectManifestHandler (object %s); treating as not active",
+                  object->second.objectId().c_str());
+        return false;
+    }
+    return object_manifest_hndlr->isObjectURLActive(object->second.getOriginalUrl());
+}
 
-           Nothing is lost by returning. The one thing the base does that this override does not is
-           call objectAddOrUpdateEvent(), which is an empty virtual here: only
-           ObjectCarouselController overrides it, and only to set keepAfterSend(true), which this
-           override already does above.
-
-           Raised by review on 5G-MAG/rt-mbs-transport-function#71. */
+void ObjectCollectionController::finishRequestInManifestHandler(const std::shared_ptr<ObjectStore::Object> &object)
+{
+    auto object_manifest_hndlr = std::dynamic_pointer_cast<ObjectManifestHandler>(manifestHandler());
+    if (!object_manifest_hndlr) {
+        ogs_error("Manifest handler is not an ObjectManifestHandler (object %s); cannot finish request",
+                  object->second.objectId().c_str());
         return;
     }
-
-    ObjectManifestController::processEvent(event, event_service);
+    object_manifest_hndlr->finishRequest(object->second.getOriginalUrl());
 }
 
 void ObjectCollectionController::sendToPackager(const std::shared_ptr<ObjectStore::Object> &object)
@@ -207,7 +167,7 @@ void ObjectCollectionController::sendToPackager(const std::shared_ptr<ObjectStor
     auto packager = getObjectListPackager();
     if (packager) {
         ObjectListPackager::PackageItem item(object);
-        packager->add(item);
+        if (packager->add(item)) m_queuedObjects.insert(object->second.objectId());
     }
 }
 
@@ -247,10 +207,11 @@ void ObjectCollectionController::populateFromManifest()
         if (obj && obj.value()) {
             const auto obj_metadata = objectStore()->findMetadataByURL(obj.value()->getLocator());
             if (obj_metadata) {
+                if (m_queuedObjects.contains(obj_metadata->objectId())) continue;
                 sendToPackager((*objectStore())[obj_metadata->objectId()]);
             }
             /* else not yet ingested -- the scheduled pull worker will fetch it, and its own
-               ObjectAddedEvent will reach processEvent() above and queue it then */
+               ObjectAddedEvent will reach ObjectManifestController::processEvent() and queue it then */
         }
     }
 }
@@ -269,38 +230,6 @@ static void validate_distribution_session(DistributionSession &distribution_sess
         throw std::logic_error("Expected objDistributionOperatingMode to be set to COLLECTION.");
     }
     ObjectController::validateDistributionSession(distribution_session);
-}
-
-static bool check_if_object_added_is_manifest(const std::shared_ptr<ObjectStore::Object> &object, std::string &manifest_url)
-{
-    auto &metadata = object->second;
-    return (metadata.getOriginalUrl() == manifest_url || metadata.getFetchedUrl() == manifest_url);
-}
-
-// dynamic_pointer_cast returns null when the manifest handler was constructed as a different
-// ManifestHandler subclass (a DASH MPD giving a DASHManifestHandler, say), so the result is
-// checked before use. ObjectCarouselController.cc holds an identical copy of these two functions
-// and the same reasoning applies there.
-static bool check_if_object_is_active_in_manifest(const std::shared_ptr<ObjectStore::Object> &object, const std::shared_ptr<ManifestHandler> &manifest_handler)
-{
-    const auto object_manifest_hndlr = std::dynamic_pointer_cast<const ObjectManifestHandler>(manifest_handler);
-    if (!object_manifest_hndlr) {
-        ogs_error("Manifest handler is not an ObjectManifestHandler (object %s); treating as not active",
-                  object->second.objectId().c_str());
-        return false;
-    }
-    return object_manifest_hndlr->isObjectURLActive(object->second.getOriginalUrl());
-}
-
-static void finish_request_in_manifest_handler(const std::shared_ptr<ObjectStore::Object> &object, const std::shared_ptr<ManifestHandler> &manifest_handler)
-{
-    auto object_manifest_hndlr = std::dynamic_pointer_cast<ObjectManifestHandler>(manifest_handler);
-    if (!object_manifest_hndlr) {
-        ogs_error("Manifest handler is not an ObjectManifestHandler (object %s); cannot finish request",
-                  object->second.objectId().c_str());
-        return;
-    }
-    object_manifest_hndlr->finishRequest(object->second.getOriginalUrl());
 }
 
 MBSTF_NAMESPACE_STOP
