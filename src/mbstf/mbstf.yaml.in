@@ -235,6 +235,11 @@ mbstf:
     rtpIngest:
       - addr: 127.0.0.61
         port: 0 # ephemeral
+    # Object push ingest. With port 0 each ingest session listens on an ephemeral port of its own. With
+    # a non-zero port, one listener on that address and port serves every ingest session, each under its own
+    # path segment, so a firewall or port mapping can be fixed in advance. Only the first entry is used in
+    # that case. If it has an "advertise" name or address, that is the host given to Application Providers in
+    # the ingest URL.
     httpPushIngest:
       - addr: 127.0.0.61
         port: 0 # ephemeral

@@ -378,6 +378,28 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
         ogs_assert(rv == OGS_OK);
     }
 
+    if (pc_key == "httpPushIngest") {
+        /* Not an SBI server. The object push server is a libmicrohttpd daemon that PushObjectIngester
+           binds to this address itself, and a listening SBI server made here as well would hold the
+           address and port, so that bind could never succeed. The address is only kept. */
+        if (pushIngest.address.has_value()) {
+            ogs_warn("mbstf.httpPushIngest lists more than one address; the object push server uses the first "
+                     "and ignores the rest");
+        } else if (addr) {
+            struct sockaddr_storage ss = {};
+            if (addr->ogs_sa_family == AF_INET6) {
+                memcpy(&ss, &addr->sin6, sizeof(addr->sin6));
+            } else {
+                memcpy(&ss, &addr->sin, sizeof(addr->sin));
+            }
+            pushIngest.address = ss;
+            if (num_of_advertise > 0 && advertise[0]) pushIngest.advertise = std::string(advertise[0]);
+        }
+        if (dev) ogs_warn("mbstf.httpPushIngest does not take a device; set its address");
+        if (addr) ogs_freeaddrinfo(addr);
+        return;
+    }
+
     ogs_list_init(&list);
     ogs_list_init(&list6);
 

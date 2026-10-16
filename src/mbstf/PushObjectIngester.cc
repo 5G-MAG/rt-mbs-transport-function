@@ -331,11 +331,9 @@ bool PushObjectIngester::sharedPortConfigured()
        option. So port zero keeps the previous behaviour. */
     auto ctx = App::self().context();
     if (!ctx) return false;
-    const auto &servers = ctx->servers[Context::SERVER_OBJECT_PUSH];
-    if (servers.empty()) return false;
-    const ogs_sbi_server_t *srv = servers.front()->ogsSBIServer();
-    if (!srv) return false;
-    return sockaddrPort(&srv->node.addr) != 0;
+    const auto &address = ctx->pushIngest.address;
+    if (!address.has_value()) return false;
+    return sockaddrPort(&address.value()) != 0;
 }
 
 uint16_t PushObjectIngester::sockaddrPort(const void *addr)
@@ -383,19 +381,8 @@ std::string PushObjectIngester::joinSharedDaemon()
 
     if (!s_sharedDaemon) {
         auto ctx = App::self().context();
-        const auto &servers = ctx->servers[Context::SERVER_OBJECT_PUSH];
-        if (servers.empty()) return std::string();
-
-        /* The first configured endpoint is the one bound. Several would each need their own daemon,
-           and the option exists so a container can publish one known port, so more than one is not
-           interpreted here rather than being guessed at. */
-        if (servers.size() > 1) {
-            ogs_warn("mbstf.httpPushIngest lists %zu addresses; the object push server uses the first "
-                     "and ignores the rest", servers.size());
-        }
-        const ogs_sbi_server_t *srv = servers.front()->ogsSBIServer();
-        if (!srv) return std::string();
-        memcpy(&s_sharedSockaddr, &srv->node.addr, sizeof(s_sharedSockaddr));
+        if (!ctx || !ctx->pushIngest.address.has_value()) return std::string();
+        memcpy(&s_sharedSockaddr, &ctx->pushIngest.address.value(), sizeof(s_sharedSockaddr));
 
         s_sharedDaemon = MHD_start_daemon(
                                     MHD_USE_SELECT_INTERNALLY | MHD_USE_ERROR_LOG,
@@ -446,9 +433,10 @@ bool PushObjectIngester::start()
        to a daemon of its own when nothing is configured, or when binding the configured address
        failed, which keeps an existing deployment working exactly as before. */
     if (sharedPortConfigured()) {
-        m_sharedPathSegment = joinSharedDaemon();
-        if (!m_sharedPathSegment.empty()) {
+        std::string segment = joinSharedDaemon();
+        if (!segment.empty()) {
             std::lock_guard<std::recursive_mutex> lock(m_mtx);
+            m_sharedPathSegment = segment;
             m_condVar.notify_all();     /* getIngestServerPrefix() waits on this */
             return true;
         }
@@ -579,8 +567,13 @@ void PushObjectIngester::addedBodyBlock(const std::shared_ptr<Request> &request,
 const std::string &PushObjectIngester::getIngestServerPrefix()
 {
     /* Shared-port mode has no daemon of its own, so the address comes from what the shared one was
-       bound to and the UUID segment is appended. Handled before the wait below, which would never
-       finish here: m_mhdDaemon stays null in this mode, so the predicate could never become false. */
+       bound to and the UUID segment is appended. */
+    {
+        /* start() runs on another thread, so this may be asked before it has chosen between the shared daemon
+           and one of its own. Either outcome ends the wait; shared mode never sets m_mhdDaemon. */
+        std::lock_guard<std::recursive_mutex> lock(m_mtx);
+        while (!m_mhdDaemon && !m_startFailed && m_sharedPathSegment.empty()) m_condVar.wait(m_mtx);
+    }
     if (!m_sharedPathSegment.empty()) {
         if (m_urlPrefix.empty()) {
             std::lock_guard<std::recursive_mutex> lock(s_sharedMtx);
@@ -600,7 +593,11 @@ const std::string &PushObjectIngester::getIngestServerPrefix()
             if (!addr.empty() && port) {
                 /* The segment is what tells the shared handler which ingest session a push belongs
                    to, so the URL the Application Provider is given has to carry it. */
-                const bool literal_v6 = (s_sharedSockaddr.ss_family == AF_INET6);
+                /* An advertised name or address, when configured, is what the Application Provider can reach; the
+                   bound address may be a wildcard or an internal one. */
+                const auto &advertise = App::self().context()->pushIngest.advertise;
+                if (advertise && !advertise->empty()) addr = *advertise;
+                const bool literal_v6 = (addr.find(':') != std::string::npos);
                 m_urlPrefix = std::string("http://") + (literal_v6 ? "[" : "") + addr +
                               (literal_v6 ? "]" : "") + ":" + std::to_string(port) + "/" +
                               m_sharedPathSegment + "/";
@@ -722,7 +719,8 @@ static MHD_Result gatherHeaders(void *cls, MHD_ValueKind kind, char const *key, 
 
 static void request_completion_callback(void *cls, struct MHD_Connection *connection, void **con_cls, enum MHD_RequestTerminationCode termination_code)
 {
-    PushObjectIngester *ingester = reinterpret_cast<PushObjectIngester*>(cls);
+    /* A request refused before it was given to an ingester (an unknown path on the shared port) has no record. */
+    if (!*con_cls) return;
 
     // Convert *con_cls into a shared pointer
     std::shared_ptr<PushObjectIngester::Request> &req = *reinterpret_cast<std::shared_ptr<PushObjectIngester::Request>*>(*con_cls);
@@ -731,7 +729,8 @@ static void request_completion_callback(void *cls, struct MHD_Connection *connec
 
     req->completed(connection, termination_code);
 
-    ingester->removeRequest(req);
+    /* cls is null on the shared daemon, so the record says which ingester the request went to. */
+    req->ingester().removeRequest(req);
 
     delete reinterpret_cast<std::shared_ptr<PushObjectIngester::Request>*>(*con_cls);
     *con_cls = nullptr;

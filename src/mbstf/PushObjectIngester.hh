@@ -49,6 +49,10 @@ public:
         Request &operator=(const Request&) = delete;
         Request &operator=(Request&&) = delete;
 
+        /** The ingester this request was routed to. Needed where the daemon's callback argument is null, as it is
+         *  on the shared daemon, which serves every ingester. */
+        PushObjectIngester &ingester() const { return m_pushObjectIngester; };
+
         const std::string &method() const { return m_method; };
 
         Request &method(const std::string &method) { m_method = method; return *this; };
