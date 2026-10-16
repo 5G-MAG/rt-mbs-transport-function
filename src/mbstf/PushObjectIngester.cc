@@ -317,9 +317,10 @@ std::string PushObjectIngester::generateUUID() {
 }
 
 /* Shared-port mode statics. See the declarations in PushObjectIngester.hh for why this exists. */
+std::mutex PushObjectIngester::s_sharedLifecycleMtx;
 std::recursive_mutex PushObjectIngester::s_sharedMtx;
 struct MHD_Daemon *PushObjectIngester::s_sharedDaemon = nullptr;
-std::map<std::string, PushObjectIngester*> PushObjectIngester::s_sharedIngesters;
+std::map<std::string, std::shared_ptr<PushObjectIngester::SharedLink> > PushObjectIngester::s_sharedIngesters;
 struct sockaddr_storage PushObjectIngester::s_sharedSockaddr = {};
 
 bool PushObjectIngester::sharedPortConfigured()
@@ -331,11 +332,9 @@ bool PushObjectIngester::sharedPortConfigured()
        option. So port zero keeps the previous behaviour. */
     auto ctx = App::self().context();
     if (!ctx) return false;
-    const auto &servers = ctx->servers[Context::SERVER_OBJECT_PUSH];
-    if (servers.empty()) return false;
-    const ogs_sbi_server_t *srv = servers.front()->ogsSBIServer();
-    if (!srv) return false;
-    return sockaddrPort(&srv->node.addr) != 0;
+    const auto &address = ctx->pushIngest.address;
+    if (!address.has_value()) return false;
+    return sockaddrPort(&address.value()) != 0;
 }
 
 uint16_t PushObjectIngester::sockaddrPort(const void *addr)
@@ -366,7 +365,7 @@ bool PushObjectIngester::splitSharedPath(const char *url, std::string &segment, 
     return true;
 }
 
-PushObjectIngester *PushObjectIngester::routeSharedRequest(const char *url, std::string &object_path)
+std::shared_ptr<PushObjectIngester::SharedLink> PushObjectIngester::routeSharedRequest(const char *url, std::string &object_path)
 {
     std::string segment;
     if (!splitSharedPath(url, segment, object_path)) return nullptr;
@@ -379,23 +378,13 @@ PushObjectIngester *PushObjectIngester::routeSharedRequest(const char *url, std:
 
 std::string PushObjectIngester::joinSharedDaemon()
 {
+    std::lock_guard<std::mutex> lifecycle(s_sharedLifecycleMtx);
     std::lock_guard<std::recursive_mutex> lock(s_sharedMtx);
 
     if (!s_sharedDaemon) {
         auto ctx = App::self().context();
-        const auto &servers = ctx->servers[Context::SERVER_OBJECT_PUSH];
-        if (servers.empty()) return std::string();
-
-        /* The first configured endpoint is the one bound. Several would each need their own daemon,
-           and the option exists so a container can publish one known port, so more than one is not
-           interpreted here rather than being guessed at. */
-        if (servers.size() > 1) {
-            ogs_warn("mbstf.httpPushIngest lists %zu addresses; the object push server uses the first "
-                     "and ignores the rest", servers.size());
-        }
-        const ogs_sbi_server_t *srv = servers.front()->ogsSBIServer();
-        if (!srv) return std::string();
-        memcpy(&s_sharedSockaddr, &srv->node.addr, sizeof(s_sharedSockaddr));
+        if (!ctx || !ctx->pushIngest.address.has_value()) return std::string();
+        memcpy(&s_sharedSockaddr, &ctx->pushIngest.address.value(), sizeof(s_sharedSockaddr));
 
         s_sharedDaemon = MHD_start_daemon(
                                     MHD_USE_SELECT_INTERNALLY | MHD_USE_ERROR_LOG,
@@ -419,19 +408,54 @@ std::string PushObjectIngester::joinSharedDaemon()
     do {
         segment = generateUUID();
     } while (s_sharedIngesters.count(segment));
-    s_sharedIngesters[segment] = this;
+    m_sharedLink = std::make_shared<SharedLink>(this);
+    s_sharedIngesters[segment] = m_sharedLink;
     return segment;
 }
 
 void PushObjectIngester::leaveSharedDaemon()
 {
-    std::lock_guard<std::recursive_mutex> lock(s_sharedMtx);
-    if (m_sharedPathSegment.empty()) return;
-    s_sharedIngesters.erase(m_sharedPathSegment);
-    m_sharedPathSegment.clear();
-    if (s_sharedIngesters.empty() && s_sharedDaemon) {
-        MHD_stop_daemon(s_sharedDaemon);
-        s_sharedDaemon = nullptr;
+    std::lock_guard<std::mutex> lifecycle(s_sharedLifecycleMtx);
+    std::string segment;
+    std::shared_ptr<SharedLink> link;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mtx);
+        segment = m_sharedPathSegment;
+        link = m_sharedLink;
+    }
+    if (segment.empty()) return;
+
+    /* Taken out of the registry first, so no new request is routed to this ingester. */
+    {
+        std::lock_guard<std::recursive_mutex> lock(s_sharedMtx);
+        s_sharedIngesters.erase(segment);
+    }
+    /* A handler that is working on this ingester holds the link's lock, so this waits for the chunk it is
+       handling and no longer; after it the link says there is no ingester, and a later chunk of an upload
+       still in progress, or its completion, refuses or skips instead of touching a freed object. Not
+       called with m_mtx held, which that handler also takes. */
+    if (link) {
+        std::lock_guard<std::recursive_mutex> lock(link->mtx);
+        link->ingester = nullptr;
+    }
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mtx);
+        m_sharedPathSegment.clear();
+        m_sharedLink.reset();
+    }
+
+    /* The daemon is stopped without s_sharedMtx held: stopping joins the daemon's thread, and a handler
+       on that thread takes s_sharedMtx to route a request. */
+    struct MHD_Daemon *daemon = nullptr;
+    {
+        std::lock_guard<std::recursive_mutex> lock(s_sharedMtx);
+        if (s_sharedIngesters.empty() && s_sharedDaemon) {
+            daemon = s_sharedDaemon;
+            s_sharedDaemon = nullptr;
+        }
+    }
+    if (daemon) {
+        MHD_stop_daemon(daemon);
         ogs_info("Object push server stopped, no ingest sessions remain");
     }
 }
@@ -446,9 +470,10 @@ bool PushObjectIngester::start()
        to a daemon of its own when nothing is configured, or when binding the configured address
        failed, which keeps an existing deployment working exactly as before. */
     if (sharedPortConfigured()) {
-        m_sharedPathSegment = joinSharedDaemon();
-        if (!m_sharedPathSegment.empty()) {
+        std::string segment = joinSharedDaemon();
+        if (!segment.empty()) {
             std::lock_guard<std::recursive_mutex> lock(m_mtx);
+            m_sharedPathSegment = segment;
             m_condVar.notify_all();     /* getIngestServerPrefix() waits on this */
             return true;
         }
@@ -483,12 +508,21 @@ bool PushObjectIngester::start()
 
 bool PushObjectIngester::stop()
 {
-    std::lock_guard<std::recursive_mutex> lock(m_mtx);
+    bool shared;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mtx);
+        m_stopped = true;
+        m_condVar.notify_all();     /* ends a wait in getIngestServerPrefix() */
+        shared = !m_sharedPathSegment.empty();
+    }
 
-    if (!m_sharedPathSegment.empty()) {
+    /* Without m_mtx: a handler holding the link takes m_mtx, and leaving waits for that handler. */
+    if (shared) {
         leaveSharedDaemon();
         return true;
     }
+
+    std::lock_guard<std::recursive_mutex> lock(m_mtx);
 
     ogs_debug("PushObjectIngester[%p]::stop(): Stopping MHD (%p)", this, m_mhdDaemon);
 
@@ -579,9 +613,20 @@ void PushObjectIngester::addedBodyBlock(const std::shared_ptr<Request> &request,
 const std::string &PushObjectIngester::getIngestServerPrefix()
 {
     /* Shared-port mode has no daemon of its own, so the address comes from what the shared one was
-       bound to and the UUID segment is appended. Handled before the wait below, which would never
-       finish here: m_mhdDaemon stays null in this mode, so the predicate could never become false. */
-    if (!m_sharedPathSegment.empty()) {
+       bound to and the UUID segment is appended. */
+    std::string shared_segment;
+    {
+        /* start() runs on another thread, so this may be asked before it has chosen between the shared daemon
+           and one of its own. Either outcome ends the wait; shared mode never sets m_mhdDaemon. Only while the
+           prefix is not known yet, and not after stop() or a cancelled worker, which would never end it. */
+        std::lock_guard<std::recursive_mutex> lock(m_mtx);
+        while (m_urlPrefix.empty() && !m_mhdDaemon && !m_startFailed && m_sharedPathSegment.empty() &&
+               !m_stopped && !workerCancelled()) {
+            m_condVar.wait_for(m_mtx, std::chrono::milliseconds(100));
+        }
+        shared_segment = m_sharedPathSegment;
+    }
+    if (!shared_segment.empty()) {
         if (m_urlPrefix.empty()) {
             std::lock_guard<std::recursive_mutex> lock(s_sharedMtx);
             socklen_t addr_len = sizeof(s_sharedSockaddr);
@@ -600,10 +645,14 @@ const std::string &PushObjectIngester::getIngestServerPrefix()
             if (!addr.empty() && port) {
                 /* The segment is what tells the shared handler which ingest session a push belongs
                    to, so the URL the Application Provider is given has to carry it. */
-                const bool literal_v6 = (s_sharedSockaddr.ss_family == AF_INET6);
+                /* An advertised name or address, when configured, is what the Application Provider can reach; the
+                   bound address may be a wildcard or an internal one. */
+                const auto &advertise = App::self().context()->pushIngest.advertise;
+                if (advertise && !advertise->empty()) addr = *advertise;
+                const bool literal_v6 = (addr.find(':') != std::string::npos);
                 m_urlPrefix = std::string("http://") + (literal_v6 ? "[" : "") + addr +
                               (literal_v6 ? "]" : "") + ":" + std::to_string(port) + "/" +
-                              m_sharedPathSegment + "/";
+                              shared_segment + "/";
             } else {
                 ogs_error("Could not render the configured object push address as a URL");
             }
@@ -615,7 +664,9 @@ const std::string &PushObjectIngester::getIngestServerPrefix()
         {
             // Wait for microhttpd to start up
             std::lock_guard<std::recursive_mutex> lock(m_mtx);
-            while(!m_mhdDaemon && !m_startFailed) m_condVar.wait(m_mtx);
+            while (!m_mhdDaemon && !m_startFailed && !m_stopped && !workerCancelled()) {
+                m_condVar.wait_for(m_mtx, std::chrono::milliseconds(100));
+            }
         }
         if (!m_mhdDaemon) {
             ogs_error("PushObjectIngester[%p]: no push ingest server, so no ingest URL to offer", this);
@@ -722,7 +773,8 @@ static MHD_Result gatherHeaders(void *cls, MHD_ValueKind kind, char const *key, 
 
 static void request_completion_callback(void *cls, struct MHD_Connection *connection, void **con_cls, enum MHD_RequestTerminationCode termination_code)
 {
-    PushObjectIngester *ingester = reinterpret_cast<PushObjectIngester*>(cls);
+    /* A request refused before it was given to an ingester (an unknown path on the shared port) has no record. */
+    if (!*con_cls) return;
 
     // Convert *con_cls into a shared pointer
     std::shared_ptr<PushObjectIngester::Request> &req = *reinterpret_cast<std::shared_ptr<PushObjectIngester::Request>*>(*con_cls);
@@ -731,7 +783,14 @@ static void request_completion_callback(void *cls, struct MHD_Connection *connec
 
     req->completed(connection, termination_code);
 
-    ingester->removeRequest(req);
+    /* cls is null on the shared daemon, so the record says which ingester the request went to; if that
+       ingester has gone, there is nothing left to remove the request from. */
+    if (const auto &link = req->sharedLink()) {
+        std::lock_guard<std::recursive_mutex> lock(link->mtx);
+        if (link->ingester) link->ingester->removeRequest(req);
+    } else {
+        req->ingester().removeRequest(req);
+    }
 
     delete reinterpret_cast<std::shared_ptr<PushObjectIngester::Request>*>(*con_cls);
     *con_cls = nullptr;
@@ -742,20 +801,33 @@ static MHD_Result handle_request(void *cls, struct MHD_Connection *connection, c
     PushObjectIngester *ingester = reinterpret_cast<PushObjectIngester*>(cls);
 
     /* The shared daemon registers no ingester of its own, so cls is null there and the leading path
-       segment says which ingest session this belongs to. What is left after that segment is the
-       object path, so a child sees exactly what it would have seen on a port of its own. An
-       unrecognised segment belongs to no session and is refused. */
+       segment says which ingest session a new request belongs to; a request already in progress carries
+       its link. What is left after that segment is the object path, so a child sees exactly what it
+       would have seen on a port of its own. An unrecognised segment belongs to no session and is
+       refused, and so is a request whose session has since gone. The link's lock is held while the
+       ingester is used, so it cannot be freed under this handler. */
     std::string shared_object_path;
+    std::shared_ptr<PushObjectIngester::SharedLink> link;
+    std::unique_lock<std::recursive_mutex> link_lock;
     if (!ingester) {
-        ingester = PushObjectIngester::routeSharedRequest(url, shared_object_path);
+        if (*con_cls) {
+            link = (*reinterpret_cast<std::shared_ptr<PushObjectIngester::Request>*>(*con_cls))->sharedLink();
+        } else {
+            link = PushObjectIngester::routeSharedRequest(url, shared_object_path);
+        }
+        if (link) {
+            link_lock = std::unique_lock<std::recursive_mutex>(link->mtx);
+            ingester = link->ingester;
+        }
         if (!ingester) {
-            ogs_warn("Object push to unknown path %s refused", url ? url : "(none)");
+            ogs_warn("Object push to %s refused: no such ingest session", url ? url : "(none)");
             struct MHD_Response *resp = MHD_create_response_from_buffer(0, (void*)"", MHD_RESPMEM_PERSISTENT);
-            MHD_Result rv = MHD_queue_response(connection, MHD_HTTP_NOT_FOUND, resp);
+            MHD_Result rv = MHD_queue_response(connection, *con_cls ? MHD_HTTP_SERVICE_UNAVAILABLE : MHD_HTTP_NOT_FOUND, resp);
             MHD_destroy_response(resp);
+            *upload_data_size = 0;
             return rv;
         }
-        url = shared_object_path.c_str();
+        if (!*con_cls) url = shared_object_path.c_str();
     }
 
     ogs_debug("handle_request[%p, %p, %s, %s, %s, %p, %lu, %p]", cls, connection, url, method, version, upload_data, *upload_data_size, *con_cls);
@@ -763,6 +835,7 @@ static MHD_Result handle_request(void *cls, struct MHD_Connection *connection, c
     if (*con_cls == nullptr) {
         ogs_debug("handle_request: creating new PushObjectIngester::Request('%s', '%s', '%s')", url, method, version);
         PushObjectIngester::Request *req = new PushObjectIngester::Request(connection, *ingester);
+        if (link) req->sharedLink(link);
         req->urlPath(url);
         req->method(method);
         req->protocolVersion(version);

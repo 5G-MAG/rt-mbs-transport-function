@@ -21,6 +21,7 @@
 
 #include <chrono>
 #include <map>
+#include <sys/socket.h>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -78,6 +79,13 @@ public:
 
     std::map<std::string, std::shared_ptr<DistributionSession> > distributionSessions;
     std::vector<std::shared_ptr<Open5GSSBIServer> > servers[SERVER_MAX_NUM];
+
+    /* The address and port of mbstf.httpPushIngest, as configured. libmicrohttpd opens the socket
+       itself, in PushObjectIngester, so no SBI server is made for it and the address is only kept. */
+    struct {
+        std::optional<struct sockaddr_storage> address; /* the first one configured */
+        std::optional<std::string> advertise;           /* the host to put in the ingest URL, if one is given */
+    } pushIngest;
     struct {
         unsigned int distMaxAge;
         unsigned int defaultObjectMaxAge; // Use if not given by push/pull resource Cache-Control.

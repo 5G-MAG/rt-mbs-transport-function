@@ -13,6 +13,7 @@
  */
 
 #include <list>
+#include <mutex>
 #include <map>
 #include <atomic>
 #include <memory>
@@ -33,6 +34,20 @@ class ObjectController;
 class PushObjectIngester : public ObjectIngester {
 public:
 
+    /** What the shared daemon's handler holds on to for one ingest session.
+     *
+     * The handler runs on the daemon's own thread, so it cannot know that the session has been deleted, and a
+     * bare pointer to the ingester would then be freed memory. A request keeps this link instead; the lock is
+     * held while the handler works on the ingester, and leaveSharedDaemon() takes it to clear `ingester`, so the
+     * ingester is never freed under a running handler, and a later chunk or completion finds `ingester` null
+     * and refuses.
+     */
+    struct SharedLink {
+        std::recursive_mutex mtx;
+        PushObjectIngester *ingester;
+        explicit SharedLink(PushObjectIngester *i) :mtx(), ingester(i) {};
+    };
+
     class Request {
     public:
         using data_type = std::vector<unsigned char>;
@@ -48,6 +63,13 @@ public:
 
         Request &operator=(const Request&) = delete;
         Request &operator=(Request&&) = delete;
+
+        /** The ingester this request was routed to. Needed where the daemon's callback argument is null, as it is
+         *  on the shared daemon, which serves every ingester. */
+        PushObjectIngester &ingester() const { return m_pushObjectIngester; };
+        /** The link to the ingester when the request arrived on the shared daemon, otherwise null. */
+        const std::shared_ptr<SharedLink> &sharedLink() const { return m_sharedLink; };
+        Request &sharedLink(const std::shared_ptr<SharedLink> &link) { m_sharedLink = link; return *this; };
 
         const std::string &method() const { return m_method; };
 
@@ -109,6 +131,7 @@ public:
 
     private:
         PushObjectIngester &m_pushObjectIngester;
+        std::shared_ptr<SharedLink> m_sharedLink;
         std::string m_objectId;
         std::string m_method;
         std::string m_urlPath;
@@ -194,9 +217,9 @@ public:
      * Static because the shared daemon's handler has no ingester of its own to be called on.
      * \param url        the request path, beginning with '/'.
      * \param object_path set to the path with the UUID segment removed.
-     * \return the ingester registered under the leading segment, or nullptr if none is.
+     * \return the link of the ingester registered under the leading segment, or null if none is.
      */
-    static PushObjectIngester *routeSharedRequest(const char *url, std::string &object_path);
+    static std::shared_ptr<SharedLink> routeSharedRequest(const char *url, std::string &object_path);
 
     PushObjectIngester(const std::shared_ptr<ObjectStore> &object_store, ObjectController &controller)
         :ObjectIngester(object_store, controller)
@@ -255,16 +278,20 @@ private:
     void leaveSharedDaemon();
 
 
+    static std::mutex s_sharedLifecycleMtx;          //!< serialises starting and stopping the shared daemon
     static std::recursive_mutex s_sharedMtx;         //!< guards the three members below
     static struct MHD_Daemon *s_sharedDaemon;        //!< the one daemon, when in shared-port mode
-    static std::map<std::string, PushObjectIngester*> s_sharedIngesters; //!< UUID -> ingester
+    static std::map<std::string, std::shared_ptr<SharedLink> > s_sharedIngesters; //!< UUID -> link to its ingester
     static struct sockaddr_storage s_sharedSockaddr; //!< what the shared daemon is bound to
 
     std::string m_sharedPathSegment;  //!< this ingester's UUID segment, empty when not shared
+    std::shared_ptr<SharedLink> m_sharedLink; //!< this ingester's entry in the shared daemon, null when not shared
 
     struct MHD_Daemon *m_mhdDaemon;
     // Set when start() could not bring up a daemon, so getIngestServerPrefix() stops waiting for one.
     std::atomic<bool> m_startFailed{false};
+    // Set by stop(), so getIngestServerPrefix() stops waiting for a daemon that will not come.
+    std::atomic<bool> m_stopped{false};
     struct sockaddr_storage m_sockaddr;
     std::list<std::shared_ptr<Request> > m_activeRequests;
     //std::vector<Request*>  m_connections;
