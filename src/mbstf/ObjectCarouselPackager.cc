@@ -29,8 +29,11 @@
 
 #include "common.hh"
 #include "DistributionSession.hh"
+#include "App.hh"
+#include "Context.hh"
 #include "ObjectController.hh"
 #include "ObjectCarouselController.hh"
+#include "ObjectListPackager.hh"
 #include "ObjectManifestHandler.hh"
 #include "ObjectPackager.hh"
 #include "ObjectStore.hh"
@@ -569,8 +572,20 @@ void ObjectCarouselPackager::scheduleCarousel()
                 }
 
                 /* update Cache expiry time */
-                LibFlute::Transmitter::FileDescription::date_time_type default_expiry(LibFlute::Transmitter::FileDescription::date_time_type::clock::now() + 60s);
-                file_desc->set_expiry_time(pkg_item.object()->second.cacheExpires().value_or(std::move(default_expiry)));
+                /* An object the origin sent already expired must not be announced expired: the MBS Client would not
+                   cache it. It stays announced until it has been sent again in full, taken as twice its repetition
+                   interval (the transmission being spread over one interval), and never less than the configured
+                   minimum. */
+                using fdt_time_type = LibFlute::Transmitter::FileDescription::date_time_type;
+                const auto now = fdt_time_type::clock::now();
+                auto earliest_expiry_after = std::chrono::duration_cast<fdt_time_type::duration>(
+                        App::self().context()->minimumObjectExpiry);
+                if (!std::isnan(pkg_item.repetitionInterval().count())) {
+                    earliest_expiry_after = std::max(earliest_expiry_after,
+                            std::chrono::duration_cast<fdt_time_type::duration>(2 * pkg_item.repetitionInterval()));
+                }
+                file_desc->set_expiry_time(ObjectListPackager::fileExpiryTime(
+                            pkg_item.object()->second.cacheExpires(), std::nullopt, now + 60s, now + earliest_expiry_after));
 
                 /* update Content-Type */
                 file_desc->set_content_type(pkg_item.object()->second.mediaType());
