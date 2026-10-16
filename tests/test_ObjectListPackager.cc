@@ -177,6 +177,28 @@ static void testFileExpiryWithoutAvailabilityStart()
           "testFileExpiryTime clamps the fallback to the availability start time when only that is known");
 }
 
+/* An origin that sends an object already expired (Cache-Control max-age below Age) must not have it announced
+ * expired in the FDT, or the MBS Client does not cache it (5G-MAG/rt-mbs-transport-function#79). The earliest
+ * expiry raises the announced one, and the availability start time still caps the result.
+ */
+static void testFileExpiryEarliest()
+{
+    const auto now = time_type::clock::now();
+    const auto fallback = now + 3600s;
+    const auto earliest = now + 10s;
+
+    check(ObjectListPackager::fileExpiryTime(now - 5s, std::nullopt, fallback, earliest) == earliest,
+          "testFileExpiryEarliest raises an expiry that is already past to the earliest");
+    check(ObjectListPackager::fileExpiryTime(now + 30s, std::nullopt, fallback, earliest) == now + 30s,
+          "testFileExpiryEarliest leaves a later expiry alone");
+    check(ObjectListPackager::fileExpiryTime(std::nullopt, std::nullopt, now + 2s, earliest) == earliest,
+          "testFileExpiryEarliest raises the fallback too");
+    check(ObjectListPackager::fileExpiryTime(now - 5s, now + 4s, fallback, earliest) == now + 4s,
+          "testFileExpiryEarliest keeps the availability start time as the ceiling");
+    check(ObjectListPackager::fileExpiryTime(now - 5s, std::nullopt, fallback) == now - 5s,
+          "testFileExpiryEarliest changes nothing when no earliest is given");
+}
+
 /* The queue orders by deadline, so an item constructed without one cannot participate in that
  * ordering at all. Guards the wiring in ObjectStreamingController::sendToPackager(), which passes
  * the object's availability start time: before it, every segment-streaming item was undated and
@@ -213,6 +235,7 @@ int main()
     testFileExpiryBoundedByAvailabilityStart();
     testFileExpiryKeepsEarlierCacheControl();
     testFileExpiryWithoutAvailabilityStart();
+    testFileExpiryEarliest();
     testItemCarriesTheAvailabilityStartTimeAsItsDeadline();
 
     std::cout << "Test: ObjectListPackager Pass: " << pass << " Fail: " << fail << std::endl;
