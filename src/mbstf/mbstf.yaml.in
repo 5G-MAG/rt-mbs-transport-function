@@ -238,6 +238,12 @@ mbstf:
     httpPushIngest:
       - addr: 127.0.0.61
         port: 0 # ephemeral
+    # The earliest File@Expires announced in the FDT, counted from when an object is sent. An origin that
+    # sends an object already expired (Cache-Control max-age below Age) would otherwise have it announced
+    # expired, and the MBS Client would not cache it. A carousel object is announced for at least twice its
+    # repetition interval, and never for less than this. The availability start time still caps an object
+    # that has one.
+    minimumObjectExpiry: 10s
     totalMaxBitRateSoftLimit: 1000 # 1Gbps
     #pathMtu: 1500
     consecutiveIngestFailuresBeforeDeactivate: 5
