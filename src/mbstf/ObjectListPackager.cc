@@ -350,7 +350,7 @@ void ObjectListPackager::doObjectPackage() {
             // ingest response carried no expiry, and rests on no clause.
             const auto now = time_type::clock::now();
             const auto &ctx = App::self().context();
-            const auto expires_at = fileExpiryTime(metadata.cacheExpires(), metadata.availabilityStartTime(),
+            const auto expires_at = fileExpiryTime(metadata.cacheExpires(), metadata.availabilityEndTime(),
                                                    now + 60s,
                                                    ctx ? std::optional<time_type>(now + ctx->minimumObjectExpiry)
                                                        : std::nullopt);

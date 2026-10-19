@@ -97,7 +97,7 @@ public:
      * sits inside the send path, which needs a live FLUTE transmitter and its sockets.
      *
      * \param cache_expires      Expiry derived from the ingest response, if any.
-     * \param availability_start The object's latest availability start time, if known.
+     * \param availability_end The object's latest availability time, if known.
      * \param fallback           Used when the ingest response carried no expiry.
      * \param earliest           The earliest expiry to announce, if any. An origin that sends an object
      *                          already expired would otherwise have it announced expired, and the MBS
@@ -105,13 +105,13 @@ public:
      * \return the File@Expires value to write.
      */
     static time_type fileExpiryTime(const std::optional<time_type> &cache_expires,
-                                    const std::optional<time_type> &availability_start,
+                                    const std::optional<time_type> &availability_end,
                                     const time_type &fallback,
                                     const std::optional<time_type> &earliest = std::nullopt) {
         time_type expires_at = cache_expires.value_or(fallback);
         if (earliest && *earliest > expires_at) expires_at = *earliest;
-        if (availability_start && *availability_start < expires_at) {
-            expires_at = *availability_start;
+        if (availability_end && *availability_end < expires_at) {
+            expires_at = *availability_end;
         }
         return expires_at;
     };
