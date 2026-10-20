@@ -86,22 +86,27 @@ public:
         std::optional<time_type> m_deadline;
     };
 
-    /** The File@Expires value for an object, per TS 26.517 V18.6.0 clause 6.2.3.5.
+    /** The File@Expires value for an object.
      *
-     * The clause makes the object's latest availability start time a ceiling, not another
-     * candidate: "-The File@Expires attribute for each object shall be set such that it is equal to
-     * or earlier than its latest availability start time." An ingest response's Cache-Control can
-     * sit either side of it, so the earlier of the two is taken whenever both are known.
+     * The object's availability end time is a ceiling, not another candidate: after it the object is not
+     * available, so an announced expiry later than that would claim it can still be used. An ingest
+     * response's Cache-Control can sit either side of it, so the earlier of the two is taken whenever both
+     * are known.
+     *
+     * TS 26.517 V18.6.0 clause 6.2.3.5 words the ceiling for this attribute as the availability start
+     * time, "equal to or earlier than its latest availability start time", and gives the end time to
+     * Cache-Control@Expires; File@Expires was removed from TS 26.346 in V19.2.0. The difference is to be
+     * raised with 3GPP (see the discussion on rt-mbs-transport-function#81).
      *
      * A named rule rather than inline arithmetic so that it can be tested directly; the call site
      * sits inside the send path, which needs a live FLUTE transmitter and its sockets.
      *
      * \param cache_expires      Expiry derived from the ingest response, if any.
-     * \param availability_end The object's latest availability time, if known.
+     * \param availability_end   The object's availability end time, if known.
      * \param fallback           Used when the ingest response carried no expiry.
      * \param earliest           The earliest expiry to announce, if any. An origin that sends an object
      *                          already expired would otherwise have it announced expired, and the MBS
-     *                          Client would not cache it. The availability start time still caps the result.
+     *                          Client would not cache it. The availability end time still caps the result.
      * \return the File@Expires value to write.
      */
     static time_type fileExpiryTime(const std::optional<time_type> &cache_expires,

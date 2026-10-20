@@ -345,8 +345,8 @@ void ObjectListPackager::doObjectPackage() {
 
             m_queued = true;
 
-            // File@Expires is bounded by the object's availability start time; see fileExpiryTime()
-            // for the clause. The 60s fallback is the pre-existing behaviour for an object whose
+            // File@Expires is capped at the object's availability end time; see fileExpiryTime() for
+            // why. The 60s fallback is the pre-existing behaviour for an object whose
             // ingest response carried no expiry, and rests on no clause.
             const auto now = time_type::clock::now();
             const auto &ctx = App::self().context();
