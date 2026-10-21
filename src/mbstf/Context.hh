@@ -163,6 +163,15 @@ public:
      */
     size_t maxConcurrentPullIngesters;
     static constexpr size_t kDefaultMaxConcurrentPullIngesters = 256;
+    /** The earliest File@Expires, counted from the moment an object is sent, that the FDT will carry.
+     *
+     * An object arriving from the origin with Cache-Control and Age already past expiry would otherwise be
+     * announced as expired in the FDT, and the MBS Client would not cache it. Carousel objects are given at
+     * least twice their repetition interval instead; this applies to objects sent once, and is the floor for
+     * carousel objects. No clause names a value: it is an operator setting (mbstf.minimumObjectExpiry).
+     */
+    std::chrono::milliseconds minimumObjectExpiry;
+    static constexpr std::chrono::milliseconds kDefaultMinimumObjectExpiry{10000};
     struct {
         /** The maximum time allowed before the manifest will be transmitted again
          *
