@@ -87,6 +87,10 @@ public:
         std::optional<std::string> advertise;           /* the host to put in the ingest URL, if one is given */
     } pushIngest;
     struct {
+        std::optional<struct sockaddr_storage> address; /* the first one configured */
+        std::optional<std::string> advertise;           /* the address to give the Application Provider, if one is given */
+    } packetIngest; /**< mbstf.packetIngest: with a fixed port, one socket serves every unicast packet ingest session */
+    struct {
         unsigned int distMaxAge;
         unsigned int defaultObjectMaxAge; // Use if not given by push/pull resource Cache-Control.
     } cacheControl;

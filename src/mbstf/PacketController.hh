@@ -86,9 +86,11 @@ protected:
 
 private:
     void reconfigurePacketIngester();
+    void claimSharedIngest(DistributionSession &distribution_session);
     void reconfigurePacketScheduler();
 
     PacketIngester m_ingester;
+    bool m_ingestAddressPublished = false; //!< the ingest address has been put in the session's pktDistributionData
     std::shared_ptr<PacketFEC> m_fec;
     std::shared_ptr<PacketPacketisation> m_packetiser;
     PacketScheduler m_scheduler;

@@ -36,6 +36,8 @@
 #include "Context.hh"
 #include "Controller.hh"
 #include "ControllerFactory.hh"
+#include "PacketIngester.hh"
+#include "utilities.hh"
 #include "DistributionSessionEvents.hh"
 #include "DistributionSessionNotificationEvent.hh"
 #include "DistributionSessionSubscription.hh"
@@ -112,6 +114,7 @@ static void send_model_params_error(const ModelParamsException &err, Open5GSSBIS
                                     const std::string &log_prefix);
 static void _validate(const std::shared_ptr<DistSession> &dist_session);
 static void _refuseFecOnPacketSession(const std::shared_ptr<DistSession> &dist_session);
+static std::shared_ptr<void> _reserveSharedIngest(const std::shared_ptr<DistSession> &dist_session);
 static bool request_too_large(Open5GSSBIRequest &request, Open5GSSBIStream &stream, int path_segments,
                               Open5GSSBIMessage &message, const NfServer::AppMetadata &app_meta,
                               const std::optional<NfServer::InterfaceMetadata> &api);
@@ -136,6 +139,9 @@ DistributionSession::DistributionSession(CJson &json, bool as_request)
     std::shared_ptr<DistSession> dist_session = m_createReqData->getDistSession();
 
     _validate(dist_session);
+    /* Last of the checks that can refuse the session: nothing has been scheduled for it yet, so a refusal here leaves
+       nothing behind. */
+    m_sharedIngestReservation = _reserveSharedIngest(dist_session);
     _setLastUsed();
     m_generated = m_lastUsed;
     _setHash();
@@ -1626,6 +1632,43 @@ static void _refuseFecOnPacketSession(const std::shared_ptr<DistSession> &dist_s
         throw ModelException("fecInformation is not supported with pktDistributionData: this MBSTF applies no FEC to a "
                              "Packet Distribution Session", "DistributionSession", "distSession.fecInformation",
                              ProblemCause::OPTIONAL_IE_INCORRECT);
+    }
+}
+
+/* With mbstf.packetIngest naming a fixed port, every unicast packet session shares it and is told apart by the source
+ * address and port of the Application Provider's tunnel. TS 29.581 V18.6.0 table 6.1.6.2.14-1, afEgressTunAddr: "The
+ * MBSTF shall use this information to validate the source IP address and port of incoming packets pertaining to the MBS
+ * User Data Ingest Session from the MBS Application Provider." The pair has to be unique for that to tell sessions
+ * apart, and no clause or application error covers a clash, so it is refused as an incorrect afEgressTunAddr (400). */
+static std::shared_ptr<void> _reserveSharedIngest(const std::shared_ptr<DistSession> &dist_session)
+{
+    if (!PacketIngester::sharedPortConfigured()) return nullptr;
+    const auto &pkt_distr_data = dist_session->getPktDistributionData();
+    if (!pkt_distr_data || !pkt_distr_data.value()) return nullptr;
+    const auto &ingest_method = pkt_distr_data.value()->getPktIngestMethod();
+    if (ingest_method && ingest_method.value()->getValue() != PktIngestMethod::VAL_UNICAST) return nullptr;
+    const auto &ingest_addr = pkt_distr_data.value()->getMbStfIngestAddr();
+    if (!ingest_addr || !ingest_addr->getAfEgressTunAddr()) return nullptr; // refused by _validate()
+    static const char *param = "distSession.pktDistributionData.mbStfIngestAddr.afEgressTunAddr";
+    try {
+        const auto &tun_addr = ingest_addr->getAfEgressTunAddr().value();
+        std::string hostname;
+        int family = AF_UNSPEC;
+        if (tun_addr->getIpv6Addr()) {
+            hostname = *tun_addr->getIpv6Addr().value();
+            family = AF_INET6;
+        } else if (tun_addr->getIpv4Addr()) {
+            hostname = tun_addr->getIpv4Addr().value();
+            family = AF_INET;
+        }
+        return PacketIngester::reserveShared(make_shared_sockaddr(family, hostname, static_cast<in_port_t>(tun_addr->getPortNumber())));
+    } catch (const PacketIngester::AddressInUse &ex) {
+        throw ModelException(ex.what(), "DistributionSession", param, ProblemCause::OPTIONAL_IE_INCORRECT);
+    } catch (const std::out_of_range &ex) {
+        throw ModelException(ex.what(), "DistributionSession", param, ProblemCause::OPTIONAL_IE_INCORRECT);
+    } catch (const std::error_condition &ex) {
+        throw ModelException(std::string("Unable to set up the shared packet ingest port: ") + ex.message(), "DistributionSession",
+                             param, ProblemCause::SYSTEM_FAILURE);
     }
 }
 

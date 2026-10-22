@@ -31,6 +31,7 @@
 #include "openapi/model/CreateReqData.h"
 #include "openapi/model/DistSession.h"
 #include "openapi/model/PktDistributionData.h"
+#include "openapi/model/PktDistributionOperatingMode.h"
 #include "openapi/model/ModelException.hh"
 #include "openapi/model/ProblemCause.hh"
 #include "openapi/model/MbStfIngestAddr.h"
@@ -59,6 +60,7 @@ PacketController::PacketController(DistributionSession &distributionSession)
     ,m_scheduler()
 {
     validateDistributionSession(distributionSession);
+    claimSharedIngest(distributionSession);
 }
 
 PacketController::~PacketController()
@@ -66,13 +68,23 @@ PacketController::~PacketController()
 }
 
     // Controller virtual functions
+static void publish_ingest_address(const std::shared_ptr<reftools::mbstf::PktDistributionData> &pkt_distr_data, const struct sockaddr &local_addr, bool is_encap);
+
 void PacketController::establishInactiveInputs()
 {
     /* Inactive state for DistSession */
 
     // stop ingester if it already exists, or create otherwise
-    if (m_ingester) {
+    if (m_ingester && m_ingestAddressPublished) {
         m_ingester.stop();
+    } else if (m_ingester) {
+        /* An ingester on the shared ingest port is made when the session is defined, so that a source address and port
+           that another session already uses is refused in the answer to the create request. Its address is given out
+           here, the first time. */
+        auto &create_req_data = distributionSession().distributionSessionReqData();
+        auto &pkt_distr_data = create_req_data->getDistSession()->getPktDistributionData().value();
+        publish_ingest_address(pkt_distr_data, m_ingester.localSockAddr(), expectEncapsulatedPackets());
+        m_ingestAddressPublished = true;
     } else {
         auto &create_req_data = distributionSession().distributionSessionReqData();
         auto &dist_sess = create_req_data->getDistSession();
@@ -93,36 +105,8 @@ void PacketController::establishInactiveInputs()
                 ogs_error("Unable to create PacketIngester: %s", ex.message().c_str());
                 return;
             }
-            TunnelAddress local_listening_addr;
-            const auto &local_addr = m_ingester.localSockAddr();
-            if (local_addr.sa_family == AF_INET) {
-                char buf[INET_ADDRSTRLEN];
-                const auto *sin = reinterpret_cast<const struct sockaddr_in*>(&local_addr);
-                if (inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf))) {
-                    local_listening_addr.setIpv4Addr(std::string(buf));
-                }
-                local_listening_addr.setPortNumber(ntohs(sin->sin_port));
-            } else if (local_addr.sa_family == AF_INET6) {
-                char buf[INET6_ADDRSTRLEN];
-                const auto *sin6 = reinterpret_cast<const struct sockaddr_in6*>(&local_addr);
-                if (inet_ntop(AF_INET6, &sin6->sin6_addr, buf, sizeof(buf))) {
-                    local_listening_addr.setIpv6Addr(std::make_shared<Ipv6Addr>(buf));
-                }
-                local_listening_addr.setPortNumber(ntohs(sin6->sin6_port));
-            }
-            if (is_encap) {
-                auto listen_addr = std::make_shared<MbStfIngestAddr::MbStfIngressTunAddrType::value_type::element_type>();
-                listen_addr->setIpv4Addr(local_listening_addr.getIpv4Addr());
-                listen_addr->setIpv6Addr(local_listening_addr.getIpv6Addr());
-                listen_addr->setPortNumber(local_listening_addr.getPortNumber());
-                pkt_distr_data->getMbStfIngestAddr()->setMbStfIngressTunAddr(listen_addr);
-            } else {
-                auto listen_addr = std::make_shared<MbStfIngestAddr::MbStfListenAddrType::value_type::element_type>();
-                listen_addr->setIpv4Addr(local_listening_addr.getIpv4Addr());
-                listen_addr->setIpv6Addr(local_listening_addr.getIpv6Addr());
-                listen_addr->setPortNumber(local_listening_addr.getPortNumber());
-                pkt_distr_data->getMbStfIngestAddr()->setMbStfListenAddr(listen_addr);
-            }
+            publish_ingest_address(pkt_distr_data, m_ingester.localSockAddr(), is_encap);
+            m_ingestAddressPublished = true;
         } else if (pkt_ingest_mode && pkt_ingest_mode.value()->getValue() == PktIngestMethod::VAL_MULTICAST) {
             const auto &af_ssm = pkt_distr_data->getMbStfIngestAddr()->getAfSsm();
             if (!af_ssm) {
@@ -181,6 +165,55 @@ void PacketController::flushPackagerQueue()
     if (m_fec) m_fec->flush();
     if (m_packetiser) m_packetiser->flush();
     m_scheduler.flush();
+}
+
+static void publish_ingest_address(const std::shared_ptr<reftools::mbstf::PktDistributionData> &pkt_distr_data, const struct sockaddr &local_addr, bool is_encap)
+{
+    TunnelAddress local_listening_addr;
+    if (local_addr.sa_family == AF_INET) {
+        char buf[INET_ADDRSTRLEN];
+        const auto *sin = reinterpret_cast<const struct sockaddr_in*>(&local_addr);
+        if (inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf))) {
+            local_listening_addr.setIpv4Addr(std::string(buf));
+        }
+        local_listening_addr.setPortNumber(ntohs(sin->sin_port));
+    } else if (local_addr.sa_family == AF_INET6) {
+        char buf[INET6_ADDRSTRLEN];
+        const auto *sin6 = reinterpret_cast<const struct sockaddr_in6*>(&local_addr);
+        if (inet_ntop(AF_INET6, &sin6->sin6_addr, buf, sizeof(buf))) {
+            local_listening_addr.setIpv6Addr(std::make_shared<Ipv6Addr>(buf));
+        }
+        local_listening_addr.setPortNumber(ntohs(sin6->sin6_port));
+    }
+    if (is_encap) {
+        auto listen_addr = std::make_shared<MbStfIngestAddr::MbStfIngressTunAddrType::value_type::element_type>();
+        listen_addr->setIpv4Addr(local_listening_addr.getIpv4Addr());
+        listen_addr->setIpv6Addr(local_listening_addr.getIpv6Addr());
+        listen_addr->setPortNumber(local_listening_addr.getPortNumber());
+        pkt_distr_data->getMbStfIngestAddr()->setMbStfIngressTunAddr(listen_addr);
+    } else {
+        auto listen_addr = std::make_shared<MbStfIngestAddr::MbStfListenAddrType::value_type::element_type>();
+        listen_addr->setIpv4Addr(local_listening_addr.getIpv4Addr());
+        listen_addr->setIpv6Addr(local_listening_addr.getIpv6Addr());
+        listen_addr->setPortNumber(local_listening_addr.getPortNumber());
+        pkt_distr_data->getMbStfIngestAddr()->setMbStfListenAddr(listen_addr);
+    }
+}
+
+/* With mbstf.packetIngest naming a fixed port, every unicast session shares it and is told apart by the source address and
+   port of the Application Provider's tunnel, so that pair has to be unique. It is claimed here, when the session is
+   defined, so that a pair another session already uses is refused in the answer to the create request. */
+void PacketController::claimSharedIngest(DistributionSession &distribution_session)
+{
+    /* The pair was taken when the session was defined (DistributionSession's constructor), where a refusal reaches the
+       Application Provider; here the ingester attaches to it. */
+    const auto reserved = std::static_pointer_cast<PacketIngester::SharedLink>(distribution_session.sharedIngestReservation());
+    if (!reserved) return;
+    const auto &pkt_distr_data = distribution_session.distributionSessionReqData()->getDistSession()->getPktDistributionData().value();
+    const auto &mode = pkt_distr_data->getPktDistributionOperatingMode();
+    const bool is_encap = mode && mode->getValue() == reftools::mbstf::PktDistributionOperatingMode::VAL_PACKET_FORWARD_ONLY;
+    auto remote = make_shared_sockaddr(pkt_distr_data->getMbStfIngestAddr()->getAfEgressTunAddr().value());
+    m_ingester = PacketIngester(reserved, remote, is_encap);
 }
 
 void PacketController::validateDistributionSession(DistributionSession &distribution_session)
