@@ -232,7 +232,15 @@ mbstf:
     distSessionAPI:
       - addr: 127.0.0.62
         port: 7777
-    rtpIngest:
+    # Unicast packet ingest (the Packet Distribution Method; any UDP payload, not only RTP). With port 0 each Distribution Session listens on an
+    # ephemeral port of its own. With a non-zero port, one socket on that address and port serves every unicast
+    # session, and the sessions are told apart by the source address and port of the Application Provider's tunnel
+    # (afEgressTunAddr, which TS 29.581 has the MBSTF validate), so that pair must be unique: creating a session whose
+    # pair another session uses is refused with 400. A container can publish a fixed port. If the entry has an
+    # "advertise" address, that is the address given to the Application Provider (the host where the port is
+    # published); otherwise it is the bound address, or for a wildcard bind the address of the default route. Only
+    # the first entry is used in that case. Multicast ingest does not use this setting.
+    packetIngest:
       - addr: 127.0.0.61
         port: 0 # ephemeral
     # Object push ingest. With port 0 each ingest session listens on an ephemeral port of its own. With
