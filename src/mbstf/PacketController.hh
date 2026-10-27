@@ -90,7 +90,7 @@ private:
     void reconfigurePacketScheduler();
 
     PacketIngester m_ingester;
-    bool m_ingestAddressPublished = false; //!< the ingest address has been put in the session's pktDistributionData
+    bool m_ingestAddressPending = false; //!< a shared-port ingester is attached and its address is not yet in the session's pktDistributionData
     std::shared_ptr<PacketFEC> m_fec;
     std::shared_ptr<PacketPacketisation> m_packetiser;
     PacketScheduler m_scheduler;

@@ -176,6 +176,14 @@ std::shared_ptr<PacketIngester::SharedLink> PacketIngester::reserveShared(const 
     const auto &ctx = App::self().context();
     if (!ctx || !ctx->packetIngest.address.has_value()) throw std::out_of_range("no shared packet ingest port is configured");
 
+    /* A listener of one family only receives sources of that family; an IPv4 source also reaches an IPv6 listener, as an
+       IPv4-mapped address (see shared_source_key). */
+    const struct sockaddr_storage &listener = ctx->packetIngest.address.value();
+    if (listener.ss_family == AF_INET && remote_endpoint->sa_family == AF_INET6 &&
+        !IN6_IS_ADDR_V4MAPPED(&reinterpret_cast<const struct sockaddr_in6*>(remote_endpoint.get())->sin6_addr)) {
+        throw std::out_of_range("the source is an IPv6 address, but the shared packet ingest port listens on IPv4");
+    }
+
     std::lock_guard<std::mutex> lock(s_sharedMtx);
 
     const std::string key = shared_source_key(remote_endpoint.get());

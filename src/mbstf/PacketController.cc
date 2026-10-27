@@ -75,7 +75,7 @@ void PacketController::establishInactiveInputs()
     /* Inactive state for DistSession */
 
     // stop ingester if it already exists, or create otherwise
-    if (m_ingester && m_ingestAddressPublished) {
+    if (m_ingester && !m_ingestAddressPending) {
         m_ingester.stop();
     } else if (m_ingester) {
         /* An ingester on the shared ingest port is made when the session is defined, so that a source address and port
@@ -84,7 +84,7 @@ void PacketController::establishInactiveInputs()
         auto &create_req_data = distributionSession().distributionSessionReqData();
         auto &pkt_distr_data = create_req_data->getDistSession()->getPktDistributionData().value();
         publish_ingest_address(pkt_distr_data, m_ingester.localSockAddr(), expectEncapsulatedPackets());
-        m_ingestAddressPublished = true;
+        m_ingestAddressPending = false;
     } else {
         auto &create_req_data = distributionSession().distributionSessionReqData();
         auto &dist_sess = create_req_data->getDistSession();
@@ -106,7 +106,6 @@ void PacketController::establishInactiveInputs()
                 return;
             }
             publish_ingest_address(pkt_distr_data, m_ingester.localSockAddr(), is_encap);
-            m_ingestAddressPublished = true;
         } else if (pkt_ingest_mode && pkt_ingest_mode.value()->getValue() == PktIngestMethod::VAL_MULTICAST) {
             const auto &af_ssm = pkt_distr_data->getMbStfIngestAddr()->getAfSsm();
             if (!af_ssm) {
@@ -214,6 +213,7 @@ void PacketController::claimSharedIngest(DistributionSession &distribution_sessi
     const bool is_encap = mode && mode->getValue() == reftools::mbstf::PktDistributionOperatingMode::VAL_PACKET_FORWARD_ONLY;
     auto remote = make_shared_sockaddr(pkt_distr_data->getMbStfIngestAddr()->getAfEgressTunAddr().value());
     m_ingester = PacketIngester(reserved, remote, is_encap);
+    m_ingestAddressPending = true;
 }
 
 void PacketController::validateDistributionSession(DistributionSession &distribution_session)
