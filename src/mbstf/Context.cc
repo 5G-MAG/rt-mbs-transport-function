@@ -96,7 +96,11 @@ bool Context::parseConfig()
                         throw std::out_of_range("Bad configuration node at mbstf.serverResponseCacheControl");
                      }
 
-                } else if (mbstf_key == "distSessionAPI" || mbstf_key == "httpPushIngest" || mbstf_key == "packetIngest") {
+                } else if (mbstf_key == "distSessionAPI" || mbstf_key == "httpPushIngest" || mbstf_key == "packetIngest" || mbstf_key == "rtpIngest") {
+                    if (mbstf_key == "rtpIngest") {
+                        ogs_warn("mbstf.rtpIngest is the former name of mbstf.packetIngest; please rename it");
+                        mbstf_key = "packetIngest";
+                    }
                     Open5GSYamlIter distSess_array(mbstf_iter);
                     do {
                         if (distSess_array.type() == YAML_MAPPING_NODE) {
