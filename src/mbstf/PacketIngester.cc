@@ -202,7 +202,11 @@ std::shared_ptr<PacketIngester::SharedLink> PacketIngester::reserveShared(const 
         if (fd < 0) throw std::generic_category().default_error_condition(errno);
         int yes = 1;
         if (bound.ss_family == AF_INET) setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &yes, sizeof(yes));
-        else if (bound.ss_family == AF_INET6) setsockopt(fd, IPPROTO_IPV6, IPV6_RECVPKTINFO, &yes, sizeof(yes));
+        else if (bound.ss_family == AF_INET6) {
+            setsockopt(fd, IPPROTO_IPV6, IPV6_RECVPKTINFO, &yes, sizeof(yes));
+            int v6only = 0; // IPv4 sources are taken too, as IPv4-mapped addresses (see shared_source_key)
+            setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+        }
         socklen_t len = bound.ss_family == AF_INET6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
         if (bind(fd, reinterpret_cast<const struct sockaddr*>(&bound), len) == -1) {
             int err = errno;
@@ -775,18 +779,48 @@ static void shared_fill_advertised(const struct sockaddr_storage &bound, const s
         }
         ogs_warn("Could not resolve mbstf.packetIngest advertise \"%s\"; using the bound address", advertise->c_str());
     }
+    /* A wildcard bind: the local address of the default route. A UDP connect() sends nothing; it only selects the route.
+       A wildcard IPv6 socket also takes IPv4 (see reserveShared), so with no IPv6 route the IPv4 one is given. */
+    auto local_address_towards = [](int family, struct sockaddr_storage &local) {
+        int sock = socket(family, SOCK_DGRAM|SOCK_CLOEXEC, 0);
+        if (sock < 0) return false;
+        struct sockaddr_storage target = {};
+        socklen_t target_len;
+        if (family == AF_INET6) {
+            auto *t = reinterpret_cast<struct sockaddr_in6*>(&target);
+            t->sin6_family = AF_INET6;
+            t->sin6_port = htons(53);
+            inet_pton(AF_INET6, "2001:4860:4860::8888", &t->sin6_addr);
+            target_len = sizeof(*t);
+        } else {
+            auto *t = reinterpret_cast<struct sockaddr_in*>(&target);
+            t->sin_family = AF_INET;
+            t->sin_port = htons(53);
+            t->sin_addr.s_addr = htonl(0x08080808);
+            target_len = sizeof(*t);
+        }
+        socklen_t len = sizeof(local);
+        bool ok = connect(sock, reinterpret_cast<struct sockaddr*>(&target), target_len) == 0 &&
+                  getsockname(sock, reinterpret_cast<struct sockaddr*>(&local), &len) == 0;
+        close(sock);
+        return ok;
+    };
+    struct sockaddr_storage local = {};
     if (bound.ss_family == AF_INET) {
         auto *sin = reinterpret_cast<struct sockaddr_in*>(&out);
-        if (sin->sin_addr.s_addr == INADDR_ANY) {
-            int s = socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC, 0);
-            struct sockaddr_in dns = { .sin_family = AF_INET, .sin_port = htons(53), .sin_addr = { htonl(0x08080808) } };
-            struct sockaddr_in local = {};
-            socklen_t len = sizeof(local);
-            if (s >= 0 && connect(s, reinterpret_cast<struct sockaddr*>(&dns), sizeof(dns)) == 0 &&
-                getsockname(s, reinterpret_cast<struct sockaddr*>(&local), &len) == 0) {
-                sin->sin_addr = local.sin_addr;
-            }
-            if (s >= 0) close(s);
+        if (sin->sin_addr.s_addr == INADDR_ANY && local_address_towards(AF_INET, local)) {
+            sin->sin_addr = reinterpret_cast<struct sockaddr_in*>(&local)->sin_addr;
+        }
+    } else if (bound.ss_family == AF_INET6 && IN6_IS_ADDR_UNSPECIFIED(&reinterpret_cast<const struct sockaddr_in6*>(&bound)->sin6_addr)) {
+        if (local_address_towards(AF_INET6, local)) {
+            reinterpret_cast<struct sockaddr_in6*>(&out)->sin6_addr = reinterpret_cast<struct sockaddr_in6*>(&local)->sin6_addr;
+        } else if (local_address_towards(AF_INET, local)) {
+            struct sockaddr_in v4 = {};
+            v4.sin_family = AF_INET;
+            v4.sin_port = port;
+            v4.sin_addr = reinterpret_cast<struct sockaddr_in*>(&local)->sin_addr;
+            memset(&out, 0, sizeof(out));
+            memcpy(&out, &v4, sizeof(v4));
         }
     }
 }
