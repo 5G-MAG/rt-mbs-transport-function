@@ -68,15 +68,11 @@ static int s_sharedSocket = -1;
 static std::thread s_sharedThread;
 static std::atomic<bool> s_sharedStop{false};
 static std::map<std::string, std::weak_ptr<PacketIngester::SharedLink> > s_sharedLinks; // source key -> session (held by the session)
-static struct sockaddr_storage s_sharedBound;        // what the socket is bound to
 static struct sockaddr_storage s_sharedAdvertised;   // what the Application Provider is told to send to
-/* Stops and joins the receiver at exit, so that a joinable std::thread is not destroyed. */
+/* Backstop: stops and joins the receiver at exit, so that a joinable std::thread is not destroyed. The daemon does it
+   earlier, from shutdownShared(). */
 static struct SharedReceiverStopper {
-    ~SharedReceiverStopper() {
-        s_sharedStop = true;
-        if (s_sharedThread.joinable()) s_sharedThread.join();
-        if (s_sharedSocket >= 0) { close(s_sharedSocket); s_sharedSocket = -1; }
-    }
+    ~SharedReceiverStopper() { PacketIngester::shutdownShared(); }
 } s_sharedReceiverStopper;
 
 // public:
@@ -184,12 +180,15 @@ std::shared_ptr<PacketIngester::SharedLink> PacketIngester::reserveShared(const 
         throw std::out_of_range("the source is an IPv6 address, but the shared packet ingest port listens on IPv4");
     }
 
+    /* Declared before the lock: if the holder lets go meanwhile, the link's deleter takes s_sharedMtx, which this thread
+       must not hold then. */
+    std::shared_ptr<SharedLink> holder;
     std::lock_guard<std::mutex> lock(s_sharedMtx);
 
     const std::string key = shared_source_key(remote_endpoint.get());
     auto taken = s_sharedLinks.find(key);
     if (taken != s_sharedLinks.end()) {
-        if (taken->second.lock()) {
+        if ((holder = taken->second.lock())) {
             char buf[INET6_ADDRSTRLEN + 8];
             throw AddressInUse(std::string("the source ") + (inet_sockaddr_to_str(remote_endpoint.get(), buf, sizeof(buf)) ? buf : "address") +
                                " is already used by another packet Distribution Session on the shared ingest port");
@@ -211,7 +210,6 @@ std::shared_ptr<PacketIngester::SharedLink> PacketIngester::reserveShared(const 
             ogs_error("Could not bind the configured packet ingest address: %s", strerror(err));
             throw std::generic_category().default_error_condition(err);
         }
-        s_sharedBound = bound;
         shared_fill_advertised(bound, ctx->packetIngest.advertise, s_sharedAdvertised);
         s_sharedSocket = fd;
         s_sharedStop = false;
@@ -221,7 +219,17 @@ std::shared_ptr<PacketIngester::SharedLink> PacketIngester::reserveShared(const 
         ogs_info("Packet ingest listening on the configured address for all unicast sessions");
     }
 
-    auto link = std::make_shared<SharedLink>(nullptr);
+    /* The registry entry goes with the link, so that nothing of a finished session outlives it (the registry is static
+       and lives past the shutdown check for leaked allocations). A later reservation of the same pair may have replaced
+       the entry by then, hence the check that it is still expired. */
+    std::shared_ptr<SharedLink> link(new SharedLink(nullptr), [key](SharedLink *l) {
+        {
+            std::lock_guard<std::mutex> lock(s_sharedMtx);
+            auto it = s_sharedLinks.find(key);
+            if (it != s_sharedLinks.end() && it->second.expired()) s_sharedLinks.erase(it);
+        }
+        delete l;
+    });
     s_sharedLinks[key] = link;
     return link;
 }
@@ -307,7 +315,20 @@ PacketIngester::PacketIngester(const SsmPort &multicast_source) // Multicast ing
     startWorker();
 }
 
+/* The receiver thread delivers to the ingester a link names, so while an ingester on the shared port is moved from, its
+   link is held: the receiver then never reads it half moved. The lock is held until the new ingester is attached. */
+std::unique_lock<std::recursive_mutex> PacketIngester::lockSharedLink(PacketIngester &other)
+{
+    if (!other.m_sharedLink) return std::unique_lock<std::recursive_mutex>();
+    return std::unique_lock<std::recursive_mutex>(other.m_sharedLink->mtx);
+}
+
 PacketIngester::PacketIngester(PacketIngester &&other)
+    :PacketIngester(std::move(other), lockSharedLink(other))
+{
+}
+
+PacketIngester::PacketIngester(PacketIngester &&other, std::unique_lock<std::recursive_mutex> &&link_lock)
     :PacketSource(std::move(other))
     ,m_ssm(std::move(other.m_ssm))
     ,m_socket(other.m_socket)
@@ -337,6 +358,7 @@ PacketIngester::~PacketIngester()
 PacketIngester &PacketIngester::operator=(PacketIngester &&other)
 {
     //ogs_debug("Move operator");
+    std::unique_lock<std::recursive_mutex> other_link_lock = lockSharedLink(other);
     stopWorker();
     leaveShared();
     bool worker_cancel = other.m_worker.isCancelled();
@@ -421,6 +443,14 @@ const struct sockaddr &PacketIngester::localSockAddr() const
 }
 
 // private:
+
+void PacketIngester::shutdownShared()
+{
+    s_sharedStop = true;
+    if (s_sharedThread.joinable()) s_sharedThread.join(); // the receiver takes s_sharedMtx, so not held here
+    std::lock_guard<std::mutex> lock(s_sharedMtx);
+    if (s_sharedSocket >= 0) { close(s_sharedSocket); s_sharedSocket = -1; }
+}
 
 bool PacketIngester::sharedPortConfigured()
 {

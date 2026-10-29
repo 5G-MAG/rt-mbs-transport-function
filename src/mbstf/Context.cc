@@ -32,6 +32,7 @@
 #include "DistributionSession.hh"
 #include "ManifestHandlerFactory.hh"
 #include "Open5GSNetworkFunction.hh"
+#include "PacketIngester.hh"
 #include "Open5GSSBIServer.hh"
 #include "Open5GSSockAddr.hh"
 #include "Open5GSYamlDocument.hh"
@@ -225,6 +226,7 @@ void Context::abortAllIngest()
         const std::shared_ptr<Controller> &controller = entry.second->controller();
         if (controller) controller->abortIngest();
     }
+    PacketIngester::shutdownShared(); // the one receiver of the shared packet ingest port
 }
 
 void Context::abortAllOutput()

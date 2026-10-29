@@ -51,6 +51,10 @@ public:
      *  apart by the source address and port of the Application Provider's tunnel. */
     static bool sharedPortConfigured();
 
+    /** Stop the receiver of the shared ingest port and close its socket. Called when the daemon shuts down, before the
+     *  allocations still held are checked; the port is not opened again unless a session is defined afterwards. */
+    static void shutdownShared();
+
     PacketIngester();
     PacketIngester(const std::shared_ptr<struct sockaddr> &listen_address, const std::shared_ptr<struct sockaddr> &remote_endpoint,
                    bool encapsulated_packets = false); // Unicast ingester
@@ -84,6 +88,8 @@ public:
     operator bool() const { return m_socket >= 0 || m_sharedLink; };
 
 private:
+    PacketIngester(PacketIngester &&other, std::unique_lock<std::recursive_mutex> &&link_lock);
+    static std::unique_lock<std::recursive_mutex> lockSharedLink(PacketIngester &other);
     static void sharedReceiver();
     void deliverShared(struct msghdr &msg, size_t bytes);
     void leaveShared();

@@ -88,6 +88,7 @@ void PacketController::establishInactiveInputs()
         auto &pkt_distr_data = create_req_data->getDistSession()->getPktDistributionData().value();
         publish_ingest_address(pkt_distr_data, m_ingester.localSockAddr(), expectEncapsulatedPackets());
         m_ingestAddressPending = false;
+        m_ingester.stop(); // INACTIVE takes no packets, as for an ingester of its own
     } else {
         auto &create_req_data = distributionSession().distributionSessionReqData();
         auto &dist_sess = create_req_data->getDistSession();
