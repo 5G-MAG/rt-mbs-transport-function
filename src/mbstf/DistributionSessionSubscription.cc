@@ -350,9 +350,9 @@ void DistributionSessionSubscription::startRetryTimer(int delay_seconds)
     }
 }
 
-void DistributionSessionSubscription::pushNotificationsEvent() const
+void DistributionSessionSubscription::pushNotificationsEvent(const std::string &dist_session_id) const
 {
-    std::shared_ptr<Open5GSEvent> event(new DistributionSessionNotificationEvent(*this));
+    std::shared_ptr<Open5GSEvent> event(new DistributionSessionNotificationEvent(dist_session_id, m_subscriptionId));
     App::self().ogsApp()->pushEvent(event);
 }
 

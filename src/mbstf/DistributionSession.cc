@@ -482,9 +482,18 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
     case LocalEvents::SEND_NOTIFICATION:
         {
             DistributionSessionNotificationEvent dist_event(event);
-            const auto &subsc = dist_event.distributionSessionSubscription();
-            ogs_debug("Sending notifications for subscription %p", &subsc);
-            subsc.sendNotifications();
+            /* Looked up here, not held by the event: the session, and the subscription it owns, may have gone since
+               the event was pushed (a create that is refused after the session was built destroys it). */
+            const auto &dist_session = App::self().context()->findDistributionSession(dist_event.distributionSessionId());
+            if (dist_session) {
+                try {
+                    const auto &subsc = dist_session->getSubscription(dist_event.subscriptionId());
+                    ogs_debug("Sending notifications for subscription %s", dist_event.subscriptionId().c_str());
+                    subsc.sendNotifications();
+                } catch (std::out_of_range &ex) {
+                    ogs_debug("No subscription %s to send notifications for: %s", dist_event.subscriptionId().c_str(), ex.what());
+                }
+            }
             dist_event.releaseEventData();
             return true;
         }
@@ -1141,7 +1150,7 @@ void DistributionSession::_registerEvent(DistributionSessionEvents::EventTypeBit
 void DistributionSession::_sendSubscriptionNotifications()
 {
     for (auto &[subsc_id, subsc] : m_eventSubscriptions) {
-        subsc.pushNotificationsEvent();
+        subsc.pushNotificationsEvent(m_distributionSessionId);
     }
 }
 

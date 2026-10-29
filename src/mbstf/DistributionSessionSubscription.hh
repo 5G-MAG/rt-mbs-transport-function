@@ -84,7 +84,7 @@ public:
     /** Push local SEND_NOTIFICATIONS event
      * This will push an event onto the event queue which will call sendNotifications() from the event thread
      */
-    void pushNotificationsEvent() const;
+    void pushNotificationsEvent(const std::string &dist_session_id) const;
 
     /** Send Notifications to client
      * This will find the current report list and if not empty will open a client connection and send the report list to the
