@@ -65,6 +65,9 @@ PacketController::PacketController(DistributionSession &distributionSession)
 
 PacketController::~PacketController()
 {
+    /* Members are destroyed in reverse order of declaration, so the packetiser and scheduler go before the ingester.
+       Stop the ingester first: this waits for a delivery in progress on the shared ingest port and leaves none after. */
+    m_ingester.stop();
 }
 
     // Controller virtual functions
