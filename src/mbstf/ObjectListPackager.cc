@@ -28,6 +28,8 @@
 #include "Transmitter.h" // LibFlute
 
 #include "common.hh"
+#include "App.hh"
+#include "Context.hh"
 #include "ObjectController.hh"
 #include "ObjectListController.hh"
 #include "ObjectPackager.hh"
@@ -343,11 +345,15 @@ void ObjectListPackager::doObjectPackage() {
 
             m_queued = true;
 
-            // File@Expires is bounded by the object's availability start time; see fileExpiryTime()
-            // for the clause. The 60s fallback is the pre-existing behaviour for an object whose
+            // File@Expires is capped at the object's availability end time; see fileExpiryTime() for
+            // why. The 60s fallback is the pre-existing behaviour for an object whose
             // ingest response carried no expiry, and rests on no clause.
-            const auto expires_at = fileExpiryTime(metadata.cacheExpires(), metadata.availabilityStartTime(),
-                                                   time_type::clock::now() + 60s);
+            const auto now = time_type::clock::now();
+            const auto &ctx = App::self().context();
+            const auto expires_at = fileExpiryTime(metadata.cacheExpires(), metadata.availabilityEndTime(),
+                                                   now + 60s,
+                                                   ctx ? std::optional<time_type>(now + ctx->minimumObjectExpiry)
+                                                       : std::nullopt);
             file_desc->set_expiry_time(expires_at);
 
             // TS 26.517 V18.6.0 clause 6.2.3.5: "-The Cache-Control@Expires attribute shall be used to

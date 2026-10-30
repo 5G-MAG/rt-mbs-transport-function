@@ -57,6 +57,7 @@ Context::Context()
     ,notifyRetryDelay(5)
     ,packetModeSchedulingQueueSize(128*1024) // 128KB queue for rate smoothing
     ,maxConcurrentPullIngesters(kDefaultMaxConcurrentPullIngesters)
+    ,minimumObjectExpiry(kDefaultMinimumObjectExpiry)
     ,manifestGlobals()
 {
 }
@@ -193,6 +194,16 @@ bool Context::parseConfig()
                         maxConcurrentPullIngesters = static_cast<size_t>(value);
                     } else {
                         throw std::out_of_range("Bad configuration node at mbstf.maxConcurrentPullIngesters");
+                    }
+                } else if (mbstf_key == "minimumObjectExpiry") {
+                    Open5GSYamlIter expiry_iter(mbstf_iter);
+                    if (expiry_iter.type() == YAML_SCALAR_NODE) {
+                        minimumObjectExpiry = parseDuration(expiry_iter.value());
+                        if (minimumObjectExpiry.count() < 0) {
+                            throw std::out_of_range("Bad configuration value at mbstf.minimumObjectExpiry");
+                        }
+                    } else {
+                        throw std::out_of_range("Bad configuration node at mbstf.minimumObjectExpiry");
                     }
                 } else if (mbstf_key == "manifestHandler") {
                     Open5GSYamlIter manifest_handler_iter(mbstf_iter);
