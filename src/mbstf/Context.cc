@@ -32,6 +32,7 @@
 #include "DistributionSession.hh"
 #include "ManifestHandlerFactory.hh"
 #include "Open5GSNetworkFunction.hh"
+#include "DistributionSessionSubscription.hh"
 #include "PacketIngester.hh"
 #include "Open5GSSBIServer.hh"
 #include "Open5GSSockAddr.hh"
@@ -231,6 +232,7 @@ void Context::abortAllIngest()
         if (controller) controller->abortIngest();
     }
     PacketIngester::shutdownShared(); // the one receiver of the shared packet ingest port
+    DistributionSessionSubscription::releaseFinalNotifications();
 }
 
 void Context::abortAllOutput()

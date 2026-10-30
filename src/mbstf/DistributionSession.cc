@@ -477,6 +477,7 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                     if (subsc.processClientResponse(event)) return true;
                 }
             }
+            if (DistributionSessionSubscription::discardFinalNotificationResponse(event)) return true;
             break;
         }
     case LocalEvents::SEND_NOTIFICATION:
@@ -969,6 +970,19 @@ void DistributionSession::haveEmptyQueue()
     _haveEmptyQueue();
 }
 
+void DistributionSession::reportReleased()
+{
+    /* Deleting a session releases it, and the queued notification would find the session gone (it is looked up by id
+       when handled), so it is sent here. Not reported again for a session already deactivated. */
+    const auto &activated = m_eventTimestamps.sessionActivated;
+    const auto &deactivated = m_eventTimestamps.sessionDeactivated;
+    if (!activated || (deactivated && !(deactivated.value() < activated.value()))) return;
+    m_eventTimestamps.registerEvent(DistributionSessionEvents::SESSION_DEACTIVATED);
+    for (auto &[subsc_id, subsc] : m_eventSubscriptions) {
+        subsc.sendFinalNotifications();
+    }
+}
+
 /**** private: ****/
 
 DistributionSession::InitStateAction DistributionSession::Action::initState()
@@ -1322,6 +1336,7 @@ void DistributionSession::_apiSessionDelete(Open5GSSBIStream &stream, Open5GSSBI
                            const NfServer::AppMetadata &app_meta)
 {
     try {
+        reportReleased();
         App::self().context()->deleteDistributionSession(distributionSessionId());
         std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(std::nullopt, std::nullopt, std::nullopt,
                                                                             std::nullopt, 0, std::nullopt, api, app_meta));

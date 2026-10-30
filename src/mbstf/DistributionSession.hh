@@ -136,6 +136,11 @@ public:
 
     void haveEmptyQueue();
 
+    /** Report SESSION_DEACTIVATED before the session is deleted, if it is active
+     * The subscriptions go with the session, so the report is sent now rather than queued.
+     */
+    void reportReleased();
+
 private:
     class InitStateAction;
     class StateTransitionAction;

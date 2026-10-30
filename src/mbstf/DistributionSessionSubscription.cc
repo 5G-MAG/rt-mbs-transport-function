@@ -21,6 +21,7 @@
 #include <limits>
 #include <utility>
 #include <list>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -147,6 +148,13 @@ namespace {
            events back rather than let a rejected notification take them with it. */
         DistributionSessionEvents reportedBefore;
     };
+    /* The notifications sent for a session being deleted, with the client each travels on. The subscription, and its
+       client, go with the session, so a client is kept here until the answer arrives and is released with it. Only the
+       event thread creates, looks up and removes entries. Held by pointer, and emptied by
+       DistributionSessionSubscription::releaseFinalNotifications() before the leak check at shutdown: an object with
+       static storage would be destroyed after the allocator it uses has been torn down. */
+    typedef std::map<const RequestData*, std::unique_ptr<Open5GSSBIClient>> FinalNotifications;
+    FinalNotifications *s_finalNotifications = nullptr;
 }
 
 /* Constructors and Destructor */
@@ -354,6 +362,56 @@ void DistributionSessionSubscription::pushNotificationsEvent(const std::string &
 {
     std::shared_ptr<Open5GSEvent> event(new DistributionSessionNotificationEvent(dist_session_id, m_subscriptionId));
     App::self().ogsApp()->pushEvent(event);
+}
+
+void DistributionSessionSubscription::sendFinalNotifications() const
+{
+    if (!m_cache) return;
+    const auto &notify_uri = m_distSessionSubscription.getNotifyUri();
+    if (!notify_uri) return;
+    auto report_list = makeReportList();
+    if (report_list->getEventReportList().empty()) return;
+    std::shared_ptr<StatusNotifyReqData> status_notify_req_data(new StatusNotifyReqData);
+    status_notify_req_data->setReportList(report_list);
+    std::string body(status_notify_req_data->toJSON(true).serialise());
+    ogs_debug("DistributionSessionSubscription[%p]: sending: %s", this, body.c_str());
+    static const std::string post_method(OGS_SBI_HTTP_METHOD_POST);
+    static const std::string api_version(std::format("{}/{}", StatusNotifyReqData::apiName, StatusNotifyReqData::apiVersion));
+    std::shared_ptr<Open5GSSBIRequest> request(new Open5GSSBIRequest(post_method, notify_uri.value(), api_version,
+                                               body, OGS_SBI_CONTENT_JSON_TYPE));
+    if (!s_finalNotifications) s_finalNotifications = new FinalNotifications;
+    std::unique_ptr<Open5GSSBIClient> client(new Open5GSSBIClient(notify_uri.value()));
+    /* No subscription: nothing is left to account the answer to, and a refusal or redirect is not followed. */
+    RequestData *data = new RequestData{nullptr, request, false, DistributionSessionEvents()};
+    Open5GSSBIClient &client_ref = *client;
+    (*s_finalNotifications)[data] = std::move(client);
+    client_ref.sendRequest(__notify_client_cb, request, data);
+}
+
+bool DistributionSessionSubscription::discardFinalNotificationResponse(const Open5GSEvent &event)
+{
+    if (!s_finalNotifications || event.id() != OGS_EVENT_SBI_CLIENT) return false;
+    RequestData *req_data = reinterpret_cast<RequestData*>(event.sbiData());
+    auto it = s_finalNotifications->find(req_data);
+    if (it == s_finalNotifications->end()) return false;
+    ogs_debug("Answer [%d] to the notification to %s for a deleted session", event.sbiState(), req_data->request->uri());
+    if (event.sbiState() == OGS_OK) auto resp = event.sbiResponse(true); // takes the response, freed here
+    req_data->request.reset();
+    s_finalNotifications->erase(it); // releases the client
+    delete req_data;
+    return true;
+}
+
+void DistributionSessionSubscription::releaseFinalNotifications()
+{
+    if (!s_finalNotifications) return;
+    for (auto &entry : *s_finalNotifications) {
+        RequestData *req_data = const_cast<RequestData*>(entry.first);
+        req_data->request.reset();
+        delete req_data;
+    }
+    delete s_finalNotifications;
+    s_finalNotifications = nullptr;
 }
 
 void DistributionSessionSubscription::sendNotifications() const

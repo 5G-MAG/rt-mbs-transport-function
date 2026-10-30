@@ -97,6 +97,20 @@ public:
 
     bool processClientResponse(const Open5GSEvent &event);
 
+    /** Send the pending events for a session that is about to be deleted
+     * The subscription goes with the session, so the notification travels on a client of its own, which is released
+     * when the answer arrives (discardFinalNotificationResponse()).
+     */
+    void sendFinalNotifications() const;
+
+    /** Release the answer to a notification sent by sendFinalNotifications()
+     * @return true if the event was such an answer
+     */
+    static bool discardFinalNotificationResponse(const Open5GSEvent &event);
+
+    /** Release what is still held for notifications sent for deleted sessions (at shutdown) */
+    static void releaseFinalNotifications();
+
 private:
     void _setEventFlags();
     void _setExpiryTime();
