@@ -902,6 +902,18 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
                                 "' != '" + packet_mode(old_dist_session) + "')");
     }
 
+    /* The checks made when a packet session is created also hold for what an update leaves it as: a change that removes
+       what they require, such as the srcIpAddr of a PACKET_PROXY session (TS 29.581 V18.6.0 table 6.1.6.2.13-1,
+       srcIpAddr: "An implementation complying with this version of the specification shall include this IE for any
+       operating mode other than"), is refused. */
+    if (new_dist_session->getPktDistributionData()) {
+        try {
+            _validate(new_dist_session);
+        } catch (ModelException &err) {
+            ex.addInvalidParameter(err.parameter, err.what());
+        }
+    }
+
     try {
         _refuseFecOnPacketSession(new_dist_session);
     } catch (ModelException &err) {
