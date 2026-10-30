@@ -866,6 +866,22 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
                                 std::format("Cannot change objDistributionOperatingMode ({} != {})", new_obj_distribution_data.value()->getObjDistributionOperatingMode()->getString(), old_obj_distribution_data.value()->getObjDistributionOperatingMode()->getString()));
     }
 
+    /* The source address of the Application Provider's tunnel is reserved, and on the shared packet ingest port keys the
+       session's packets, when the session is created. TS 29.581 V18.6.0 table 6.1.6.2.14-1, afEgressTunAddr: "This shall
+       be present only in the Create request over the Nmb2, Nmb10 and Nmb5 interfaces." A change is therefore refused,
+       rather than left unreserved or clashing with another session's. */
+    auto af_egress_tun_addr = [](const std::shared_ptr<DistSession> &dist_session) -> std::string {
+        const auto &pkt_distr_data = dist_session->getPktDistributionData();
+        if (!pkt_distr_data || !pkt_distr_data.value()) return std::string();
+        const auto &ingest_addr = pkt_distr_data.value()->getMbStfIngestAddr();
+        if (!ingest_addr || !ingest_addr->getAfEgressTunAddr()) return std::string();
+        return ingest_addr->getAfEgressTunAddr().value()->toJSON(true).serialise();
+    };
+    if (af_egress_tun_addr(new_dist_session) != af_egress_tun_addr(old_dist_session)) {
+        ex.addInvalidParameter("distSession.pktDistributionData.mbStfIngestAddr.afEgressTunAddr",
+                                "Cannot change afEgressTunAddr: it is given only when the session is created");
+    }
+
     try {
         _refuseFecOnPacketSession(new_dist_session);
     } catch (ModelException &err) {
