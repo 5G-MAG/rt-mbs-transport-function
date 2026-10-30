@@ -882,6 +882,25 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
                                 "Cannot change afEgressTunAddr: it is given only when the session is created");
     }
 
+    /* What the session reserves and how it ingests is set up when it is created: the operating mode and ingest method
+       decide whether a source address was reserved at all (afEgressTunAddr applies only to PACKET_FORWARD_ONLY and to
+       PACKET_PROXY with UNICAST ingest, table 6.1.6.2.14-1), so changing either would leave a session with no
+       reservation, or a reservation it no longer uses. No clause says which attributes an update may change; as for
+       objDistributionOperatingMode above, these are refused. */
+    auto packet_mode = [](const std::shared_ptr<DistSession> &dist_session) -> std::string {
+        const auto &pkt_distr_data = dist_session->getPktDistributionData();
+        if (!pkt_distr_data || !pkt_distr_data.value()) return std::string();
+        std::string result(pkt_distr_data.value()->getPktDistributionOperatingMode()->getString());
+        const auto &ingest_method = pkt_distr_data.value()->getPktIngestMethod();
+        if (ingest_method) result += "/" + ingest_method.value()->getString();
+        return result;
+    };
+    if (packet_mode(new_dist_session) != packet_mode(old_dist_session)) {
+        ex.addInvalidParameter("distSession.pktDistributionData",
+                                "Cannot change pktDistributionOperatingMode or pktIngestMethod ('" + packet_mode(new_dist_session) +
+                                "' != '" + packet_mode(old_dist_session) + "')");
+    }
+
     try {
         _refuseFecOnPacketSession(new_dist_session);
     } catch (ModelException &err) {
