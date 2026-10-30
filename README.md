@@ -117,6 +117,18 @@ as a compile or link error rather than as a missing dependency.
 | `rt-common-shared` | git submodule | the HTTP server and the shared Open5GS tooling, including the OpenAPI generator this build runs |
 | `rt-libflute` | meson wrap | the FLUTE transmitter, the TS 26.346 annex L.6 profiled FDT schema, the scheme-specific FEC OTI and the RFC 5053 Raptor scheme |
 
+### Testing other branches
+
+The wrap files in `subprojects/` pin the repositories this branch is built against, and they pin their
+`main` branches. Work that has not yet been merged into those branches is not in the pins, so a clean
+build against them as committed may not compile. To test other branches, adapt the pinned
+repositories: edit the `url` and `revision` lines of the matching `.wrap` file in `subprojects/`
+before running `meson setup`. For example, set `revision = feature/mbs-profile` in
+`subprojects/rt-libflute.wrap`.
+
+If a `subprojects/<name>` directory already exists as a checkout, Meson uses it and ignores the wrap
+file, so check out the branch there instead.
+
 ## Building
 
 The build needs a working Internet connection, because the API files are retrieved at build time.
