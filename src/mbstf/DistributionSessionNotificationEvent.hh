@@ -18,18 +18,20 @@
  * See the License for the specific language governing permissions and limitations
  * under the License.
  */
+#include <string>
+
 #include "common.hh"
 #include "Open5GSEvent.hh"
 
 MBSTF_NAMESPACE_START
 
-class DistributionSessionSubscription;
-
 class DistributionSessionNotificationEvent : public Open5GSEvent {
 public:
     /* Constructors and Destructor */
     DistributionSessionNotificationEvent(Open5GSEvent &event);
-    DistributionSessionNotificationEvent(const DistributionSessionSubscription &dist_session);
+    /* Carries the ids, not the subscription: the event is handled later on the event thread, by when the session may
+       have gone (a refused create destroys the session it built), so it is looked up again there. */
+    DistributionSessionNotificationEvent(const std::string &dist_session_id, const std::string &subscription_id);
     DistributionSessionNotificationEvent() = delete;
     DistributionSessionNotificationEvent(DistributionSessionNotificationEvent &&other) = delete;
     DistributionSessionNotificationEvent(const DistributionSessionNotificationEvent &other) = delete;
@@ -40,7 +42,8 @@ public:
     DistributionSessionNotificationEvent &operator=(DistributionSessionNotificationEvent &&other) = delete;
     DistributionSessionNotificationEvent &operator=(const DistributionSessionNotificationEvent &other) = delete;
 
-    const DistributionSessionSubscription &distributionSessionSubscription() const;
+    const std::string &distributionSessionId() const;
+    const std::string &subscriptionId() const;
     void releaseEventData();
 };
 

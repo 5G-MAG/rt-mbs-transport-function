@@ -30,7 +30,8 @@ MBSTF_NAMESPACE_START
 
 namespace {
   struct EventData {
-    const DistributionSessionSubscription &dist_session;
+    std::string dist_session_id;
+    std::string subscription_id;
   };
 }
 
@@ -39,19 +40,23 @@ DistributionSessionNotificationEvent::DistributionSessionNotificationEvent(Open5
 {
 }
 
-DistributionSessionNotificationEvent::DistributionSessionNotificationEvent(const DistributionSessionSubscription &dist_session)
+DistributionSessionNotificationEvent::DistributionSessionNotificationEvent(const std::string &dist_session_id, const std::string &subscription_id)
     :Open5GSEvent(new ogs_event_t)
 {
     ogs_event_t *evt = ogsEvent();
     evt->id = LocalEvents::SEND_NOTIFICATION;
-    EventData *evt_data = new EventData{dist_session};
+    EventData *evt_data = new EventData{dist_session_id, subscription_id};
     evt->sbi.data = reinterpret_cast<void*>(evt_data);
 }
 
-const DistributionSessionSubscription &DistributionSessionNotificationEvent::distributionSessionSubscription() const
+const std::string &DistributionSessionNotificationEvent::distributionSessionId() const
 {
-    EventData *evt_data = reinterpret_cast<EventData*>(sbiData());
-    return evt_data->dist_session;
+    return reinterpret_cast<EventData*>(sbiData())->dist_session_id;
+}
+
+const std::string &DistributionSessionNotificationEvent::subscriptionId() const
+{
+    return reinterpret_cast<EventData*>(sbiData())->subscription_id;
 }
 
 void DistributionSessionNotificationEvent::releaseEventData()

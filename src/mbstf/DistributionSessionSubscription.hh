@@ -84,7 +84,7 @@ public:
     /** Push local SEND_NOTIFICATIONS event
      * This will push an event onto the event queue which will call sendNotifications() from the event thread
      */
-    void pushNotificationsEvent() const;
+    void pushNotificationsEvent(const std::string &dist_session_id) const;
 
     /** Send Notifications to client
      * This will find the current report list and if not empty will open a client connection and send the report list to the
@@ -96,6 +96,20 @@ public:
     void startRetryTimer(int delay_seconds);
 
     bool processClientResponse(const Open5GSEvent &event);
+
+    /** Send the pending events for a session that is about to be deleted
+     * The subscription goes with the session, so the notification travels on a client of its own, which is released
+     * when the answer arrives (discardFinalNotificationResponse()).
+     */
+    void sendFinalNotifications() const;
+
+    /** Release the answer to a notification sent by sendFinalNotifications()
+     * @return true if the event was such an answer
+     */
+    static bool discardFinalNotificationResponse(const Open5GSEvent &event);
+
+    /** Release what is still held for notifications sent for deleted sessions (at shutdown) */
+    static void releaseFinalNotifications();
 
 private:
     void _setEventFlags();

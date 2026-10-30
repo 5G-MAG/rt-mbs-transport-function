@@ -23,15 +23,22 @@
 #include <sys/ioctl.h>
 #include <ifaddrs.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstring>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <string>
 #include <system_error>
+#include <thread>
 
 #include "ogs-core.h"
 #include "ogs-sbi.h"
 
 #include "common.hh"
+#include "App.hh"
+#include "Context.hh"
 #include "Packet.hh"
 #include "PacketProcessing.hh"
 #include "ThreadedWorker.hh"
@@ -46,6 +53,27 @@ static bool fill_sockaddr_by_hostname(void /*struct sockaddr*/ *addr, const std:
 static bool match_sockaddrs(const struct sockaddr *a, const struct sockaddr *b);
 static const char *inet_sockaddr_to_str(const struct sockaddr *sa, char *buf, socklen_t buf_len);
 static int get_interface_for_sockaddr(const struct sockaddr *sa);
+static std::string shared_source_key(const struct sockaddr *sa);
+static bool shared_source_is_specific(const struct sockaddr *sa);
+static void shared_fill_advertised(const struct sockaddr_storage &bound, const std::optional<std::string> &advertise,
+                                   struct sockaddr_storage &out);
+
+/* Shared ingest port. With mbstf.packetIngest naming a fixed port, one UDP socket on it serves every unicast packet
+   ingest session, so the port can be published (a container cannot publish a port it does not know when it starts).
+   The sessions are told apart by the source address and port of the Application Provider's tunnel: TS 29.581 V18.6.0
+   table 6.1.6.2.14-1, afEgressTunAddr: "The MBSTF shall use this information to validate the source IP address and port
+   of incoming packets pertaining to the MBS User Data Ingest Session from the MBS Application Provider." */
+static std::mutex s_sharedMtx;                       // guards everything below
+static int s_sharedSocket = -1;
+static std::thread s_sharedThread;
+static std::atomic<bool> s_sharedStop{false};
+static std::map<std::string, std::weak_ptr<PacketIngester::SharedLink> > s_sharedLinks; // source key -> session (held by the session)
+static struct sockaddr_storage s_sharedAdvertised;   // what the Application Provider is told to send to
+/* Backstop: stops and joins the receiver at exit, so that a joinable std::thread is not destroyed. The daemon does it
+   earlier, from shutdownShared(). */
+static struct SharedReceiverStopper {
+    ~SharedReceiverStopper() { PacketIngester::shutdownShared(); }
+} s_sharedReceiverStopper;
 
 // public:
 
@@ -134,6 +162,104 @@ PacketIngester::PacketIngester(const std::shared_ptr<struct sockaddr> &listen_ad
     startWorker();
 }
 
+std::shared_ptr<PacketIngester::SharedLink> PacketIngester::reserveShared(const std::shared_ptr<struct sockaddr> &remote_endpoint)
+{
+    /* Sessions can only be told apart by one source address and port; a wildcard would match another session's
+       packets as well. */
+    if (!remote_endpoint || !shared_source_is_specific(remote_endpoint.get())) {
+        throw std::out_of_range("a source address and port are needed to tell sessions apart on the shared packet ingest port");
+    }
+    const auto &ctx = App::self().context();
+    if (!ctx || !ctx->packetIngest.address.has_value()) throw std::out_of_range("no shared packet ingest port is configured");
+
+    /* A listener of one family only receives sources of that family; an IPv4 source also reaches an IPv6 listener, as an
+       IPv4-mapped address (see shared_source_key). */
+    const struct sockaddr_storage &listener = ctx->packetIngest.address.value();
+    if (listener.ss_family == AF_INET && remote_endpoint->sa_family == AF_INET6 &&
+        !IN6_IS_ADDR_V4MAPPED(&reinterpret_cast<const struct sockaddr_in6*>(remote_endpoint.get())->sin6_addr)) {
+        throw std::out_of_range("the source is an IPv6 address, but the shared packet ingest port listens on IPv4");
+    }
+
+    /* Declared before the lock: if the holder lets go meanwhile, the link's deleter takes s_sharedMtx, which this thread
+       must not hold then. */
+    std::shared_ptr<SharedLink> holder;
+    std::lock_guard<std::mutex> lock(s_sharedMtx);
+
+    const std::string key = shared_source_key(remote_endpoint.get());
+    auto taken = s_sharedLinks.find(key);
+    if (taken != s_sharedLinks.end()) {
+        if ((holder = taken->second.lock())) {
+            char buf[INET6_ADDRSTRLEN + 8];
+            throw AddressInUse(std::string("the source ") + (inet_sockaddr_to_str(remote_endpoint.get(), buf, sizeof(buf)) ? buf : "address") +
+                               " is already used by another packet Distribution Session on the shared ingest port");
+        }
+        s_sharedLinks.erase(taken); // its session has gone
+    }
+
+    if (s_sharedSocket < 0) {
+        const struct sockaddr_storage &bound = ctx->packetIngest.address.value();
+        int fd = socket(bound.ss_family, SOCK_DGRAM, IPPROTO_UDP);
+        if (fd < 0) throw std::generic_category().default_error_condition(errno);
+        int yes = 1;
+        if (bound.ss_family == AF_INET) setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &yes, sizeof(yes));
+        else if (bound.ss_family == AF_INET6) {
+            setsockopt(fd, IPPROTO_IPV6, IPV6_RECVPKTINFO, &yes, sizeof(yes));
+            int v6only = 0; // IPv4 sources are taken too, as IPv4-mapped addresses (see shared_source_key)
+            setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+        }
+        socklen_t len = bound.ss_family == AF_INET6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
+        if (bind(fd, reinterpret_cast<const struct sockaddr*>(&bound), len) == -1) {
+            int err = errno;
+            close(fd);
+            ogs_error("Could not bind the configured packet ingest address: %s", strerror(err));
+            throw std::generic_category().default_error_condition(err);
+        }
+        shared_fill_advertised(bound, ctx->packetIngest.advertise, s_sharedAdvertised);
+        s_sharedSocket = fd;
+        s_sharedStop = false;
+        /* Kept for the life of the process once opened: a published port stays bound, and the receiver does nothing
+           while no session holds a source address. Stopped by SharedReceiverStopper at exit. */
+        s_sharedThread = std::thread(&PacketIngester::sharedReceiver);
+        ogs_info("Packet ingest listening on the configured address for all unicast sessions");
+    }
+
+    /* The registry entry goes with the link, so that nothing of a finished session outlives it (the registry is static
+       and lives past the shutdown check for leaked allocations). A later reservation of the same pair may have replaced
+       the entry by then, hence the check that it is still expired. */
+    std::shared_ptr<SharedLink> link(new SharedLink(nullptr), [key](SharedLink *l) {
+        {
+            std::lock_guard<std::mutex> lock(s_sharedMtx);
+            auto it = s_sharedLinks.find(key);
+            if (it != s_sharedLinks.end() && it->second.expired()) s_sharedLinks.erase(it);
+        }
+        delete l;
+    });
+    s_sharedLinks[key] = link;
+    return link;
+}
+
+PacketIngester::PacketIngester(const std::shared_ptr<SharedLink> &reserved, const std::shared_ptr<struct sockaddr> &remote_endpoint,
+                               bool encapsulated_packets) // Unicast ingester, shared port
+    :PacketSource()
+    ,m_ssm()
+    ,m_socket(-1)
+    ,m_encapsulatedPackets(encapsulated_packets)
+    ,m_localAddr()
+    ,m_remoteAddr(remote_endpoint)
+    ,m_worker()
+    ,m_sharedLink(reserved)
+{
+    if (!m_sharedLink) throw std::out_of_range("a reserved source address is needed for the shared packet ingest port");
+    {
+        std::lock_guard<std::mutex> lock(s_sharedMtx);
+        auto adv = std::make_shared<struct sockaddr_storage>(s_sharedAdvertised);
+        m_localAddr = std::reinterpret_pointer_cast<struct sockaddr>(adv);
+    }
+    std::lock_guard<std::recursive_mutex> lock(m_sharedLink->mtx);
+    m_sharedLink->ingester = this;
+    m_sharedLink->running = true;
+}
+
 PacketIngester::PacketIngester(const SsmPort &multicast_source) // Multicast ingester
     :PacketSource()
     ,m_ssm(multicast_source)
@@ -193,7 +319,20 @@ PacketIngester::PacketIngester(const SsmPort &multicast_source) // Multicast ing
     startWorker();
 }
 
+/* The receiver thread delivers to the ingester a link names, so while an ingester on the shared port is moved from, its
+   link is held: the receiver then never reads it half moved. The lock is held until the new ingester is attached. */
+std::unique_lock<std::recursive_mutex> PacketIngester::lockSharedLink(PacketIngester &other)
+{
+    if (!other.m_sharedLink) return std::unique_lock<std::recursive_mutex>();
+    return std::unique_lock<std::recursive_mutex>(other.m_sharedLink->mtx);
+}
+
 PacketIngester::PacketIngester(PacketIngester &&other)
+    :PacketIngester(std::move(other), lockSharedLink(other))
+{
+}
+
+PacketIngester::PacketIngester(PacketIngester &&other, std::unique_lock<std::recursive_mutex> &&link_lock)
     :PacketSource(std::move(other))
     ,m_ssm(std::move(other.m_ssm))
     ,m_socket(other.m_socket)
@@ -201,15 +340,21 @@ PacketIngester::PacketIngester(PacketIngester &&other)
     ,m_localAddr(std::move(other.m_localAddr))
     ,m_remoteAddr(std::move(other.m_remoteAddr))
     ,m_worker()
+    ,m_sharedLink(std::move(other.m_sharedLink))
 {
     //ogs_debug("Move constructor");
     other.stopWorker();
     other.m_socket = -1;
+    if (m_sharedLink) {
+        std::lock_guard<std::recursive_mutex> lock(m_sharedLink->mtx);
+        m_sharedLink->ingester = this;
+    }
 }
 
 PacketIngester::~PacketIngester()
 {
     //ogs_debug("Destroy ingester");
+    leaveShared();
     closeSocket();
     stopWorker();
 }
@@ -217,7 +362,9 @@ PacketIngester::~PacketIngester()
 PacketIngester &PacketIngester::operator=(PacketIngester &&other)
 {
     //ogs_debug("Move operator");
+    std::unique_lock<std::recursive_mutex> other_link_lock = lockSharedLink(other);
     stopWorker();
+    leaveShared();
     bool worker_cancel = other.m_worker.isCancelled();
     other.stopWorker();
     PacketSource::operator=(std::move(other));
@@ -228,7 +375,12 @@ PacketIngester &PacketIngester::operator=(PacketIngester &&other)
     m_encapsulatedPackets = other.m_encapsulatedPackets;
     m_localAddr = std::move(other.m_localAddr);
     m_remoteAddr = std::move(other.m_remoteAddr);
-    if (!worker_cancel) startWorker();
+    m_sharedLink = std::move(other.m_sharedLink);
+    if (m_sharedLink) {
+        std::lock_guard<std::recursive_mutex> lock(m_sharedLink->mtx);
+        m_sharedLink->ingester = this;
+    }
+    if (!worker_cancel && !m_sharedLink) startWorker();
     return *this;
 }
 
@@ -248,18 +400,33 @@ bool PacketIngester::processEvent(const std::shared_ptr<PacketEvent> &event)
 bool PacketIngester::start()
 {
     //ogs_debug("Start ingester");
+    if (m_sharedLink) {
+        std::lock_guard<std::recursive_mutex> lock(m_sharedLink->mtx);
+        m_sharedLink->running = true;
+        return true;
+    }
     startWorker();
     return true;
 }
 
 bool PacketIngester::isStarted() const
 {
+    if (m_sharedLink) {
+        std::lock_guard<std::recursive_mutex> lock(m_sharedLink->mtx);
+        return m_sharedLink->running;
+    }
     return m_worker.isRunning();
 }
 
 bool PacketIngester::stop()
 {
     //ogs_debug("Stop ingester");
+    if (m_sharedLink) {
+        /* The source address stays reserved for this session; only the delivery stops. */
+        std::lock_guard<std::recursive_mutex> lock(m_sharedLink->mtx);
+        m_sharedLink->running = false;
+        return true;
+    }
     stopWorker();
     return true;
 }
@@ -280,6 +447,109 @@ const struct sockaddr &PacketIngester::localSockAddr() const
 }
 
 // private:
+
+void PacketIngester::shutdownShared()
+{
+    s_sharedStop = true;
+    if (s_sharedThread.joinable()) s_sharedThread.join(); // the receiver takes s_sharedMtx, so not held here
+    std::lock_guard<std::mutex> lock(s_sharedMtx);
+    if (s_sharedSocket >= 0) { close(s_sharedSocket); s_sharedSocket = -1; }
+}
+
+bool PacketIngester::sharedPortConfigured()
+{
+    const auto &ctx = App::self().context();
+    if (!ctx || !ctx->packetIngest.address.has_value()) return false;
+    const auto &ss = ctx->packetIngest.address.value();
+    if (ss.ss_family == AF_INET) return reinterpret_cast<const struct sockaddr_in*>(&ss)->sin_port != 0;
+    if (ss.ss_family == AF_INET6) return reinterpret_cast<const struct sockaddr_in6*>(&ss)->sin6_port != 0;
+    return false;
+}
+
+void PacketIngester::deliverShared(struct msghdr &msg, size_t bytes)
+{
+    msg.msg_iov->iov_len = bytes;
+    Packet pkt{&msg, m_localAddr, m_encapsulatedPackets};
+    sendPacket(pkt);
+}
+
+void PacketIngester::leaveShared()
+{
+    if (!m_sharedLink) return;
+    std::shared_ptr<SharedLink> link = std::move(m_sharedLink);
+    m_sharedLink.reset();
+
+    /* Wait for a delivery that is in progress and no longer; after it the receiver finds no ingester. The source
+       address stays taken for as long as the session holds the link. */
+    std::lock_guard<std::recursive_mutex> lock(link->mtx);
+    link->ingester = nullptr;
+}
+
+void PacketIngester::sharedReceiver()
+{
+    int fd;
+    {
+        std::lock_guard<std::mutex> lock(s_sharedMtx);
+        fd = s_sharedSocket;
+    }
+    std::array<uint8_t, 65536> buffer;
+    std::array<uint8_t, 65536> control_buffer;
+    /* This one thread serves every unicast session and nothing starts another while the socket stays open, so an error
+       is waited out and the loop goes on; it is reported once, not on every attempt. */
+    bool failing = false;
+    auto fail = [&failing](const char *what, int err) {
+        if (!failing) ogs_error("Error %s the shared packet ingest socket, retrying: %s", what, strerror(err));
+        failing = true;
+        std::this_thread::sleep_for(100ms);
+    };
+    while (!s_sharedStop) {
+        struct pollfd read_poll = { .fd = fd, .events = POLLIN, .revents = 0 };
+        int presult = poll(&read_poll, 1, 100);
+        if (presult < 0) {
+            if (errno == EINTR) continue;
+            fail("polling", errno);
+            continue;
+        }
+        if (presult == 0) {
+            failing = false; // polling works again
+            continue;
+        }
+
+        struct sockaddr_storage from_addr;
+        struct iovec iov = { .iov_base = buffer.data(), .iov_len = buffer.size() };
+        struct msghdr msg = {
+            .msg_name = &from_addr,
+            .msg_namelen = sizeof(from_addr),
+            .msg_iov = &iov,
+            .msg_iovlen = 1,
+            .msg_control = control_buffer.data(),
+            .msg_controllen = control_buffer.size(),
+            .msg_flags = 0
+        };
+        ssize_t bytes = recvmsg(fd, &msg, 0);
+        if (bytes < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
+            fail("reading", errno);
+            continue;
+        }
+        if (bytes <= 0) continue;
+        failing = false;
+
+        std::shared_ptr<SharedLink> link;
+        {
+            std::lock_guard<std::mutex> lock(s_sharedMtx);
+            auto it = s_sharedLinks.find(shared_source_key(reinterpret_cast<const struct sockaddr*>(&from_addr)));
+            if (it != s_sharedLinks.end()) link = it->second.lock();
+        }
+        if (!link) {
+            char buf[INET6_ADDRSTRLEN + 8];
+            ogs_warn("Packet from unexpected source dropped: %s",
+                     inet_sockaddr_to_str(reinterpret_cast<const struct sockaddr*>(&from_addr), buf, sizeof(buf)) ? buf : "Unknown address");
+            continue;
+        }
+        std::lock_guard<std::recursive_mutex> lock(link->mtx);
+        if (link->ingester && link->running) link->ingester->deliverShared(msg, static_cast<size_t>(bytes));
+    }
+}
 
 bool PacketIngester::startWorker()
 {
@@ -462,6 +732,113 @@ static const char *inet_sockaddr_to_str(const struct sockaddr *sa, char *buf, so
     }
 
     return nullptr;
+}
+
+/* The source address and port as a map key. An IPv4 source seen through an IPv6 socket arrives as an IPv4-mapped
+   address and keys the same as the IPv4 one. */
+static std::string shared_source_key(const struct sockaddr *sa)
+{
+    if (!sa) return std::string();
+    if (sa->sa_family == AF_INET) {
+        const auto *sin = reinterpret_cast<const struct sockaddr_in*>(sa);
+        std::string key("4:");
+        key.append(reinterpret_cast<const char*>(&sin->sin_addr), sizeof(sin->sin_addr));
+        key.append(reinterpret_cast<const char*>(&sin->sin_port), sizeof(sin->sin_port));
+        return key;
+    }
+    if (sa->sa_family == AF_INET6) {
+        const auto *sin6 = reinterpret_cast<const struct sockaddr_in6*>(sa);
+        if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
+            std::string key("4:");
+            key.append(reinterpret_cast<const char*>(&sin6->sin6_addr.s6_addr[12]), 4);
+            key.append(reinterpret_cast<const char*>(&sin6->sin6_port), sizeof(sin6->sin6_port));
+            return key;
+        }
+        std::string key("6:");
+        key.append(reinterpret_cast<const char*>(&sin6->sin6_addr), sizeof(sin6->sin6_addr));
+        key.append(reinterpret_cast<const char*>(&sin6->sin6_port), sizeof(sin6->sin6_port));
+        return key;
+    }
+    return std::string();
+}
+
+static bool shared_source_is_specific(const struct sockaddr *sa)
+{
+    if (!sa) return false;
+    if (sa->sa_family == AF_INET) {
+        const auto *sin = reinterpret_cast<const struct sockaddr_in*>(sa);
+        return sin->sin_addr.s_addr != INADDR_ANY && sin->sin_port != 0;
+    }
+    if (sa->sa_family == AF_INET6) {
+        const auto *sin6 = reinterpret_cast<const struct sockaddr_in6*>(sa);
+        return !IN6_IS_ADDR_UNSPECIFIED(&sin6->sin6_addr) && sin6->sin6_port != 0;
+    }
+    return false;
+}
+
+/* The address and port the Application Provider is told to send to: the configured advertise address when there is
+   one (a published port is reached on the host, not on the container's own address), otherwise the bound address, or
+   for a wildcard bind the local address of the default route, as the object push server does. */
+static void shared_fill_advertised(const struct sockaddr_storage &bound, const std::optional<std::string> &advertise,
+                                   struct sockaddr_storage &out)
+{
+    out = bound;
+    const in_port_t port = bound.ss_family == AF_INET6 ? reinterpret_cast<const struct sockaddr_in6*>(&bound)->sin6_port
+                                                       : reinterpret_cast<const struct sockaddr_in*>(&bound)->sin_port;
+    if (advertise && !advertise->empty()) {
+        struct sockaddr_storage resolved = {};
+        if (fill_sockaddr_by_hostname(&resolved, *advertise, AF_UNSPEC)) {
+            out = resolved;
+            if (out.ss_family == AF_INET6) reinterpret_cast<struct sockaddr_in6*>(&out)->sin6_port = port;
+            else reinterpret_cast<struct sockaddr_in*>(&out)->sin_port = port;
+            return;
+        }
+        ogs_warn("Could not resolve mbstf.packetIngest advertise \"%s\"; using the bound address", advertise->c_str());
+    }
+    /* A wildcard bind: the local address of the default route. A UDP connect() sends nothing; it only selects the route.
+       A wildcard IPv6 socket also takes IPv4 (see reserveShared), so with no IPv6 route the IPv4 one is given. */
+    auto local_address_towards = [](int family, struct sockaddr_storage &local) {
+        int sock = socket(family, SOCK_DGRAM|SOCK_CLOEXEC, 0);
+        if (sock < 0) return false;
+        struct sockaddr_storage target = {};
+        socklen_t target_len;
+        if (family == AF_INET6) {
+            auto *t = reinterpret_cast<struct sockaddr_in6*>(&target);
+            t->sin6_family = AF_INET6;
+            t->sin6_port = htons(53);
+            inet_pton(AF_INET6, "2001:4860:4860::8888", &t->sin6_addr);
+            target_len = sizeof(*t);
+        } else {
+            auto *t = reinterpret_cast<struct sockaddr_in*>(&target);
+            t->sin_family = AF_INET;
+            t->sin_port = htons(53);
+            t->sin_addr.s_addr = htonl(0x08080808);
+            target_len = sizeof(*t);
+        }
+        socklen_t len = sizeof(local);
+        bool ok = connect(sock, reinterpret_cast<struct sockaddr*>(&target), target_len) == 0 &&
+                  getsockname(sock, reinterpret_cast<struct sockaddr*>(&local), &len) == 0;
+        close(sock);
+        return ok;
+    };
+    struct sockaddr_storage local = {};
+    if (bound.ss_family == AF_INET) {
+        auto *sin = reinterpret_cast<struct sockaddr_in*>(&out);
+        if (sin->sin_addr.s_addr == INADDR_ANY && local_address_towards(AF_INET, local)) {
+            sin->sin_addr = reinterpret_cast<struct sockaddr_in*>(&local)->sin_addr;
+        }
+    } else if (bound.ss_family == AF_INET6 && IN6_IS_ADDR_UNSPECIFIED(&reinterpret_cast<const struct sockaddr_in6*>(&bound)->sin6_addr)) {
+        if (local_address_towards(AF_INET6, local)) {
+            reinterpret_cast<struct sockaddr_in6*>(&out)->sin6_addr = reinterpret_cast<struct sockaddr_in6*>(&local)->sin6_addr;
+        } else if (local_address_towards(AF_INET, local)) {
+            struct sockaddr_in v4 = {};
+            v4.sin_family = AF_INET;
+            v4.sin_port = port;
+            v4.sin_addr = reinterpret_cast<struct sockaddr_in*>(&local)->sin_addr;
+            memset(&out, 0, sizeof(out));
+            memcpy(&out, &v4, sizeof(v4));
+        }
+    }
 }
 
 static int get_interface_for_sockaddr(const struct sockaddr *sa)

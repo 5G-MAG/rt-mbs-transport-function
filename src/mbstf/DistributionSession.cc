@@ -36,6 +36,8 @@
 #include "Context.hh"
 #include "Controller.hh"
 #include "ControllerFactory.hh"
+#include "PacketIngester.hh"
+#include "utilities.hh"
 #include "DistributionSessionEvents.hh"
 #include "DistributionSessionNotificationEvent.hh"
 #include "DistributionSessionSubscription.hh"
@@ -112,6 +114,7 @@ static void send_model_params_error(const ModelParamsException &err, Open5GSSBIS
                                     const std::string &log_prefix);
 static void _validate(const std::shared_ptr<DistSession> &dist_session);
 static void _refuseFecOnPacketSession(const std::shared_ptr<DistSession> &dist_session);
+static std::shared_ptr<void> _reserveSharedIngest(const std::shared_ptr<DistSession> &dist_session);
 static bool request_too_large(Open5GSSBIRequest &request, Open5GSSBIStream &stream, int path_segments,
                               Open5GSSBIMessage &message, const NfServer::AppMetadata &app_meta,
                               const std::optional<NfServer::InterfaceMetadata> &api);
@@ -136,6 +139,9 @@ DistributionSession::DistributionSession(CJson &json, bool as_request)
     std::shared_ptr<DistSession> dist_session = m_createReqData->getDistSession();
 
     _validate(dist_session);
+    /* Last of the checks that can refuse the session: nothing has been scheduled for it yet, so a refusal here leaves
+       nothing behind. */
+    m_sharedIngestReservation = _reserveSharedIngest(dist_session);
     _setLastUsed();
     m_generated = m_lastUsed;
     _setHash();
@@ -471,14 +477,24 @@ bool DistributionSession::processEvent(Open5GSEvent &event)
                     if (subsc.processClientResponse(event)) return true;
                 }
             }
+            if (DistributionSessionSubscription::discardFinalNotificationResponse(event)) return true;
             break;
         }
     case LocalEvents::SEND_NOTIFICATION:
         {
             DistributionSessionNotificationEvent dist_event(event);
-            const auto &subsc = dist_event.distributionSessionSubscription();
-            ogs_debug("Sending notifications for subscription %p", &subsc);
-            subsc.sendNotifications();
+            /* Looked up here, not held by the event: the session, and the subscription it owns, may have gone since
+               the event was pushed (a create that is refused after the session was built destroys it). */
+            const auto &dist_session = App::self().context()->findDistributionSession(dist_event.distributionSessionId());
+            if (dist_session) {
+                try {
+                    const auto &subsc = dist_session->getSubscription(dist_event.subscriptionId());
+                    ogs_debug("Sending notifications for subscription %s", dist_event.subscriptionId().c_str());
+                    subsc.sendNotifications();
+                } catch (std::out_of_range &ex) {
+                    ogs_debug("No subscription %s to send notifications for: %s", dist_event.subscriptionId().c_str(), ex.what());
+                }
+            }
             dist_event.releaseEventData();
             return true;
         }
@@ -851,6 +867,53 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
                                 std::format("Cannot change objDistributionOperatingMode ({} != {})", new_obj_distribution_data.value()->getObjDistributionOperatingMode()->getString(), old_obj_distribution_data.value()->getObjDistributionOperatingMode()->getString()));
     }
 
+    /* The source address of the Application Provider's tunnel is reserved, and on the shared packet ingest port keys the
+       session's packets, when the session is created. TS 29.581 V18.6.0 table 6.1.6.2.14-1, afEgressTunAddr: "This shall
+       be present only in the Create request over the Nmb2, Nmb10 and Nmb5 interfaces." A change is therefore refused,
+       rather than left unreserved or clashing with another session's. */
+    auto af_egress_tun_addr = [](const std::shared_ptr<DistSession> &dist_session) -> std::string {
+        const auto &pkt_distr_data = dist_session->getPktDistributionData();
+        if (!pkt_distr_data || !pkt_distr_data.value()) return std::string();
+        const auto &ingest_addr = pkt_distr_data.value()->getMbStfIngestAddr();
+        if (!ingest_addr || !ingest_addr->getAfEgressTunAddr()) return std::string();
+        return ingest_addr->getAfEgressTunAddr().value()->toJSON(true).serialise();
+    };
+    if (af_egress_tun_addr(new_dist_session) != af_egress_tun_addr(old_dist_session)) {
+        ex.addInvalidParameter("distSession.pktDistributionData.mbStfIngestAddr.afEgressTunAddr",
+                                "Cannot change afEgressTunAddr: it is given only when the session is created");
+    }
+
+    /* What the session reserves and how it ingests is set up when it is created: the operating mode and ingest method
+       decide whether a source address was reserved at all (afEgressTunAddr applies only to PACKET_FORWARD_ONLY and to
+       PACKET_PROXY with UNICAST ingest, table 6.1.6.2.14-1), so changing either would leave a session with no
+       reservation, or a reservation it no longer uses. No clause says which attributes an update may change; as for
+       objDistributionOperatingMode above, these are refused. */
+    auto packet_mode = [](const std::shared_ptr<DistSession> &dist_session) -> std::string {
+        const auto &pkt_distr_data = dist_session->getPktDistributionData();
+        if (!pkt_distr_data || !pkt_distr_data.value()) return std::string();
+        std::string result(pkt_distr_data.value()->getPktDistributionOperatingMode()->getString());
+        const auto &ingest_method = pkt_distr_data.value()->getPktIngestMethod();
+        if (ingest_method) result += "/" + ingest_method.value()->getString();
+        return result;
+    };
+    if (packet_mode(new_dist_session) != packet_mode(old_dist_session)) {
+        ex.addInvalidParameter("distSession.pktDistributionData",
+                                "Cannot change pktDistributionOperatingMode or pktIngestMethod ('" + packet_mode(new_dist_session) +
+                                "' != '" + packet_mode(old_dist_session) + "')");
+    }
+
+    /* The checks made when a packet session is created also hold for what an update leaves it as: a change that removes
+       what they require, such as the srcIpAddr of a PACKET_PROXY session (TS 29.581 V18.6.0 table 6.1.6.2.13-1,
+       srcIpAddr: "An implementation complying with this version of the specification shall include this IE for any
+       operating mode other than"), is refused. */
+    if (new_dist_session->getPktDistributionData()) {
+        try {
+            _validate(new_dist_session);
+        } catch (ModelException &err) {
+            ex.addInvalidParameter(err.parameter, err.what());
+        }
+    }
+
     try {
         _refuseFecOnPacketSession(new_dist_session);
     } catch (ModelException &err) {
@@ -917,6 +980,19 @@ DistributionSession &DistributionSession::distributionSessionReqData(const std::
 void DistributionSession::haveEmptyQueue()
 {
     _haveEmptyQueue();
+}
+
+void DistributionSession::reportReleased()
+{
+    /* Deleting a session releases it, and the queued notification would find the session gone (it is looked up by id
+       when handled), so it is sent here. Not reported again for a session already deactivated. */
+    const auto &activated = m_eventTimestamps.sessionActivated;
+    const auto &deactivated = m_eventTimestamps.sessionDeactivated;
+    if (!activated || (deactivated && !(deactivated.value() < activated.value()))) return;
+    m_eventTimestamps.registerEvent(DistributionSessionEvents::SESSION_DEACTIVATED);
+    for (auto &[subsc_id, subsc] : m_eventSubscriptions) {
+        subsc.sendFinalNotifications();
+    }
 }
 
 /**** private: ****/
@@ -1135,7 +1211,7 @@ void DistributionSession::_registerEvent(DistributionSessionEvents::EventTypeBit
 void DistributionSession::_sendSubscriptionNotifications()
 {
     for (auto &[subsc_id, subsc] : m_eventSubscriptions) {
-        subsc.pushNotificationsEvent();
+        subsc.pushNotificationsEvent(m_distributionSessionId);
     }
 }
 
@@ -1272,6 +1348,7 @@ void DistributionSession::_apiSessionDelete(Open5GSSBIStream &stream, Open5GSSBI
                            const NfServer::AppMetadata &app_meta)
 {
     try {
+        reportReleased();
         App::self().context()->deleteDistributionSession(distributionSessionId());
         std::shared_ptr<Open5GSSBIResponse> response(NfServer::newResponse(std::nullopt, std::nullopt, std::nullopt,
                                                                             std::nullopt, 0, std::nullopt, api, app_meta));
@@ -1626,6 +1703,43 @@ static void _refuseFecOnPacketSession(const std::shared_ptr<DistSession> &dist_s
         throw ModelException("fecInformation is not supported with pktDistributionData: this MBSTF applies no FEC to a "
                              "Packet Distribution Session", "DistributionSession", "distSession.fecInformation",
                              ProblemCause::OPTIONAL_IE_INCORRECT);
+    }
+}
+
+/* With mbstf.packetIngest naming a fixed port, every unicast packet session shares it and is told apart by the source
+ * address and port of the Application Provider's tunnel. TS 29.581 V18.6.0 table 6.1.6.2.14-1, afEgressTunAddr: "The
+ * MBSTF shall use this information to validate the source IP address and port of incoming packets pertaining to the MBS
+ * User Data Ingest Session from the MBS Application Provider." The pair has to be unique for that to tell sessions
+ * apart, and no clause or application error covers a clash, so it is refused as an incorrect afEgressTunAddr (400). */
+static std::shared_ptr<void> _reserveSharedIngest(const std::shared_ptr<DistSession> &dist_session)
+{
+    if (!PacketIngester::sharedPortConfigured()) return nullptr;
+    const auto &pkt_distr_data = dist_session->getPktDistributionData();
+    if (!pkt_distr_data || !pkt_distr_data.value()) return nullptr;
+    const auto &ingest_method = pkt_distr_data.value()->getPktIngestMethod();
+    if (ingest_method && ingest_method.value()->getValue() != PktIngestMethod::VAL_UNICAST) return nullptr;
+    const auto &ingest_addr = pkt_distr_data.value()->getMbStfIngestAddr();
+    if (!ingest_addr || !ingest_addr->getAfEgressTunAddr()) return nullptr; // refused by _validate()
+    static const char *param = "distSession.pktDistributionData.mbStfIngestAddr.afEgressTunAddr";
+    try {
+        const auto &tun_addr = ingest_addr->getAfEgressTunAddr().value();
+        std::string hostname;
+        int family = AF_UNSPEC;
+        if (tun_addr->getIpv6Addr()) {
+            hostname = *tun_addr->getIpv6Addr().value();
+            family = AF_INET6;
+        } else if (tun_addr->getIpv4Addr()) {
+            hostname = tun_addr->getIpv4Addr().value();
+            family = AF_INET;
+        }
+        return PacketIngester::reserveShared(make_shared_sockaddr(family, hostname, static_cast<in_port_t>(tun_addr->getPortNumber())));
+    } catch (const PacketIngester::AddressInUse &ex) {
+        throw ModelException(ex.what(), "DistributionSession", param, ProblemCause::OPTIONAL_IE_INCORRECT);
+    } catch (const std::out_of_range &ex) {
+        throw ModelException(ex.what(), "DistributionSession", param, ProblemCause::OPTIONAL_IE_INCORRECT);
+    } catch (const std::error_condition &ex) {
+        throw ModelException(std::string("Unable to set up the shared packet ingest port: ") + ex.message(), "DistributionSession",
+                             param, ProblemCause::SYSTEM_FAILURE);
     }
 }
 

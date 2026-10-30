@@ -92,6 +92,10 @@ public:
     const std::string &hash() const {return m_hash;};
     void setController(std::shared_ptr<Controller> controller) {m_controller = controller;};
     const std::shared_ptr<Controller> &controller() const {return m_controller;};
+    /** The source address and port this session holds on the shared packet ingest port, if it uses it (type-erased: it is a
+     *  PacketIngester::SharedLink). Taken when the session is defined, so that a pair another session uses is refused in
+     *  the answer to the create request, and kept until the session has gone. */
+    const std::shared_ptr<void> &sharedIngestReservation() const {return m_sharedIngestReservation;};
 
     virtual void processEvent(Event &event, SubscriptionService &event_service);
     static bool processEvent(Open5GSEvent &event);
@@ -131,6 +135,11 @@ public:
     const DistributionSessionEvents &eventTimestamps() const { return m_eventTimestamps; };
 
     void haveEmptyQueue();
+
+    /** Report SESSION_DEACTIVATED before the session is deleted, if it is active
+     * The subscriptions go with the session, so the report is sent now rather than queued.
+     */
+    void reportReleased();
 
 private:
     class InitStateAction;
@@ -224,6 +233,7 @@ private:
     std::string m_hash;
     std::string m_distributionSessionId;
     std::shared_ptr<Controller> m_controller;
+    std::shared_ptr<void> m_sharedIngestReservation; //!< PacketIngester::SharedLink, see sharedIngestReservation()
     std::map<std::string, DistributionSessionSubscription> m_eventSubscriptions;
     std::function<void(const Action&)> m_currentStateFunction;
     DistributionSessionEvents m_eventTimestamps;

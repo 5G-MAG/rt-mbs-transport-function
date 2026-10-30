@@ -32,6 +32,8 @@
 #include "DistributionSession.hh"
 #include "ManifestHandlerFactory.hh"
 #include "Open5GSNetworkFunction.hh"
+#include "DistributionSessionSubscription.hh"
+#include "PacketIngester.hh"
 #include "Open5GSSBIServer.hh"
 #include "Open5GSSockAddr.hh"
 #include "Open5GSYamlDocument.hh"
@@ -95,7 +97,11 @@ bool Context::parseConfig()
                         throw std::out_of_range("Bad configuration node at mbstf.serverResponseCacheControl");
                      }
 
-                } else if (mbstf_key == "distSessionAPI" || mbstf_key == "httpPushIngest" || mbstf_key == "rtpIngest") {
+                } else if (mbstf_key == "distSessionAPI" || mbstf_key == "httpPushIngest" || mbstf_key == "packetIngest" || mbstf_key == "rtpIngest") {
+                    if (mbstf_key == "rtpIngest") {
+                        ogs_warn("mbstf.rtpIngest is the former name of mbstf.packetIngest; please rename it");
+                        mbstf_key = "packetIngest";
+                    }
                     Open5GSYamlIter distSess_array(mbstf_iter);
                     do {
                         if (distSess_array.type() == YAML_MAPPING_NODE) {
@@ -225,6 +231,8 @@ void Context::abortAllIngest()
         const std::shared_ptr<Controller> &controller = entry.second->controller();
         if (controller) controller->abortIngest();
     }
+    PacketIngester::shutdownShared(); // the one receiver of the shared packet ingest port
+    DistributionSessionSubscription::releaseFinalNotifications();
 }
 
 void Context::abortAllOutput()
@@ -378,6 +386,26 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
         ogs_assert(rv == OGS_OK);
     }
 
+    if (pc_key == "packetIngest") {
+        /* Not an SBI server either: the packet ingest socket is a UDP socket that PacketIngester binds to this
+           address itself, and nothing else used the server made here. The address is only kept. */
+        if (packetIngest.address.has_value()) {
+            ogs_warn("mbstf.packetIngest lists more than one address; the packet ingest uses the first and ignores the rest");
+        } else if (addr) {
+            struct sockaddr_storage ss = {};
+            if (addr->ogs_sa_family == AF_INET6) {
+                memcpy(&ss, &addr->sin6, sizeof(addr->sin6));
+            } else {
+                memcpy(&ss, &addr->sin, sizeof(addr->sin));
+            }
+            packetIngest.address = ss;
+            if (num_of_advertise > 0 && advertise[0]) packetIngest.advertise = std::string(advertise[0]);
+        }
+        if (dev) ogs_warn("mbstf.packetIngest does not take a device; set its address");
+        if (addr) ogs_freeaddrinfo(addr);
+        return;
+    }
+
     if (pc_key == "httpPushIngest") {
         /* Not an SBI server. The object push server is a libmicrohttpd daemon that PushObjectIngester
            binds to this address itself, and a listening SBI server made here as well would hold the
@@ -440,7 +468,7 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
                 servers[SERVER_DISTRIBUTION_SESSION].push_back(newServer);
             } else if (pc_key == "httpPushIngest") {
                  servers[SERVER_OBJECT_PUSH].push_back(newServer);
-            } else if (pc_key == "rtpIngest") {
+            } else if (pc_key == "packetIngest") {
                 servers[SERVER_RTP].push_back(newServer);
             }
 
@@ -464,7 +492,7 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
                 servers[SERVER_DISTRIBUTION_SESSION].push_back(newServer);
             } else if (pc_key == "httpPushIngest") {
                  servers[SERVER_OBJECT_PUSH].push_back(newServer);
-            } else if (pc_key == "rtpIngest") {
+            } else if (pc_key == "packetIngest") {
                 servers[SERVER_RTP].push_back(newServer);
             }
         }
