@@ -494,15 +494,26 @@ void PacketIngester::sharedReceiver()
     }
     std::array<uint8_t, 65536> buffer;
     std::array<uint8_t, 65536> control_buffer;
+    /* This one thread serves every unicast session and nothing starts another while the socket stays open, so an error
+       is waited out and the loop goes on; it is reported once, not on every attempt. */
+    bool failing = false;
+    auto fail = [&failing](const char *what, int err) {
+        if (!failing) ogs_error("Error %s the shared packet ingest socket, retrying: %s", what, strerror(err));
+        failing = true;
+        std::this_thread::sleep_for(100ms);
+    };
     while (!s_sharedStop) {
         struct pollfd read_poll = { .fd = fd, .events = POLLIN, .revents = 0 };
         int presult = poll(&read_poll, 1, 100);
         if (presult < 0) {
             if (errno == EINTR) continue;
-            ogs_error("Error polling the shared packet ingest socket: %s", strerror(errno));
-            break;
+            fail("polling", errno);
+            continue;
         }
-        if (presult == 0) continue;
+        if (presult == 0) {
+            failing = false; // polling works again
+            continue;
+        }
 
         struct sockaddr_storage from_addr;
         struct iovec iov = { .iov_base = buffer.data(), .iov_len = buffer.size() };
@@ -516,7 +527,12 @@ void PacketIngester::sharedReceiver()
             .msg_flags = 0
         };
         ssize_t bytes = recvmsg(fd, &msg, 0);
+        if (bytes < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
+            fail("reading", errno);
+            continue;
+        }
         if (bytes <= 0) continue;
+        failing = false;
 
         std::shared_ptr<SharedLink> link;
         {
