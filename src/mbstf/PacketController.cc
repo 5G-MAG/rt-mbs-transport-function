@@ -160,6 +160,11 @@ void PacketController::deactivateOutput()
     if (m_fec) m_fec->stop();
     if (m_packetiser) m_packetiser->stop();
     m_scheduler.stop();
+    /* DEACTIVATING is left through the empty-queue action, which only the object controllers raised, so a packet session
+       stayed in DEACTIVATING and never reached INACTIVE: it could not be activated again and reported no deactivation.
+       The packet queue was flushed before the transition (DistributionSession::distributionSessionReqData()), so nothing
+       is held back and the session is deactivated. */
+    distributionSession().haveEmptyQueue();
 }
 
 void PacketController::flushPackagerQueue()
