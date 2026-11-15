@@ -481,11 +481,11 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
     node6 = (ogs_socknode_t *)ogs_list_first(&list6);
     if (node6) {
         int matches = 0;
-        matches = checkForAddr(node);
+        matches = checkForAddr(node6);
 
         if(!matches) {
             std::shared_ptr<Open5GSSBIServer> newServer;
-            newServer.reset(new Open5GSSBIServer(node, is_option ? &option : nullptr));
+            newServer.reset(new Open5GSSBIServer(node6, is_option ? &option : nullptr));
             newServer->ogsSBIServerAdvertise(addr);
 
             if (pc_key == "distSessionAPI") {
