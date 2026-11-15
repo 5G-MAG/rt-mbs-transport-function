@@ -110,11 +110,16 @@ void App::initialise()
     static const char supportedFeatures[] = "0";
     static const char apiVersion[] = NMBSTF_DISTSESSION_API_VERSION;
 
-    if (!m_context->parseConfig()) {
+    if (!m_context->checkSbiConfig()) {
         throw std::runtime_error("Unable to load MBSTF configuration!");
     }
+    // The SBI configuration first: it sets the scheme (http or https) the servers made by the MBSTF's own
+    // configuration are created with.
     if (!m_app->sbiParseConfig("mbstf")) {
         throw std::runtime_error("Open5GS parse SBI configuration failed!");
+    }
+    if (!m_context->parseConfig()) {
+        throw std::runtime_error("Unable to load MBSTF configuration!");
     }
 
     std::vector<std::shared_ptr<Open5GSSockAddr> > addrs(m_context->DistributionSessionServerAddress());

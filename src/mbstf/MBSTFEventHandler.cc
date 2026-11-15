@@ -63,7 +63,14 @@ void MBSTFEventHandler::dispatch(Open5GSFSM &fsm, Open5GSEvent &event)
                so taking ownership here double-frees it and talloc aborts the process.
                There is no leak to close on this path. */
             auto request = event.sbiRequest();
-            Open5GSSBIStream stream(reinterpret_cast<ogs_sbi_stream_t*>(event.sbiData()));
+            ogs_pool_id_t stream_id = OGS_POINTER_TO_UINT(event.sbiData());
+            ogs_assert(stream_id >= OGS_MIN_POOL_ID && stream_id <= OGS_MAX_POOL_ID);
+            ogs_sbi_stream_t *ogs_stream = reinterpret_cast<ogs_sbi_stream_t*>(ogs_sbi_stream_find_by_id(stream_id));
+            if (!ogs_stream) {
+                ogs_error("STREAM has already been removed [%d]", stream_id);
+                break;
+            }
+            Open5GSSBIStream stream(ogs_stream);
 
             Open5GSSBIMessage message;
 
@@ -78,7 +85,7 @@ void MBSTFEventHandler::dispatch(Open5GSFSM &fsm, Open5GSEvent &event)
             }
 
             std::string service_name(message.serviceName());
-            if (service_name == OGS_SBI_SERVICE_NAME_NNRF_NFM) {
+            if (service_name == OpenAPI_service_name_ToString(OpenAPI_service_name_nnrf_nfm)) {
                 std::string api_version(message.apiVersion());
                 if (api_version != OGS_SBI_API_V1) {
                     ogs_error("Not supported version [%s]", api_version.c_str());
@@ -106,7 +113,7 @@ void MBSTFEventHandler::dispatch(Open5GSFSM &fsm, Open5GSEvent &event)
 
                            This resource is the NRF's status notification callback, which serves POST
                            and nothing else. */
-                        ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_MEHTOD_NOT_ALLOWED, 0,
+                        ogs_assert(true == NfServer::sendError(stream, OGS_SBI_HTTP_STATUS_METHOD_NOT_ALLOWED, 0,
                                         message, App::self().mbstfAppMetadata(), std::nullopt,
                                         "Method Not Allowed", "Invalid HTTP method in NRF status notification",
                                         std::nullopt, std::nullopt, std::nullopt,
@@ -143,8 +150,9 @@ void MBSTFEventHandler::dispatch(Open5GSFSM &fsm, Open5GSEvent &event)
             message.resStatus(response.status());
 
             std::string service_name(message.serviceName());
-            if (service_name == OGS_SBI_SERVICE_NAME_NNRF_NFM) {
+            if (service_name == OpenAPI_service_name_ToString(OpenAPI_service_name_nnrf_nfm)) {
                 std::string resource(message.resourceComponent(0));
+                message.parseResponse(response);
                 if (resource == OGS_SBI_RESOURCE_NAME_NF_INSTANCES) {
                     cJSON *nf_profile;
                     OpenAPI_nf_profile_t *nfprofile;
@@ -152,7 +160,8 @@ void MBSTFEventHandler::dispatch(Open5GSFSM &fsm, Open5GSEvent &event)
 
                     ogs_assert(nf_instance);
 
-                    if (response.contentLength() && response.content()){
+                    /* a response without an instance id is the NF list (links), parsed by parseResponse() */
+                    if (message.resourceComponent(1) && response.contentLength() && response.content()){
                         ogs_debug( "response: %s", response.content());
                         nf_profile = cJSON_Parse(response.content());
                         nfprofile = OpenAPI_nf_profile_parseFromJSON(nf_profile);
@@ -237,9 +246,14 @@ void MBSTFEventHandler::dispatch(Open5GSFSM &fsm, Open5GSEvent &event)
 
             case OGS_TIMER_SBI_CLIENT_WAIT:
                 {
-                    ogs_sbi_xact_t *sbi_xact(reinterpret_cast<ogs_sbi_xact_t*>(event.sbiData()));
-                    ogs_assert(sbi_xact);
-                    Open5GSSBIStream stream(sbi_xact->assoc_stream);
+                    ogs_pool_id_t sbi_xact_id = OGS_POINTER_TO_UINT(event.sbiData());
+                    ogs_assert(sbi_xact_id >= OGS_MIN_POOL_ID && sbi_xact_id <= OGS_MAX_POOL_ID);
+                    ogs_sbi_xact_t *sbi_xact = ogs_sbi_xact_find_by_id(sbi_xact_id);
+                    if (!sbi_xact) {
+                        ogs_error("SBI transaction has already been removed [%d]", sbi_xact_id);
+                        break;
+                    }
+                    Open5GSSBIStream stream(reinterpret_cast<ogs_sbi_stream_t*>(ogs_sbi_stream_find_by_id(sbi_xact->assoc_stream_id)));
 
                     ogs_sbi_xact_remove(sbi_xact);
 

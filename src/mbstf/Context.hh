@@ -47,6 +47,7 @@ public:
     Context &operator=(const Context &other) = delete;
     virtual ~Context();
 
+    bool checkSbiConfig(); // false for an mbstf.sbi that is not in the sections server and client
     bool parseConfig();
 
     std::vector<std::shared_ptr<Open5GSSockAddr> > DistributionSessionServerAddress();

@@ -71,6 +71,26 @@ Context::~Context()
 
 }
 
+bool Context::checkSbiConfig()
+{
+    // The SBI configuration parser takes mbstf.sbi as the sections server and client. The older form, a list of
+    // addr and port, would stop it on an assertion.
+    Open5GSYamlDocument doc(App::self().configDocument());
+    Open5GSYamlIter root_iter(doc);
+    while (root_iter.next()) {
+        if (std::string(root_iter.key()) != "mbstf") continue;
+        Open5GSYamlIter mbstf_iter(root_iter);
+        while (mbstf_iter.next()) {
+            if (std::string(mbstf_iter.key()) == "sbi" && Open5GSYamlIter(mbstf_iter).type() == YAML_SEQUENCE_NODE) {
+                ogs_error("mbstf.sbi is a list of addresses: it has to be the sections server and client "
+                          "(mbstf.sbi.server, mbstf.sbi.client.nrf), as for the other network functions");
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool Context::parseConfig()
 {
     Open5GSYamlDocument doc(App::self().configDocument());
@@ -81,7 +101,8 @@ bool Context::parseConfig()
             Open5GSYamlIter mbstf_iter(root_iter);
             while (mbstf_iter.next()) {
                 std::string mbstf_key(mbstf_iter.key());
-                if (mbstf_key == "sbi" || mbstf_key == "service_name" || mbstf_key == "discovery") {
+                if (mbstf_key == "sbi" || mbstf_key == "service_name" || mbstf_key == "discovery" ||
+                    mbstf_key == "default") {
                     // Handled by SBI config parser
                 } else if (mbstf_key == "serverResponseCacheControl") {
                     Open5GSYamlIter cc_array(mbstf_iter);
@@ -432,17 +453,17 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
     ogs_list_init(&list6);
 
     if (addr) {
-        if (ogs_app()->parameter.no_ipv4 == 0)
+        if (ogs_global_conf()->parameter.no_ipv4 == 0)
             ogs_socknode_add(&list, AF_INET, addr, NULL);
-        if (ogs_app()->parameter.no_ipv6 == 0)
+        if (ogs_global_conf()->parameter.no_ipv6 == 0)
             ogs_socknode_add(&list6, AF_INET6, addr, NULL);
         ogs_freeaddrinfo(addr);
     }
 
     if (dev) {
         rv = ogs_socknode_probe(
-                        ogs_app()->parameter.no_ipv4 ? NULL : &list,
-                                    ogs_app()->parameter.no_ipv6 ? NULL : &list6,
+                        ogs_global_conf()->parameter.no_ipv4 ? NULL : &list,
+                                    ogs_global_conf()->parameter.no_ipv6 ? NULL : &list6,
                                     dev, port, NULL);
         ogs_assert(rv == OGS_OK);
     }
@@ -549,7 +570,7 @@ void Context::updateNFLoad()
 
     this_nf->load += new_load;
     ogs_list_for_each(&this_nf->nf_service_list, svc) {
-        if (std::string(svc->name) == "nmbstf-distsession") {
+        if (svc->name == OpenAPI_service_name_nmbstf_distsession) {
             svc->load += new_load;
         }
     }
