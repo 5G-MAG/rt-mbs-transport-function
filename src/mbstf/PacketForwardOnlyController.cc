@@ -66,16 +66,13 @@ void PacketForwardOnlyController::reconfigurePacketFEC()
     // no FEC implemented yet
 }
 
-// Overhead beyond IP level is GTP header size + UDP header size
-#define OVERHEAD (2 + sizeof(udphdr))
-
 void PacketForwardOnlyController::setPacketPacketisation()
 {
     SsmPort ssm;
     const auto &dist_session = distributionSession();
     const auto &tun_endpoint = dist_session.getTunnelAddr();
     in_port_t tun_port = dist_session.getTunnelPortNumber();
-    uint16_t mtu = static_cast<uint16_t>(get_tunnelled_path_mtu(ssm, tun_endpoint, tun_port, GET_MTU_IP_PAYLOAD)) - OVERHEAD;
+    uint16_t mtu = static_cast<uint16_t>(tunnelled_inner_packet_mtu(ssm, tun_endpoint, tun_port));
     ogs_debug("Creating packetiser with MTU = %u", mtu);
     packetPacketiser(new PacketForwardPacketisation(mtu));
 }
@@ -93,7 +90,7 @@ void PacketForwardOnlyController::reconfigurePacketPacketisation()
         const auto &dist_session = distributionSession();
         const auto &tun_endpoint = dist_session.getTunnelAddr();
         in_port_t tun_port = dist_session.getTunnelPortNumber();
-        uint16_t mtu = static_cast<uint16_t>(get_tunnelled_path_mtu(ssm, tun_endpoint, tun_port, GET_MTU_IP_PAYLOAD)) - OVERHEAD;
+        uint16_t mtu = static_cast<uint16_t>(tunnelled_inner_packet_mtu(ssm, tun_endpoint, tun_port));
         packetiser->mtu(mtu);
         packetiser->reconfigure();
     }

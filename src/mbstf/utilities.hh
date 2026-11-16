@@ -27,6 +27,7 @@
 #include <string>
 
 #include "common.hh"
+#include "PacketMtu.hh"
 
 MBSTF_NAMESPACE_START
 
@@ -61,6 +62,16 @@ int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::str
  * Context::kDefaultPathMtu. A configured Context::pathMtu also caps a discovered value.
  */
 int flute_path_mtu(int discovered_mtu, bool discovered_via_loopback);
+
+/** The largest IP packet a packet-mode session may carry in its tunnel to the MB-UPF.
+ *
+ * The packet is sent inside a UDP datagram to the MB-UPF, which puts it in a GTP-U packet to the gNB, so what fits is
+ * the path MTU less the IP and UDP headers of the outer packet and the GTP-U header the MB-UPF writes
+ * (GTP_HEADER_SIZE). The path MTU is that of flute_path_mtu(), so a tunnel that is local is sized for the configured or
+ * default path MTU rather than for the loopback interface. The IP header is that of the tunnel's address family. */
+int tunnelled_inner_packet_mtu(const SsmPort &ssm_port, const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port);
+
+
 std::shared_ptr<struct sockaddr> make_shared_sockaddr(int family_hint, const std::string &hostname, in_port_t port);
 
 MBSTF_NAMESPACE_STOP

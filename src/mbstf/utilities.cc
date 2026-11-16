@@ -21,6 +21,7 @@
 #include <netdb.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
+#include <netinet/udp.h>
 
 #include "ogs-core.h"
 
@@ -204,6 +205,13 @@ int get_tunnelled_path_mtu(const SsmPort &ssm_port, const std::optional<std::str
         }
     }
     return mtu;
+}
+
+int tunnelled_inner_packet_mtu(const SsmPort &ssm_port, const std::optional<std::string> &tunnel_ip, in_port_t tunnel_port)
+{
+    bool via_loopback = false;
+    const int discovered_mtu = get_tunnelled_path_mtu(ssm_port, tunnel_ip, tunnel_port, GET_MTU_ETHERNET_PAYLOAD, &via_loopback);
+    return inner_packet_mtu(flute_path_mtu(discovered_mtu, via_loopback), tunnel_address_is_ipv6(tunnel_ip));
 }
 
 std::shared_ptr<struct sockaddr> make_shared_sockaddr(int family_hint, const std::string &hostname, in_port_t port)

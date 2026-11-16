@@ -65,16 +65,13 @@ void PacketProxyController::reconfigurePacketFEC()
     // no FEC implemented yet
 }
 
-// GTP + UDP header overhead
-#define OVERHEAD (2 + sizeof(udphdr))
-
 void PacketProxyController::setPacketPacketisation()
 {
     const auto &dist_session = distributionSession();
     SsmPort ssm = dist_session.getSsmPort();
     const auto &tun_endpoint = dist_session.getTunnelAddr();
     in_port_t tun_port = dist_session.getTunnelPortNumber();
-    uint16_t mtu = static_cast<uint16_t>(get_tunnelled_path_mtu(ssm, tun_endpoint, tun_port, GET_MTU_IP_PAYLOAD)) - OVERHEAD;
+    uint16_t mtu = static_cast<uint16_t>(tunnelled_inner_packet_mtu(ssm, tun_endpoint, tun_port));
     packetPacketiser(new PacketProxyPacketisation(mtu, ssm));
 }
 
@@ -91,7 +88,7 @@ void PacketProxyController::reconfigurePacketPacketisation()
         const auto &dist_session = distributionSession();
         const auto &tun_endpoint = dist_session.getTunnelAddr();
         in_port_t tun_port = dist_session.getTunnelPortNumber();
-        uint16_t mtu = static_cast<uint16_t>(get_tunnelled_path_mtu(ssm, tun_endpoint, tun_port, GET_MTU_IP_PAYLOAD)) - OVERHEAD;
+        uint16_t mtu = static_cast<uint16_t>(tunnelled_inner_packet_mtu(ssm, tun_endpoint, tun_port));
         packetiser->mtu(mtu);
         packetiser->reconfigure();
     }

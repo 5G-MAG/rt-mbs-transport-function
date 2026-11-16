@@ -48,3 +48,7 @@ test('test_entity_tag',
 test('test_queued_object_set',
     executable('testQueuedObjectSet', 'test_QueuedObjectSet.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
    ,verbose: true, timeout: 600, protocol: 'exitcode')
+
+test('test_packet_mtu',
+    executable('testPacketMtu', 'test_PacketMtu.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
+   ,verbose: true, timeout: 60, protocol: 'exitcode')
