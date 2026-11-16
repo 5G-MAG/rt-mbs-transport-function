@@ -329,7 +329,7 @@ void ObjectStore::deleteObject(const std::string& object_id) {
     sendEventAsynchronous(event);
 }
 
-const std::shared_ptr<ObjectStore::Object> &ObjectStore::operator[](const std::string& object_id) {
+std::shared_ptr<ObjectStore::Object> ObjectStore::operator[](const std::string& object_id) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     return m_store.at(object_id);
 }

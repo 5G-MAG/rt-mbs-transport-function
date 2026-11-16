@@ -385,7 +385,9 @@ public:
     bool removeObject(const std::string& objectId);
     bool removeObjects(const std::list<std::string>& objectIds);
     std::list<std::pair<const std::string*, std::shared_ptr<Object> > > getExpired();
-    const std::shared_ptr<Object> &operator[](const std::string& object_id);
+    /* A copy of the pointer, not a reference to the map's own: another thread removing the object
+       frees the map node, and a reference held across that is a use after free. */
+    std::shared_ptr<Object> operator[](const std::string& object_id);
     std::shared_ptr<const Object> operator[](const std::string& object_id) const;
     bool isStale(const std::string& object_id) const;
     std::map<std::string, std::shared_ptr<Object>> getStale() const;
