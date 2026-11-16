@@ -129,7 +129,12 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
        addMPDRefreshToExtraPullObjects() adds to m_extraPullObjects from the same value. Left empty,
        both comparisons test against "" and m_refreshMpd is never set, so a re-fetched MPD is
        ingested without the handler being told its own manifest changed. */
-    const std::string manifest_url(m_manifest ? m_manifest->second.getFetchedUrl() : std::string());
+    std::string manifest_url;
+    {
+        /* m_manifest is replaced by update() on another thread, under this mutex. */
+        std::lock_guard<std::recursive_mutex> guard(m_mpdMutex);
+        if (m_manifest) manifest_url = m_manifest->second.getFetchedUrl();
+    }
     time_type fetch_time;
 
     std::list<SegmentEntry> media_segments;
@@ -165,7 +170,12 @@ std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> DASHManifest
         }
     }
 
-    media_segments.insert(media_segments.end(), m_extraPullObjects.begin(), m_extraPullObjects.end());
+    {
+        /* addMPDRefreshToExtraPullObjects() replaces this list from the thread that ingests a new
+           manifest; reading it unlocked here walked list nodes that thread had just freed. */
+        std::lock_guard<std::recursive_mutex> guard(m_mpdMutex);
+        media_segments.insert(media_segments.end(), m_extraPullObjects.begin(), m_extraPullObjects.end());
+    }
     for (auto &ms: media_segments) {
         if(ms.availabilityStartTime() < current_time)
             ms.availabilityStartTime(current_time);
@@ -298,6 +308,7 @@ void DASHManifestHandler::addMPDRefreshToExtraPullObjects()
 
 void DASHManifestHandler::removeExtraPullObjectsEntry(const DASHManifestHandler::SegmentEntry &segment)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_mpdMutex);
     m_extraPullObjects.remove_if([&segment](const SegmentEntry &item){ return item.segmentURL() == segment.segmentURL(); });
 }
 
