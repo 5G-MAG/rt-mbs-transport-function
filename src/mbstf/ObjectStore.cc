@@ -80,51 +80,21 @@ ObjectStore::Metadata::Metadata(const std::string &object_id, const std::string 
 }
 
 ObjectStore::Metadata::Metadata(const Metadata &other)
-    :m_objectId(other.m_objectId)
-    ,m_mediaType(other.m_mediaType)
-    ,m_originalUrl(other.m_originalUrl)
-    ,m_fetchedUrl(other.m_fetchedUrl)
-    ,m_acquisitionId(other.m_acquisitionId)
-    ,m_keepAfterSend(other.m_keepAfterSend)
-    ,m_compressedSend(other.m_compressedSend)
-    ,m_objIngestBaseUrl(other.m_objIngestBaseUrl)
-    ,m_objDistributionBaseUrl(other.m_objDistributionBaseUrl)
-    ,m_entityTag(other.m_entityTag)
-    ,m_cacheExpires(other.m_cacheExpires)
-    ,m_availabilityStartTime(other.m_availabilityStartTime)
-    ,m_availabilityEndTime(other.m_availabilityEndTime)
-    ,m_receivedTime(other.m_receivedTime)
-    ,m_created(other.m_created)
-    ,m_modified(other.m_modified)
-    ,m_lastSentTime(other.m_lastSentTime)
-    ,m_fileDescription(other.m_fileDescription)
+    :Metadata()
 {
+    *this = other;
 }
 
 ObjectStore::Metadata::Metadata(Metadata &&other)
-    :m_objectId(std::move(other.m_objectId))
-    ,m_mediaType(std::move(other.m_mediaType))
-    ,m_originalUrl(std::move(other.m_originalUrl))
-    ,m_fetchedUrl(std::move(other.m_fetchedUrl))
-    ,m_acquisitionId(std::move(other.m_acquisitionId))
-    ,m_keepAfterSend(other.m_keepAfterSend)
-    ,m_compressedSend(other.m_compressedSend)
-    ,m_objIngestBaseUrl(std::move(other.m_objIngestBaseUrl))
-    ,m_objDistributionBaseUrl(std::move(other.m_objDistributionBaseUrl))
-    ,m_entityTag(std::move(other.m_entityTag))
-    ,m_cacheExpires(std::move(other.m_cacheExpires))
-    ,m_availabilityStartTime(std::move(other.m_availabilityStartTime))
-    ,m_availabilityEndTime(std::move(other.m_availabilityEndTime))
-    ,m_receivedTime(std::move(other.m_receivedTime))
-    ,m_created(std::move(other.m_created))
-    ,m_modified(std::move(other.m_modified))
-    ,m_lastSentTime(std::move(other.m_lastSentTime))
-    ,m_fileDescription(std::move(other.m_fileDescription))
+    :Metadata()
 {
+    *this = std::move(other);
 }
 
 ObjectStore::Metadata &ObjectStore::Metadata::operator=(const ObjectStore::Metadata &other)
 {
+    if (this == &other) return *this;
+    std::scoped_lock lock(m_mutex, other.m_mutex);
     m_objectId = other.m_objectId;
     m_mediaType = other.m_mediaType;
     m_originalUrl = other.m_originalUrl;
@@ -149,6 +119,8 @@ ObjectStore::Metadata &ObjectStore::Metadata::operator=(const ObjectStore::Metad
 
 ObjectStore::Metadata &ObjectStore::Metadata::operator=(ObjectStore::Metadata &&other)
 {
+    if (this == &other) return *this;
+    std::scoped_lock lock(m_mutex, other.m_mutex);
     m_objectId = std::move(other.m_objectId);
     m_mediaType = std::move(other.m_mediaType);
     m_originalUrl = std::move(other.m_originalUrl);
@@ -173,6 +145,8 @@ ObjectStore::Metadata &ObjectStore::Metadata::operator=(ObjectStore::Metadata &&
 
 bool ObjectStore::Metadata::operator==(const ObjectStore::Metadata& other) const
 {
+    if (this == &other) return true;
+    std::scoped_lock lock(m_mutex, other.m_mutex);
     return m_keepAfterSend == other.m_keepAfterSend &&
            m_compressedSend == other.m_compressedSend &&
            m_cacheExpires == other.m_cacheExpires &&

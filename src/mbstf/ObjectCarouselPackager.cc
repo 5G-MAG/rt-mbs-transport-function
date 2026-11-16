@@ -538,7 +538,7 @@ void ObjectCarouselPackager::scheduleCarousel()
                     throw std::runtime_error("no FLUTE Transmitter available for this session");
                 }
                 auto &metadata = pkg_item.object()->second;
-                auto &file_desc = metadata.fluteFileDescription();
+                auto file_desc = metadata.fluteFileDescription();
                 std::string location;
                 std::string obj_ingest_base_url = metadata.objIngestBaseUrl().value_or(std::string());
                 std::string obj_distribution_base_url = metadata.objDistributionBaseUrl().value_or(std::string());
@@ -551,6 +551,8 @@ void ObjectCarouselPackager::scheduleCarousel()
                 }
                 if (!file_desc) {
                     metadata.fluteFileDescription(new LibFlute::Transmitter::FileDescription(location, pkg_item.object()->first));
+                    /* The accessor returns a copy of the pointer, so read the new one back. */
+                    file_desc = metadata.fluteFileDescription();
                 } else {
                     /* reset file description information if it's changed */
                     if (file_desc->file_entry().content_location != location) {

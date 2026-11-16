@@ -183,19 +183,19 @@ public:
 
         virtual ~Metadata() {};
 
-        const std::string &getOriginalUrl() const {return m_originalUrl;};
+        std::string getOriginalUrl() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_originalUrl; };
 
-        const std::string &getFetchedUrl() const {return m_fetchedUrl;};
+        std::string getFetchedUrl() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_fetchedUrl; };
 
-        const std::string &objectId() const { return m_objectId;};
-        Metadata &objectId(const std::string &object_id) { m_objectId = object_id; return *this;};
+        std::string objectId() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_objectId; };
+        Metadata &objectId(const std::string &object_id) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_objectId = object_id; return *this;};
 
-        const std::string &acquisitionId() const { return m_acquisitionId;};
-        Metadata &acquisitionId(const std::string &acquistion_id) { m_acquisitionId = acquistion_id; return *this;};
+        std::string acquisitionId() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_acquisitionId; };
+        Metadata &acquisitionId(const std::string &acquistion_id) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_acquisitionId = acquistion_id; return *this;};
 
-        const std::string &mediaType() const {return m_mediaType;};
-        Metadata &mediaType(const std::string &media_type) {m_mediaType = media_type; return *this;};
-        Metadata &mediaType(std::string &&media_type) {m_mediaType = std::move(media_type); return *this;};
+        std::string mediaType() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_mediaType; };
+        Metadata &mediaType(const std::string &media_type) { std::lock_guard<std::recursive_mutex> guard(m_mutex);m_mediaType = media_type; return *this;};
+        Metadata &mediaType(std::string &&media_type) { std::lock_guard<std::recursive_mutex> guard(m_mutex);m_mediaType = std::move(media_type); return *this;};
 
 
 
@@ -211,9 +211,9 @@ public:
          * availability start time is signalled in this document." Otherwise it is the ingest time
          * plus a configured distribution offset.
          */
-        const std::optional<datetime_type> &availabilityStartTime() const { return m_availabilityStartTime; };
-        Metadata &availabilityStartTime(const datetime_type &val) { m_availabilityStartTime = val; return *this; };
-        Metadata &availabilityStartTime(const std::optional<datetime_type> &val) { m_availabilityStartTime = val; return *this; };
+        std::optional<datetime_type> availabilityStartTime() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_availabilityStartTime; };
+        Metadata &availabilityStartTime(const datetime_type &val) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_availabilityStartTime = val; return *this; };
+        Metadata &availabilityStartTime(const std::optional<datetime_type> &val) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_availabilityStartTime = val; return *this; };
 
 
         /** Availability end time of this object from the MBSTF Client.
@@ -226,85 +226,90 @@ public:
          * max-age for the ingest fetch and is a property of the origin, not of this distribution
          * session.
          */
-        const std::optional<datetime_type> &availabilityEndTime() const { return m_availabilityEndTime; };
-        Metadata &availabilityEndTime(const datetime_type &val) { m_availabilityEndTime = val; return *this; };
-        Metadata &availabilityEndTime(const std::optional<datetime_type> &val) { m_availabilityEndTime = val; return *this; };
-        bool hasExpiryTime() const { return m_cacheExpires.has_value(); };
-        const datetime_type &ExpiryTime() const { return m_cacheExpires.value();};
-        const std::optional<datetime_type>& cacheExpires() const { return m_cacheExpires;};
-        std::optional<datetime_type>& cacheExpires(const datetime_type &cacheExpires) {
+        std::optional<datetime_type> availabilityEndTime() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_availabilityEndTime; };
+        Metadata &availabilityEndTime(const datetime_type &val) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_availabilityEndTime = val; return *this; };
+        Metadata &availabilityEndTime(const std::optional<datetime_type> &val) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_availabilityEndTime = val; return *this; };
+        bool hasExpiryTime() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_cacheExpires.has_value(); };
+        datetime_type ExpiryTime() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_cacheExpires.value(); };
+        std::optional<datetime_type> cacheExpires() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_cacheExpires; };
+        Metadata &cacheExpires(const datetime_type &cacheExpires) {
+            std::lock_guard<std::recursive_mutex> guard(m_mutex);
             m_cacheExpires = cacheExpires;
-            return m_cacheExpires;
+            return *this;
         };
         static int cacheExpiry()  {return CACHE_EXPIRES;};
         static int cacheExpiryInterval()  {return CHECK_EXPIRY_INTERVAL;};
 
-        const std::optional<std::string> &entityTag() const { return m_entityTag;};
+        std::optional<std::string> entityTag() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_entityTag; };
 
-        bool hasEntityTag() {return m_entityTag.has_value();};
+        bool hasEntityTag() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_entityTag.has_value(); };
 
-        Metadata &entityTag(const std::optional<std::string>& entityTag) {m_entityTag = entityTag; if (m_fileDescription && entityTag) m_fileDescription->set_etag(entityTag.value()); return *this;};
+        Metadata &entityTag(const std::optional<std::string>& entityTag) { std::lock_guard<std::recursive_mutex> guard(m_mutex);m_entityTag = entityTag; if (m_fileDescription && entityTag) m_fileDescription->set_etag(entityTag.value()); return *this;};
 
-        Metadata &keepAfterSend(bool keep_after_send) {m_keepAfterSend = keep_after_send; return *this;};
-        bool keepAfterSend() const { return m_keepAfterSend;};
+        Metadata &keepAfterSend(bool keep_after_send) { std::lock_guard<std::recursive_mutex> guard(m_mutex);m_keepAfterSend = keep_after_send; return *this;};
+        bool keepAfterSend() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_keepAfterSend; };
 
-        bool compressedSend() const { return m_compressedSend; };
-        Metadata &compressedSend(bool compress_send) { m_compressedSend = compress_send; return *this; };
+        bool compressedSend() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_compressedSend; };
+        Metadata &compressedSend(bool compress_send) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_compressedSend = compress_send; return *this; };
 
-        const std::optional<std::string> &objIngestBaseUrl() const { return m_objIngestBaseUrl;};
-        Metadata &objIngestBaseUrl(const std::optional<std::string> &obj_ingest_base_url) {
+        std::optional<std::string> objIngestBaseUrl() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_objIngestBaseUrl; };
+        Metadata &objIngestBaseUrl(const std::optional<std::string> &obj_ingest_base_url) { std::lock_guard<std::recursive_mutex> guard(m_mutex);
             m_objIngestBaseUrl = obj_ingest_base_url;
             return *this;
         };
-        Metadata &objIngestBaseUrl(const std::string &obj_ingest_base_url) {
+        Metadata &objIngestBaseUrl(const std::string &obj_ingest_base_url) { std::lock_guard<std::recursive_mutex> guard(m_mutex);
             m_objIngestBaseUrl = obj_ingest_base_url;
             return *this;
         };
-        Metadata &objIngestBaseUrl(std::nullopt_t) {m_objIngestBaseUrl.reset(); return *this;};
+        Metadata &objIngestBaseUrl(std::nullopt_t) { std::lock_guard<std::recursive_mutex> guard(m_mutex);m_objIngestBaseUrl.reset(); return *this;};
 
-        const std::optional<std::string> &objDistributionBaseUrl() const { return m_objDistributionBaseUrl;};
-        Metadata &objDistributionBaseUrl(const std::optional<std::string> &obj_distrib_base_url) {
+        std::optional<std::string> objDistributionBaseUrl() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_objDistributionBaseUrl; };
+        Metadata &objDistributionBaseUrl(const std::optional<std::string> &obj_distrib_base_url) { std::lock_guard<std::recursive_mutex> guard(m_mutex);
             m_objDistributionBaseUrl = obj_distrib_base_url;
             return *this;
         };
-        Metadata &objDistributionBaseUrl(const std::string &obj_distrib_base_url) {
+        Metadata &objDistributionBaseUrl(const std::string &obj_distrib_base_url) { std::lock_guard<std::recursive_mutex> guard(m_mutex);
             m_objDistributionBaseUrl = obj_distrib_base_url;
             return *this;
         };
-        Metadata &objDistributionBaseUrl(std::nullopt_t) {m_objDistributionBaseUrl.reset(); return *this;};
+        Metadata &objDistributionBaseUrl(std::nullopt_t) { std::lock_guard<std::recursive_mutex> guard(m_mutex);m_objDistributionBaseUrl.reset(); return *this;};
 
-        const datetime_type &receivedTime() const { return m_receivedTime;};
-        Metadata &receivedTime(const datetime_type &val) { m_receivedTime = val; return *this; };
-        Metadata &receivedTime(datetime_type &&val) { m_receivedTime = std::move(val); return *this; };
+        datetime_type receivedTime() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_receivedTime; };
+        Metadata &receivedTime(const datetime_type &val) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_receivedTime = val; return *this; };
+        Metadata &receivedTime(datetime_type &&val) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_receivedTime = std::move(val); return *this; };
 
-        const datetime_type &created() const { return m_created;};
-        Metadata &created(const datetime_type &val) { m_created = val; return *this; };
-        Metadata &created(datetime_type &&val) { m_created = std::move(val); return *this; };
+        datetime_type created() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_created; };
+        Metadata &created(const datetime_type &val) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_created = val; return *this; };
+        Metadata &created(datetime_type &&val) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_created = std::move(val); return *this; };
 
-        const datetime_type &modified() const { return m_modified;};
-        Metadata &modified(const datetime_type &val) { m_modified = val; return *this; };
-        Metadata &modified(datetime_type &&val) { m_modified = std::move(val); return *this; };
+        datetime_type modified() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_modified; };
+        Metadata &modified(const datetime_type &val) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_modified = val; return *this; };
+        Metadata &modified(datetime_type &&val) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_modified = std::move(val); return *this; };
 
-        const std::shared_ptr<LibFlute::Transmitter::FileDescription> &fluteFileDescription() const { return m_fileDescription; };
-        Metadata &fluteFileDescription(const std::shared_ptr<LibFlute::Transmitter::FileDescription> &fd_ptr) {
+        std::shared_ptr<LibFlute::Transmitter::FileDescription> fluteFileDescription() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_fileDescription; };
+        Metadata &fluteFileDescription(const std::shared_ptr<LibFlute::Transmitter::FileDescription> &fd_ptr) { std::lock_guard<std::recursive_mutex> guard(m_mutex);
             m_fileDescription = fd_ptr;
             return *this;
         };
-        Metadata &fluteFileDescription(std::shared_ptr<LibFlute::Transmitter::FileDescription> &&fd_ptr) {
+        Metadata &fluteFileDescription(std::shared_ptr<LibFlute::Transmitter::FileDescription> &&fd_ptr) { std::lock_guard<std::recursive_mutex> guard(m_mutex);
             m_fileDescription = std::move(fd_ptr);
             return *this;
         };
-        Metadata &fluteFileDescription(LibFlute::Transmitter::FileDescription *fd_ptr) {
+        Metadata &fluteFileDescription(LibFlute::Transmitter::FileDescription *fd_ptr) { std::lock_guard<std::recursive_mutex> guard(m_mutex);
             m_fileDescription.reset(fd_ptr);
             return *this;
         };
 
-        const datetime_type &lastSent() const { return m_lastSentTime; };
-        Metadata &lastSent(const datetime_type &val) { m_lastSentTime = val; return *this; };
-        Metadata &lastSent(datetime_type &&val) { m_lastSentTime = std::move(val); return *this; };
-        Metadata &lastSentNow() { m_lastSentTime = datetime_type::clock::now(); return *this; };
+        datetime_type lastSent() const { std::lock_guard<std::recursive_mutex> guard(m_mutex); return m_lastSentTime; };
+        Metadata &lastSent(const datetime_type &val) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_lastSentTime = val; return *this; };
+        Metadata &lastSent(datetime_type &&val) { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_lastSentTime = std::move(val); return *this; };
+        Metadata &lastSentNow() { std::lock_guard<std::recursive_mutex> guard(m_mutex); m_lastSentTime = datetime_type::clock::now(); return *this; };
 
     private:
+        /* Every accessor takes this. A stored object is shared by the ingesters, the store and the
+           packagers, and ObjectStore::updateMetadata() replaces it in place; without a lock a reader
+           walked strings the replacement had just freed. Accessors return copies for the same reason. */
+        mutable std::recursive_mutex m_mutex;
         std::string m_objectId;
         std::string m_mediaType;
         std::string m_originalUrl;
