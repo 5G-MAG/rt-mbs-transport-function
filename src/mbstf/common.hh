@@ -27,7 +27,15 @@
 #define MBSTF_NAMESPACE_NAME(a) MBSTF_NAMESPACE::a
 
 /* Constants */
-#define GTP_HEADER_SIZE 2
+
+/* The GTP-U header the MB-UPF puts in front of each packet it forwards to the gNB, beyond the IP and UDP headers that
+   the tunnel from the MBSTF to the MB-UPF already counts for. TS 29.281 V18.4.0 clause 5.1: "The GTP-U header is a
+   variable length header whose minimum length is 8 bytes." The MB-UPF writes 20: the 8 octets, the 4 optional ones,
+   and one extension header of 8 octets (a capture of its output: flags 0x34, header of 20 octets). The FLUTE packets
+   are sized with this taken off the path MTU, so that the packet the MB-UPF sends on, with its own IP, UDP and GTP-U
+   headers, fits the path MTU. With 2 taken off, a full-size FDT packet of 1470 octets became a 1518 octet packet
+   at the MB-UPF, which cut it to the 1498 it could send, and the UE dropped what was left. */
+#define GTP_HEADER_SIZE 20
 
 /* Open5GS Logging */
 extern int __mbstf_log_domain;
