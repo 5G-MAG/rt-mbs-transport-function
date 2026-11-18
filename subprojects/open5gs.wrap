@@ -1,4 +1,5 @@
 [wrap-git]
 directory = open5gs
 url = https://github.com/5G-MAG/open5gs.git
-revision = bbc-patches
+revision = feature/mbs-broadcast-rel19
+# The Release 19 MBS Broadcast branch of Open5GS: the 2.8 API this repository is written against (ogs_global_conf()).
