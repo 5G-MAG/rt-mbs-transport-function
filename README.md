@@ -50,7 +50,7 @@ Built against these versions:
 - **3GPP TS 26.502 V18.6.0**, the MBS User Service architecture
 - **3GPP TS 26.346 V18.2.0**, for the FLUTE and FDT profiling
 
-The API bindings are generated at build time from the 3GPP 5G APIs, by default at tag `TSG111-Rel18`
+The API bindings are generated at build time from the 3GPP 5G APIs, by default at tag `TSG113-Rel19`
 (build options `fiveg_api_release` and `fiveg_api_approval` in `meson_options.txt`): the TS 29.581
 Nmbstf distribution session API and the TS 26.517 object manifest model.
 
