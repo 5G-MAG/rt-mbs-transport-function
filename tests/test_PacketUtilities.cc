@@ -1,5 +1,5 @@
 /******************************************************************************
- * 5G-MAG Reference Tools: MBS Transport Function: packet checksum unit test
+ * 5G-MAG Reference Tools: MBS Transport Function: packet checksum and proxy MTU unit test
  ******************************************************************************
  * License: 5G-MAG Public License v1
  ******************************************************************************/
@@ -8,14 +8,20 @@
  * of the 16-bit words of the data, where an odd final octet is padded with a zero octet for the sum. The final partial
  * word of a buffer whose length is not a multiple of four is built here from the octets that remain, and the others
  * of its four octets must be zero.
+ *
+ * PacketProxyPacketisation sizes the packets it carries to the outer MTU less the IP and UDP headers of the outer
+ * packet, 20 + 8 octets for an IPv4 source and 40 + 8 for an IPv6 one.
  */
 
 #include "common.hh"
 #include "Packet.hh"
+#include "PacketProxyPacketisation.hh"
+#include "SsmPort.hh"
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -71,10 +77,22 @@ static void testChecksumOfARfc1071Example()
     check(in_memory[0] == 0x22 && in_memory[1] == 0x0d, "the RFC 1071 example gives 220d in network order");
 }
 
+static void testProxyMtuLeavesRoomForTheOuterHeaders()
+{
+    SsmPort ipv4(5000, "232.0.0.1", std::optional<std::string>("127.0.0.7"));
+    PacketProxyPacketisation proxy4(1500, ipv4);
+    check(proxy4.mtu() == 1500 - 20 - 8, "IPv4 outer packet: 1472 left of a 1500 octet MTU");
+
+    SsmPort ipv6(5000, "ff3e::1234", std::optional<std::string>("2001:db8::7"));
+    PacketProxyPacketisation proxy6(1500, ipv6);
+    check(proxy6.mtu() == 1500 - 40 - 8, "IPv6 outer packet: 1452 left of a 1500 octet MTU");
+}
+
 int main()
 {
     testChecksumOfBuffersThatAreNotAMultipleOfFour();
     testChecksumOfARfc1071Example();
+    testProxyMtuLeavesRoomForTheOuterHeaders();
 
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

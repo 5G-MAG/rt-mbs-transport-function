@@ -131,7 +131,7 @@ void PacketProxyPacketisation::ssmToAddrs()
     if (m_srcAddr) {
         if (m_srcAddr->sa_family == AF_INET) {
             mtu(m_outerMTU - sizeof(iphdr) - sizeof(udphdr));
-        } else if (m_srcAddr->sa_family == AF_INET) {
+        } else if (m_srcAddr->sa_family == AF_INET6) {
             mtu(m_outerMTU - sizeof(ip6_hdr) - sizeof(udphdr));
         }
     }
