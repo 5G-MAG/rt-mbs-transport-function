@@ -5,7 +5,8 @@
  ******************************************************************************/
 
 /* Covers RepairObjectStore, which keeps the objects the co-located MBS AS hosts for as long as the operator allows (TS 26.517
- * V19.2.0 clause 10.2.3), and repairPathOf(), which gives the path an object is hosted under (clause 6.2.4.4).
+ * V19.2.0 clause 10.2.3), repairPathOf(), which gives the path an object is hosted under (clause 6.2.4.4), and RepairRegistry, which
+ * keeps one store per Distribution Session.
  */
 
 #include <atomic>
@@ -19,6 +20,7 @@
 
 #include "common.hh"
 #include "RepairObjectStore.hh"
+#include "RepairRegistry.hh"
 
 using namespace com::fiveg_mag::ref_tools::mbstf;
 using std::chrono::seconds;
@@ -163,6 +165,22 @@ int main(int argc, char *argv[])
     check(repairPathOf("seg/1.m4s", std::nullopt) == "/seg/1.m4s", "a location with no scheme is taken as a path");
     check(repairPathOf("https://dist.example.com/live", dist) == "/live", "a location the base does not reach keeps its own path");
     check(repairPathOf("https://dist.example.com/live/", dist) == "/", "the base itself is the root");
+
+    /* One store per Distribution Session. */
+    {
+        RepairRegistry r(seconds(60), 250);
+        check(r.put("s1", "/a", object(100), t0) && r.put("s2", "/a", object(100, "\"other\""), t0), "two sessions keep an object under the same path");
+        check(r.get("s1", "/a", t0)->entityTag == "\"e\"" && r.get("s2", "/a", t0)->entityTag == "\"other\"", "each session's object is its own");
+        check(!r.get("s3", "/a", t0) && !r.get("s1", "/b", t0), "a session or path that is not held is not found");
+        check(r.sessionCount() == 2, "two sessions are held");
+        r.put("s1", "/b", object(100), t0 + seconds(1));
+        check(!r.put("s1", "/c", object(300), t0 + seconds(2)), "the octet limit is that of one session");
+        r.put("s1", "/c", object(100), t0 + seconds(2));
+        check(!r.get("s1", "/a", t0 + seconds(3)) && r.get("s1", "/b", t0 + seconds(3)) && r.get("s1", "/c", t0 + seconds(3)) && r.get("s2", "/a", t0 + seconds(3)), "a session at its limit drops its own oldest object and no other session's");
+        check(r.purgeExpired(t0 + seconds(61)) == 2 && r.sessionCount() == 1 && r.get("s1", "/c", t0 + seconds(61)), "a purge drops the objects whose retention has run out, and a store left empty");
+        check(r.purgeExpired(t0 + seconds(200)) == 1 && r.sessionCount() == 0, "the last session's last object goes and its store with it");
+        check(r.put("s1", "/a", object(10), t0 + seconds(300)) && r.sessionCount() == 1, "a session is made again when an object arrives for it");
+    }
 
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

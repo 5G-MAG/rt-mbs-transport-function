@@ -183,6 +183,8 @@ libmbstf_dist_sources = files('''
     PacketForwardOnlyController.hh
     PacketPacketisation.cc
     PacketPacketisation.hh
+    MbsAsServer.cc
+    MbsAsServer.hh
     PacketProcessing.cc
     PacketProcessing.hh
     PacketProxyController.cc
