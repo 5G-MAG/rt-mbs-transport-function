@@ -27,6 +27,7 @@
 #include "openapi/model/DistSessionState.h"
 
 #include "ObjectController.hh"
+#include "RepairRetention.hh"
 
 using reftools::mbstf::DistSessionState;
 using fiveg_mag_reftools::ModelException;
@@ -161,6 +162,8 @@ void ObjectController::processEvent(Event &event, SubscriptionService &event_ser
         ogs_info("Object [%s] sent", object_id.c_str());
 
         if (m_objectStore) {
+            /* Before the object can be deleted below: the MBS AS keeps it for repair, sharing its octets. */
+            retainForRepair(object_id);
             /* Decided and acted on under the store's own lock: reading keepAfterSend() through a
                reference and then deleting leaves room for another thread to replace or erase the
                entry in between. An object already gone is a normal outcome of that race rather than
@@ -194,6 +197,21 @@ void ObjectController::processEvent(Event &event, SubscriptionService &event_ser
                event.eventName() == ObjectStore::ObjectUpdatedEvent::event_name) {
         /* object successfully added/updated to the object store */
         m_consecutiveIngestFailures = 0;
+    }
+}
+
+void ObjectController::retainForRepair(const std::string &object_id)
+{
+    const auto &registry = App::self().context()->repairRegistry;
+    if (!registry || !m_objectStore) return;
+    auto retained = repairObjectOf((*m_objectStore)[object_id]);
+    if (!retained) {
+        ogs_debug("Object [%s] is not hosted by the MBS AS", object_id.c_str());
+        return;
+    }
+    const std::string path(retained->path);
+    if (registry->put(distributionSession().distributionSessionId(), path, std::move(retained->object), RepairObjectStore::clock_type::now())) {
+        ogs_debug("Object [%s] kept for repair at %s", object_id.c_str(), path.c_str());
     }
 }
 

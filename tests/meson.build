@@ -81,3 +81,7 @@ test('test_mbs_as_server',
 test('test_server_identification',
     executable('testServerIdentification', 'test_ServerIdentification.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
    ,verbose: true, timeout: 60, protocol: 'exitcode')
+
+test('test_repair_retention',
+    executable('testRepairRetention', 'test_RepairRetention.cc', '../src/mbstf/App.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
+   ,verbose: true, timeout: 60, protocol: 'exitcode')

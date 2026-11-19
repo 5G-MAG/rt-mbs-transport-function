@@ -76,6 +76,10 @@ public:
 
     virtual void processEvent(Event &event, SubscriptionService &event_service);
 
+    /** Keep an object that has been sent for the co-located MBS AS, which hosts it for unicast Object Repair (TS 26.517 V19.2.0 clause 10.2.3).
+     *  Does nothing when the MBS AS is not running or the object is not one it hosts. */
+    void retainForRepair(const std::string &object_id);
+
     virtual std::string nextObjectId();
 
     const std::optional<std::string> &getObjectDistributionBaseUrl() const;
