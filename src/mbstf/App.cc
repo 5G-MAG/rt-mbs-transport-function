@@ -132,6 +132,8 @@ void App::initialise()
     if (!m_app->sbiOpen()) {
         throw std::runtime_error("Open SBI servers failed!");
     }
+
+    m_context->startMbsAs();
 }
 
 void App::startEventHandler()

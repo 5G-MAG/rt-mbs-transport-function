@@ -26,6 +26,9 @@
 #include <optional>
 #include <vector>
 
+#include "MbsAsServer.hh"
+#include "RepairRegistry.hh"
+
 #include "ogs-sbi.h"
 #include "ogs-app.h"
 
@@ -70,6 +73,23 @@ public:
     /* The same, for each session's output threads. */
     void abortAllOutput();
     const std::shared_ptr<DistributionSession> &findDistributionSession(const std::string &distributionSessionid);
+
+    /* The co-located MBS AS (TS 26.502 V19.5.0 clause 4.3.4). Declared before the Distribution Sessions so that they are destroyed first and the
+       registry they feed outlives them. */
+    struct {
+        std::optional<struct sockaddr_storage> address; /* mbstf.mbsAs, the first one configured: where the MBS AS listens */
+        std::optional<std::string> advertise;           /* the host to put in the repair base URL, if one is given */
+    } mbsAs;
+    /* How long an object is kept for repair after it was stored, and the most octets kept for one Distribution Session. Both are set by
+       mbstf.repairRetentionSeconds and mbstf.repairMaxOctetsPerSession. The defaults are the operator's to change: the retention has to outlast the
+       back-off time of the clients (the MBSF announces it) plus the repair itself, and the octet limit is what a session may use. */
+    std::chrono::seconds repairRetention{3600};
+    std::size_t repairMaxOctetsPerSession{536870912}; /* 512 MiB */
+    std::shared_ptr<RepairRegistry> repairRegistry;   /* null unless the MBS AS is configured and running */
+    /** Start the MBS AS if mbstf.mbsAs is configured. A failure to listen is reported and leaves the MBS AS off; nothing else depends on it. */
+    void startMbsAs();
+    /** The base URL of a Distribution Session's objects on the MBS AS, "http://{host}:{port}/{id}", or nothing when the MBS AS is not running. */
+    std::optional<std::string> mbsAsBaseUrl(const std::string &distribution_session_id) const;
 
     enum ServerType {
         SERVER_DISTRIBUTION_SESSION,
@@ -194,6 +214,7 @@ public:
     static std::chrono::milliseconds parseDuration(const std::string &duration_string);
 
 private:
+    std::unique_ptr<MbsAsServer> m_mbsAsServer; /* destroyed before the Distribution Sessions, which only stops serving; the registry outlives it */
     void parseCacheControl(Open5GSYamlIter &iter);
     void parseManifestHandlerGlobals(const std::string &pc_key, Open5GSYamlIter &iter);
     void parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter);

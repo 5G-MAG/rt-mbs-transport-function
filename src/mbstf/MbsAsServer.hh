@@ -19,9 +19,13 @@
 
 #include <sys/socket.h>
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 
 #include "common.hh"
 #include "RepairRegistry.hh"
@@ -43,8 +47,11 @@ public:
      * \param address        where to listen; a port of zero lets the system choose, which port() then tells.
      * \param registry       the objects to serve.
      * \param server_header  the value of the Server response header field (clause 8.2.3.3.5).
+     * \param housekeeping   how often objects whose retention has run out are dropped from the registry. This only frees memory: a
+     *                       request is never answered with an expired object, whenever the purge last ran.
      */
-    MbsAsServer(const struct sockaddr_storage &address, const std::shared_ptr<RepairRegistry> &registry, const std::string &server_header);
+    MbsAsServer(const struct sockaddr_storage &address, const std::shared_ptr<RepairRegistry> &registry, const std::string &server_header,
+                std::chrono::seconds housekeeping = std::chrono::seconds(60));
     MbsAsServer(const MbsAsServer &) = delete;
     MbsAsServer &operator=(const MbsAsServer &) = delete;
     ~MbsAsServer();
@@ -61,6 +68,11 @@ public:
 private:
     struct MHD_Daemon *m_daemon;
     void *m_context;  //!< what the request handler needs, owned here, freed after the daemon has stopped
+    std::shared_ptr<RepairRegistry> m_registry;
+    std::mutex m_housekeepingMutex;
+    std::condition_variable m_housekeepingWake;
+    bool m_housekeepingStop;
+    std::thread m_housekeeping;
 };
 
 MBSTF_NAMESPACE_STOP

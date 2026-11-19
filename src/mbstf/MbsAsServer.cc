@@ -119,8 +119,9 @@ static MHD_Result handleRequest(void *cls, struct MHD_Connection *connection, co
     return queue(connection, mbsas::respond(http_method, conditions, *object, makeBoundary()), server->second);
 }
 
-MbsAsServer::MbsAsServer(const struct sockaddr_storage &address, const std::shared_ptr<RepairRegistry> &registry, const std::string &server_header)
-    :m_daemon(nullptr), m_context(nullptr)
+MbsAsServer::MbsAsServer(const struct sockaddr_storage &address, const std::shared_ptr<RepairRegistry> &registry, const std::string &server_header,
+                         std::chrono::seconds housekeeping)
+    :m_daemon(nullptr), m_context(nullptr), m_registry(registry), m_housekeepingStop(false)
 {
     // The daemon's own copy of what the handler needs: a pointer that lives as long as the daemon does.
     auto *context = new std::pair<std::shared_ptr<RepairRegistry>, std::string>(registry, server_header);
@@ -134,10 +135,28 @@ MbsAsServer::MbsAsServer(const struct sockaddr_storage &address, const std::shar
         return;
     }
     m_context = context;
+    if (housekeeping.count() > 0) {
+        m_housekeeping = std::thread([this, housekeeping]() {
+            std::unique_lock<std::mutex> lock(m_housekeepingMutex);
+            while (!m_housekeepingStop) {
+                if (m_housekeepingWake.wait_for(lock, housekeeping, [this]() { return m_housekeepingStop; })) break;
+                lock.unlock();
+                const auto dropped = m_registry->purgeExpired(RepairObjectStore::clock_type::now());
+                if (dropped) ogs_debug("MBS AS: dropped %zu repair objects whose retention had run out", dropped);
+                lock.lock();
+            }
+        });
+    }
 }
 
 MbsAsServer::~MbsAsServer()
 {
+    {
+        std::lock_guard<std::mutex> lock(m_housekeepingMutex);
+        m_housekeepingStop = true;
+    }
+    m_housekeepingWake.notify_all();
+    if (m_housekeeping.joinable()) m_housekeeping.join();
     if (m_daemon) MHD_stop_daemon(m_daemon);
     delete static_cast<std::pair<std::shared_ptr<RepairRegistry>, std::string> *>(m_context);
 }

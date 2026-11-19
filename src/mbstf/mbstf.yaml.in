@@ -251,6 +251,19 @@ mbstf:
     httpPushIngest:
       - addr: 127.0.0.61
         port: 0 # ephemeral
+    # The MBS AS co-located with the MBSTF (TS 26.502 clause 4.3.4): the HTTP server through which an MBSTF Client repairs objects it did not
+    # receive intact (TS 26.517 clause 10). An object is served at {base URL}/{Distribution Session id}/{path of the object}, the base URL being
+    # "http://{host}:{port}" with this address and port, or the "advertise" name or address if the entry has one. The MBS AS is only started when
+    # this entry is present, and only the first entry is used. The MBSF announces the base URL to the clients (mbsf.objectRepairParameters).
+    #mbsAs:
+    #  - addr: 127.0.0.68
+    #    port: 8889
+    # How long an object is kept for repair after it was sent, in seconds (default 3600; 0 keeps nothing), and the most octets kept for one
+    # Distribution Session (default 536870912, 512 MiB; 0 keeps nothing). Both are for the operator to choose for the deployment: the retention has
+    # to outlast the back-off time that the MBSF announces to the clients plus the repair itself, and a session that reaches the octet limit
+    # drops its oldest objects first, after which a request for such an object is answered 404.
+    #repairRetentionSeconds: 3600
+    #repairMaxOctetsPerSession: 536870912
     totalMaxBitRateSoftLimit: 1000 # 1Gbps
     #pathMtu: 1500
     consecutiveIngestFailuresBeforeDeactivate: 5

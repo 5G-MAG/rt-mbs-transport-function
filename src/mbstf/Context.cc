@@ -17,7 +17,11 @@
  * under the License.
  */
 
+#include <arpa/inet.h>
+#include <microhttpd.h>
+
 #include <chrono>
+#include <format>
 #include <map>
 #include <memory>
 #include <string>
@@ -27,6 +31,7 @@
 #include "ogs-app.h"
 
 #include "common.hh"
+#include "mbstf-version.h"
 #include "App.hh"
 #include "Controller.hh"
 #include "DistributionSession.hh"
@@ -41,6 +46,7 @@
 #include "openapi/model/DistSessionState.h"
 
 #include "Context.hh"
+#include "ServerIdentification.hh"
 
 using reftools::mbstf::DistSessionState;
 
@@ -118,7 +124,7 @@ bool Context::parseConfig()
                         throw std::out_of_range("Bad configuration node at mbstf.serverResponseCacheControl");
                      }
 
-                } else if (mbstf_key == "distSessionAPI" || mbstf_key == "httpPushIngest" || mbstf_key == "packetIngest" || mbstf_key == "rtpIngest") {
+                } else if (mbstf_key == "distSessionAPI" || mbstf_key == "httpPushIngest" || mbstf_key == "packetIngest" || mbstf_key == "rtpIngest" || mbstf_key == "mbsAs") {
                     if (mbstf_key == "rtpIngest") {
                         ogs_warn("mbstf.rtpIngest is the former name of mbstf.packetIngest; please rename it");
                         mbstf_key = "packetIngest";
@@ -151,6 +157,23 @@ bool Context::parseConfig()
                     } else {
                         throw std::out_of_range("Bad configuration node at mbstf.totalMaxBitRateSoftLimit");
                     }
+                } else if (mbstf_key == "repairRetentionSeconds") {
+                    Open5GSYamlIter retention_iter(mbstf_iter);
+                    if (retention_iter.type() != YAML_SCALAR_NODE) throw std::out_of_range("Bad configuration node at mbstf.repairRetentionSeconds");
+                    std::string num_val(retention_iter.value());
+                    size_t idx = 0;
+                    const long long seconds_val = std::stoll(num_val, &idx);
+                    if (idx != num_val.size() || seconds_val < 0) throw std::out_of_range("Bad configuration value at mbstf.repairRetentionSeconds");
+                    repairRetention = std::chrono::seconds(seconds_val);
+                } else if (mbstf_key == "repairMaxOctetsPerSession") {
+                    Open5GSYamlIter octets_iter(mbstf_iter);
+                    if (octets_iter.type() != YAML_SCALAR_NODE) throw std::out_of_range("Bad configuration node at mbstf.repairMaxOctetsPerSession");
+                    std::string num_val(octets_iter.value());
+                    size_t idx = 0;
+                    if (!num_val.empty() && num_val.front() == '-') throw std::out_of_range("Bad configuration value at mbstf.repairMaxOctetsPerSession");
+                    const unsigned long long octets_val = std::stoull(num_val, &idx);
+                    if (idx != num_val.size()) throw std::out_of_range("Bad configuration value at mbstf.repairMaxOctetsPerSession");
+                    repairMaxOctetsPerSession = static_cast<std::size_t>(octets_val);
                 } else if (mbstf_key == "pathMtu") {
                     Open5GSYamlIter mtu_iter(mbstf_iter);
                     if (mtu_iter.type() == YAML_SCALAR_NODE) {
@@ -234,6 +257,45 @@ bool Context::parseConfig()
     //}
 
     return true;
+}
+
+void Context::startMbsAs()
+{
+    if (!mbsAs.address.has_value() || m_mbsAsServer) return;
+    auto registry = std::make_shared<RepairRegistry>(repairRetention, repairMaxOctetsPerSession);
+    /* TS 26.517 V19.2.0 clauses 8.2.3.3.1 and 8.2.3.3.5: the MBS AS names itself MBSAS, with the host name and the release number. */
+    const std::string host_name = serverident::localHostName();
+    if (host_name.empty()) ogs_warn("The host name of this machine cannot be read, the Server header of the MBS AS carries none");
+    const std::string header = serverident::headerValue("MBSAS", host_name, std::format("{}/{}; microhttpd/{}", MBSTF_NAME, MBSTF_VERSION, MHD_get_version()));
+    auto server = std::make_unique<MbsAsServer>(mbsAs.address.value(), registry, header);
+    if (!server->running()) {
+        ogs_error("The MBS AS is not running: the address configured at mbstf.mbsAs could not be used. Objects are not kept for repair.");
+        return;
+    }
+    m_mbsAsServer = std::move(server);
+    repairRegistry = registry;
+    ogs_info("MBS AS listening on port %u; objects are kept %lld s, at most %zu octets per Distribution Session",
+             static_cast<unsigned>(m_mbsAsServer->port()), static_cast<long long>(repairRetention.count()), repairMaxOctetsPerSession);
+}
+
+std::optional<std::string> Context::mbsAsBaseUrl(const std::string &distribution_session_id) const
+{
+    if (!m_mbsAsServer || !mbsAs.address.has_value()) return std::nullopt;
+    std::string host;
+    if (mbsAs.advertise.has_value()) {
+        host = mbsAs.advertise.value();
+    } else {
+        char buf[INET6_ADDRSTRLEN] = {0};
+        const auto &ss = mbsAs.address.value();
+        if (ss.ss_family == AF_INET6) {
+            inet_ntop(AF_INET6, &reinterpret_cast<const struct sockaddr_in6 *>(&ss)->sin6_addr, buf, sizeof(buf));
+            host = std::string("[") + buf + "]";
+        } else {
+            inet_ntop(AF_INET, &reinterpret_cast<const struct sockaddr_in *>(&ss)->sin_addr, buf, sizeof(buf));
+            host = buf;
+        }
+    }
+    return std::format("http://{}:{}/{}", host, m_mbsAsServer->port(), distribution_session_id);
 }
 
 void Context::addDistributionSession(const std::shared_ptr<DistributionSession> &session)
@@ -423,6 +485,25 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
             if (num_of_advertise > 0 && advertise[0]) packetIngest.advertise = std::string(advertise[0]);
         }
         if (dev) ogs_warn("mbstf.packetIngest does not take a device; set its address");
+        if (addr) ogs_freeaddrinfo(addr);
+        return;
+    }
+
+    if (pc_key == "mbsAs") {
+        /* Not an SBI server either: the MBS AS is a libmicrohttpd daemon that MbsAsServer binds to this address itself. The address is only kept. */
+        if (mbsAs.address.has_value()) {
+            ogs_warn("mbstf.mbsAs lists more than one address; the MBS AS uses the first and ignores the rest");
+        } else if (addr) {
+            struct sockaddr_storage ss = {};
+            if (addr->ogs_sa_family == AF_INET6) {
+                memcpy(&ss, &addr->sin6, sizeof(addr->sin6));
+            } else {
+                memcpy(&ss, &addr->sin, sizeof(addr->sin));
+            }
+            mbsAs.address = ss;
+            if (num_of_advertise > 0 && advertise[0]) mbsAs.advertise = std::string(advertise[0]);
+        }
+        if (dev) ogs_warn("mbstf.mbsAs does not take a device; set its address");
         if (addr) ogs_freeaddrinfo(addr);
         return;
     }

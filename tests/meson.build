@@ -77,3 +77,7 @@ curl_dep_for_tests = dependency('libcurl', required: true)
 test('test_mbs_as_server',
     executable('testMbsAsServer', 'test_MbsAsServer.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep, curl_dep_for_tests])
    ,verbose: true, timeout: 120, protocol: 'exitcode')
+
+test('test_server_identification',
+    executable('testServerIdentification', 'test_ServerIdentification.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
+   ,verbose: true, timeout: 60, protocol: 'exitcode')

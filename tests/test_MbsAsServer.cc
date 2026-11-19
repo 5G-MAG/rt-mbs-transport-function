@@ -21,6 +21,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "common.hh"
@@ -184,6 +185,16 @@ int main(int argc, char *argv[])
     {
         MbsAsServer second(loopback(port), registry, server_header);
         check(!second.running() && second.port() == 0, "a server cannot listen on a port that is in use");
+    }
+
+    /* Objects whose retention has run out are dropped without any request. */
+    {
+        auto short_lived = std::make_shared<RepairRegistry>(seconds(1), 100000);
+        short_lived->put("s", "/x", object(0, "\"x\""), RepairObjectStore::clock_type::now());
+        MbsAsServer housekept(loopback(0), short_lived, server_header, seconds(1));
+        check(housekept.running() && short_lived->sessionCount() == 1, "an object is held at first");
+        for (int i = 0; i < 50 && short_lived->sessionCount() != 0; i++) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        check(short_lived->sessionCount() == 0, "the housekeeping drops it, and its store, once its retention has run out");
     }
 
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
