@@ -68,3 +68,7 @@ test('test_range_request',
 test('test_repair_object_store',
     executable('testRepairObjectStore', 'test_RepairObjectStore.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
    ,verbose: true, timeout: 120, protocol: 'exitcode')
+
+test('test_mbs_as_response',
+    executable('testMbsAsResponse', 'test_MbsAsResponse.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
+   ,verbose: true, timeout: 60, protocol: 'exitcode')
