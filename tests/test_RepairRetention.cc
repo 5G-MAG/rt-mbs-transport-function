@@ -88,7 +88,15 @@ int main(int argc, char *argv[])
         auto d = stored("https://dist.example/live/seg/1.m4s", dist);
         d->second.fluteFileDescription()->set_compression(FD::CompressionAlgorithm::COMPRESSION_DEFLATE);
         check(!repairObjectOf(d), "nor one with another encoding");
-        check(!repairObjectOf(stored("https://dist.example/live/seg/1.m4s", dist, false)), "an object that was never packaged is not hosted");
+        auto unpackaged = repairObjectOf(stored("https://dist.example/live/seg/1.m4s", dist, false));
+        check(unpackaged && unpackaged->path == "/seg/1.m4s", "an object not yet queued for sending is hosted under the path its location will give it");
+        auto swapped = stored("http://origin/live/seg/1.m4s", std::string("https://dist.example/live/"), false);
+        swapped->second.objIngestBaseUrl(std::string("http://origin/live/"));
+        auto sw = repairObjectOf(swapped);
+        check(sw && sw->path == "/seg/1.m4s", "the ingest base URL is replaced by the distribution base URL as the packager does, before the path is taken");
+        auto compressed_unpackaged = stored("https://dist.example/live/seg/1.m4s", dist, false);
+        compressed_unpackaged->second.compressedSend(true);
+        check(!repairObjectOf(compressed_unpackaged), "an object marked to be sent compressed is not hosted before it is queued either");
         check(!repairObjectOf(nullptr), "no object is nothing to host");
     }
 

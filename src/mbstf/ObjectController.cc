@@ -197,6 +197,8 @@ void ObjectController::processEvent(Event &event, SubscriptionService &event_ser
                event.eventName() == ObjectStore::ObjectUpdatedEvent::event_name) {
         /* object successfully added/updated to the object store */
         m_consecutiveIngestFailures = 0;
+        /* The MBS AS hosts the object from now on, so that a client that loses part of it can repair it even if the session ends first. */
+        if (const auto *changed = dynamic_cast<const ObjectStore::ObjectChangedEvent *>(&event)) retainForRepair(changed->objectId());
     }
 }
 
