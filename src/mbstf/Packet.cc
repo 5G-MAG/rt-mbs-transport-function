@@ -390,7 +390,10 @@ uint16_t Packet::checksum(const void *buffer, size_t buffer_len)
 
     if (i > 0) {
         const uint8_t *buf8 = reinterpret_cast<const uint8_t*>(buf32);
-        std::array<uint8_t, sizeof(uint32_t)> partial_word;
+        /* Zero-initialised: only the first i (1 to 3) octets are written below and all four are summed, so an
+           indeterminate tail would add whatever the stack held to the checksum of any buffer whose length is not a
+           multiple of four. */
+        std::array<uint8_t, sizeof(uint32_t)> partial_word{};
         size_t j = 0;
         while (i > 0) {
             partial_word[j++] = *buf8++;
