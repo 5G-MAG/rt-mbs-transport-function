@@ -45,6 +45,10 @@ test('test_packet_utilities',
     executable('testPacketUtilities', 'test_PacketUtilities.cc', '../src/mbstf/App.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
    ,verbose: true, timeout: 600, protocol: 'exitcode')
 
+test('test_packet_ipv6_headers',
+    executable('testPacketIpv6Headers', 'test_PacketIpv6Headers.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
+   ,verbose: true, timeout: 600, protocol: 'exitcode')
+
 test('test_entity_tag',
     executable('testEntityTag', 'test_EntityTag.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
    ,verbose: true, timeout: 600, protocol: 'exitcode')

@@ -36,6 +36,33 @@ MBSTF_NAMESPACE_START
 static int g_rawIcmpv4Socket = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
 static int g_rawIcmpv6Socket = socket(AF_INET6, SOCK_RAW, IPPROTO_RAW);
 
+/* The length of the IPv6 header and of the extension headers that follow it in the packet at `buffer`, which is the
+ * offset of the header that the last of them names next (the UDP header, for the packets this class carries).
+ *
+ * The chain starts with the Next Header field of the IPv6 header itself. RFC 8200 clause 4: "Each extension header is
+ * an integer multiple of 8 octets long"; the Hop-by-Hop Options, Routing and Destination Options headers give their
+ * length in Hdr Ext Len, "in 8-octet units, not including the first 8 octets", and the Fragment header is 8 octets.
+ * Any other Next Header value ends the chain. */
+static size_t ipv6HeadersLength(const uint8_t *buffer, size_t buffer_size)
+{
+    if (buffer_size < sizeof(ip6_hdr)) return 0;
+    size_t offset = sizeof(ip6_hdr);
+    uint8_t next = reinterpret_cast<const struct ip6_hdr*>(buffer)->ip6_nxt;
+    while (offset + sizeof(ip6_ext) <= buffer_size) {
+        size_t length;
+        if (next == IPPROTO_HOPOPTS || next == IPPROTO_ROUTING || next == IPPROTO_DSTOPTS) {
+            length = (static_cast<size_t>(buffer[offset + 1]) + 1) * 8;
+        } else if (next == IPPROTO_FRAGMENT) {
+            length = 8;
+        } else {
+            break;
+        }
+        next = buffer[offset];
+        offset += length;
+    }
+    return offset;
+}
+
 Packet::Packet()
     :m_packet(std::max(sizeof(iphdr), sizeof(ip6_hdr)) + sizeof(udphdr))
     ,m_originalPayloadOffset(std::max(sizeof(iphdr), sizeof(ip6_hdr)) + sizeof(udphdr))
@@ -81,12 +108,8 @@ Packet::Packet(const uint8_t *buffer, size_t buffer_size, bool encapsulated_hdrs
         if (ip->version == 4) {
             m_encapsulatedUdpOffset = m_encapsulatedIpOffset + ip->ihl * 4;
         } else if (ip->version == 6) {
-            m_encapsulatedUdpOffset = m_encapsulatedIpOffset + sizeof(ip6_hdr);
-            for (const struct ip6_ext *ip6e = reinterpret_cast<const struct ip6_ext*>(buffer + sizeof(ip6_hdr));
-                 ip6e->ip6e_nxt != IPPROTO_UDP;
-                 ip6e = reinterpret_cast<const struct ip6_ext*>(reinterpret_cast<const uint8_t*>(ip6e) + (ip6e->ip6e_len + 1) * 8))
-            {
-                m_encapsulatedUdpOffset += (ip6e->ip6e_len + 1) * 8;
+            if (const size_t headers_length = ipv6HeadersLength(buffer, buffer_size)) {
+                m_encapsulatedUdpOffset = m_encapsulatedIpOffset + headers_length;
             }
         }
         if (m_encapsulatedUdpOffset) m_encapsulatedPayloadOffset = m_encapsulatedUdpOffset + sizeof(udphdr);
@@ -121,11 +144,8 @@ Packet::Packet(struct msghdr *msg, const std::shared_ptr<struct sockaddr> &liste
         if (ip->version == 4) {
             m_encapsulatedUdpOffset = m_encapsulatedIpOffset + ip->ihl * 4;
         } else if (ip->version == 6) {
-            m_encapsulatedUdpOffset = m_encapsulatedIpOffset + sizeof(ip6_hdr);
-            for (const struct ip6_ext *ip6e = reinterpret_cast<const struct ip6_ext*>(buffer + sizeof(ip6_hdr));
-                 ip6e->ip6e_nxt != IPPROTO_UDP;
-                 ip6e = reinterpret_cast<const struct ip6_ext*>(reinterpret_cast<const uint8_t*>(ip6e) + ip6e->ip6e_len)) {
-                m_encapsulatedUdpOffset += ip6e->ip6e_len;
+            if (const size_t headers_length = ipv6HeadersLength(buffer, buffer_len)) {
+                m_encapsulatedUdpOffset = m_encapsulatedIpOffset + headers_length;
             }
         }
         if (m_encapsulatedUdpOffset) m_encapsulatedPayloadOffset = m_encapsulatedUdpOffset + sizeof(udphdr);
