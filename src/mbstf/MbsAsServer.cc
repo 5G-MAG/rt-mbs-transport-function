@@ -85,6 +85,13 @@ static MHD_Result handleRequest(void *cls, struct MHD_Connection *connection, co
 {
     auto *server = static_cast<std::pair<std::shared_ptr<RepairRegistry>, std::string> *>(cls);
     const std::string http_method(method ? method : "");
+    const std::string request_url(url ? url : "");
+    /* Every answer is logged at debug level with the request that was made and the status given, which is what shows a repair at work. */
+    auto answer = [&](const mbsas::Reply &reply) -> MHD_Result {
+        const char *range = MHD_lookup_connection_value(connection, MHD_HEADER_KIND, "Range");
+        ogs_debug("MBS AS: %s %s%s%s -> %u (%zu octets)", http_method.c_str(), request_url.c_str(), range ? " Range: " : "", range ? range : "", reply.status, reply.body.size());
+        return queue(connection, reply, server->second);
+    };
 
     // A request has no body here; one that carries data has it taken and ignored, as libmicrohttpd asks of a handler.
     if (*upload_data_size != 0) {
@@ -96,7 +103,7 @@ static MHD_Result handleRequest(void *cls, struct MHD_Connection *connection, co
         mbsas::Reply reply;
         reply.status = 405;
         reply.headers.emplace_back("Allow", "GET, HEAD");
-        return queue(connection, reply, server->second);
+        return answer(reply);
     }
 
     std::string session_id, path;
@@ -107,7 +114,7 @@ static MHD_Result handleRequest(void *cls, struct MHD_Connection *connection, co
     if (!object) {
         mbsas::Reply reply;
         reply.status = 404;
-        return queue(connection, reply, server->second);
+        return answer(reply);
     }
 
     mbsas::Conditions conditions;
@@ -116,7 +123,7 @@ static MHD_Result handleRequest(void *cls, struct MHD_Connection *connection, co
     conditions.ifModifiedSince = requestHeader(connection, "If-Modified-Since");
     conditions.ifRange = requestHeader(connection, "If-Range");
     conditions.range = requestHeader(connection, "Range");
-    return queue(connection, mbsas::respond(http_method, conditions, *object, makeBoundary()), server->second);
+    return answer(mbsas::respond(http_method, conditions, *object, makeBoundary()));
 }
 
 MbsAsServer::MbsAsServer(const struct sockaddr_storage &address, const std::shared_ptr<RepairRegistry> &registry, const std::string &server_header,
