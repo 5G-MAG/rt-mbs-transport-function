@@ -60,3 +60,7 @@ test('test_queued_object_set',
 test('test_packet_mtu',
     executable('testPacketMtu', 'test_PacketMtu.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
    ,verbose: true, timeout: 60, protocol: 'exitcode')
+
+test('test_range_request',
+    executable('testRangeRequest', 'test_RangeRequest.cc', install:false, include_directories:[libmbstf_libinc, libinc], dependencies : [libmbstf_dep])
+   ,verbose: true, timeout: 60, protocol: 'exitcode')
