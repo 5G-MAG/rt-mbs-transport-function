@@ -12,9 +12,11 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <unistd.h>
 
 #include <curl/curl.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -68,11 +70,12 @@ static size_t onHeader(char *data, size_t size, size_t n, void *out)
     return size * n;
 }
 
-static Answer ask(uint16_t port, const std::string &method, const std::string &path, const std::vector<std::string> &headers = {})
+/* \param host  as it is written in a URL: an IPv6 address is in square brackets. */
+static Answer askAt(const std::string &host, uint16_t port, const std::string &method, const std::string &path, const std::vector<std::string> &headers = {})
 {
     Answer a;
     CURL *curl = curl_easy_init();
-    const std::string url = "http://127.0.0.1:" + std::to_string(port) + path;
+    const std::string url = "http://" + host + ":" + std::to_string(port) + path;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
     if (method == "HEAD") curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
@@ -92,6 +95,11 @@ static Answer ask(uint16_t port, const std::string &method, const std::string &p
     return a;
 }
 
+static Answer ask(uint16_t port, const std::string &method, const std::string &path, const std::vector<std::string> &headers = {})
+{
+    return askAt("127.0.0.1", port, method, path, headers);
+}
+
 static RepairObjectStore::Object object(unsigned char fill_base, const std::string &etag)
 {
     auto data = std::make_shared<RepairObjectStore::Data>(100);
@@ -107,6 +115,38 @@ static struct sockaddr_storage loopback(uint16_t port)
     in->sin_port = htons(port);
     in->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     return ss;
+}
+
+static struct sockaddr_storage address6(const struct in6_addr &addr, uint16_t port)
+{
+    struct sockaddr_storage ss{};
+    auto *in6 = reinterpret_cast<struct sockaddr_in6 *>(&ss);
+    in6->sin6_family = AF_INET6;
+    in6->sin6_port = htons(port);
+    in6->sin6_addr = addr;
+    return ss;
+}
+
+static struct sockaddr_storage wildcard(int family, uint16_t port)
+{
+    if (family == AF_INET6) return address6(in6addr_any, port);
+    struct sockaddr_storage ss{};
+    auto *in = reinterpret_cast<struct sockaddr_in *>(&ss);
+    in->sin_family = AF_INET;
+    in->sin_port = htons(port);
+    in->sin_addr.s_addr = htonl(INADDR_ANY);
+    return ss;
+}
+
+/* Whether this machine can bind an IPv6 loopback socket: a case that needs it is reported as skipped, never as passed. */
+static bool hasIpv6Loopback()
+{
+    const int fd = socket(AF_INET6, SOCK_STREAM, 0);
+    if (fd < 0) return false;
+    struct sockaddr_storage ss = address6(in6addr_loopback, 0);
+    const bool ok = bind(fd, reinterpret_cast<struct sockaddr *>(&ss), sizeof(struct sockaddr_in6)) == 0;
+    close(fd);
+    return ok;
 }
 
 int main(int argc, char *argv[])
@@ -195,6 +235,70 @@ int main(int argc, char *argv[])
         check(housekept.running() && short_lived->sessionCount() == 1, "an object is held at first");
         for (int i = 0; i < 50 && short_lived->sessionCount() != 0; i++) std::this_thread::sleep_for(std::chrono::milliseconds(100));
         check(short_lived->sessionCount() == 0, "the housekeeping drops it, and its store, once its retention has run out");
+    }
+
+    /* Every form of address the configuration accepts: IPv4 and IPv6 loopback, and the wildcard addresses of both families. */
+    {
+        if (hasIpv6Loopback()) {
+            MbsAsServer v6(address6(in6addr_loopback, 0), registry, server_header);
+            check(v6.running() && v6.port() != 0, "a server listens on the IPv6 loopback address");
+            if (v6.running()) {
+                Answer whole = askAt("[::1]", v6.port(), "GET", "/s1/a/b.bin");
+                check(whole.status == 200 && whole.body.size() == 100 && whole.headers["server"] == server_header, "and answers a GET sent over IPv6");
+                Answer part = askAt("[::1]", v6.port(), "GET", "/s1/a/b.bin", {"Range: bytes=10-19"});
+                check(part.status == 206 && part.body.size() == 10 && part.headers["content-range"] == "bytes 10-19/100", "and a Range request sent over IPv6");
+            }
+            MbsAsServer any6(wildcard(AF_INET6, 0), registry, server_header);
+            check(any6.running() && any6.port() != 0, "a server listens on the IPv6 wildcard address");
+            if (any6.running()) check(askAt("[::1]", any6.port(), "GET", "/s1/a/b.bin").status == 200, "and answers over the IPv6 loopback address");
+        } else {
+            std::printf("SKIPPED: the IPv6 cases (this machine has no IPv6 loopback address).\n");
+        }
+        MbsAsServer any4(wildcard(AF_INET, 0), registry, server_header);
+        check(any4.running() && any4.port() != 0, "a server listens on the IPv4 wildcard address");
+        if (any4.running()) check(ask(any4.port(), "GET", "/s1/a/b.bin").status == 200, "and answers over the IPv4 loopback address");
+    }
+
+    /* Two Distribution Sessions at once: many clients ask for the same path of two sessions while objects of a third are stored and
+     * purged. Every answer has to carry the object of the session that was asked for, whatever else the server is doing. */
+    {
+        auto busy = std::make_shared<RepairRegistry>(seconds(600), 1000000);
+        busy->put("a", "/obj.bin", object(0, "\"a1\""), now);
+        busy->put("b", "/obj.bin", object(100, "\"b1\""), now);
+        MbsAsServer shared(loopback(0), busy, server_header, seconds(1));
+        const uint16_t shared_port = shared.port();
+        constexpr int kClients = 8, kRequests = 40;
+        std::atomic<int> wrong{0}, failed{0}, answered{0};
+        std::atomic<bool> stop{false};
+        std::vector<std::thread> clients;
+        for (int c = 0; c < kClients; c++) {
+            clients.emplace_back([&, c]() {
+                for (int i = 0; i < kRequests; i++) {
+                    const bool first = ((c + i) % 2) == 0;
+                    Answer r = ask(shared_port, "GET", first ? "/a/obj.bin" : "/b/obj.bin", {"Range: bytes=0-9"});
+                    if (r.failed) { failed++; continue; }
+                    const unsigned char want = first ? 0 : 100;
+                    if (r.status != 206 || r.body.size() != 10 || static_cast<unsigned char>(r.body[0]) != want || r.headers["etag"] != (first ? "\"a1\"" : "\"b1\"")) wrong++;
+                    answered++;
+                }
+            });
+        }
+        std::thread writer([&]() {
+            int n = 0;
+            while (!stop) {
+                /* Stored at a time that puts its retention in the past, so that the purge drops it and leaves sessions "a" and "b" alone. */
+                busy->put("c", "/obj" + std::to_string(n++ % 5) + ".bin", object(50, "\"c\""), RepairObjectStore::clock_type::now() - seconds(1000));
+                busy->purgeExpired(RepairObjectStore::clock_type::now());
+                /* The object of session "a" replaced by an identical one while clients read it, as a new version of an object is. */
+                busy->put("a", "/obj.bin", object(0, "\"a1\""), RepairObjectStore::clock_type::now());
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        });
+        for (auto &t : clients) t.join();
+        stop = true;
+        writer.join();
+        check(failed == 0 && answered == kClients * kRequests, "320 requests for two sessions sent at once are all answered");
+        check(wrong == 0, "and each answer carries the object and entity tag of the session that was asked for");
     }
 
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
