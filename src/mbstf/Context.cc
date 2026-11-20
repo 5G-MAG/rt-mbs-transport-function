@@ -278,26 +278,6 @@ void Context::startMbsAs()
              static_cast<unsigned>(m_mbsAsServer->port()), static_cast<long long>(repairRetention.count()), repairMaxOctetsPerSession);
 }
 
-std::optional<std::string> Context::mbsAsBaseUrl(const std::string &distribution_session_id) const
-{
-    if (!m_mbsAsServer || !mbsAs.address.has_value()) return std::nullopt;
-    std::string host;
-    if (mbsAs.advertise.has_value()) {
-        host = mbsAs.advertise.value();
-    } else {
-        char buf[INET6_ADDRSTRLEN] = {0};
-        const auto &ss = mbsAs.address.value();
-        if (ss.ss_family == AF_INET6) {
-            inet_ntop(AF_INET6, &reinterpret_cast<const struct sockaddr_in6 *>(&ss)->sin6_addr, buf, sizeof(buf));
-            host = std::string("[") + buf + "]";
-        } else {
-            inet_ntop(AF_INET, &reinterpret_cast<const struct sockaddr_in *>(&ss)->sin_addr, buf, sizeof(buf));
-            host = buf;
-        }
-    }
-    return std::format("http://{}:{}/{}", host, m_mbsAsServer->port(), distribution_session_id);
-}
-
 void Context::addDistributionSession(const std::shared_ptr<DistributionSession> &session)
 {
     std::string id(session->distributionSessionId());
@@ -501,8 +481,8 @@ void Context::parseConfiguration(std::string &pc_key, Open5GSYamlIter &iter)   {
                 memcpy(&ss, &addr->sin, sizeof(addr->sin));
             }
             mbsAs.address = ss;
-            if (num_of_advertise > 0 && advertise[0]) mbsAs.advertise = std::string(advertise[0]);
         }
+        if (num_of_advertise > 0) ogs_warn("mbstf.mbsAs does not take an advertise name; the address that clients repair from is the one the MBSF announces (mbsf.objectRepairParameters)");
         if (dev) ogs_warn("mbstf.mbsAs does not take a device; set its address");
         if (addr) ogs_freeaddrinfo(addr);
         return;

@@ -78,7 +78,6 @@ public:
        registry they feed outlives them. */
     struct {
         std::optional<struct sockaddr_storage> address; /* mbstf.mbsAs, the first one configured: where the MBS AS listens */
-        std::optional<std::string> advertise;           /* the host to put in the repair base URL, if one is given */
     } mbsAs;
     /* How long an object is kept for repair after it was stored, and the most octets kept for one Distribution Session. Both are set by
        mbstf.repairRetentionSeconds and mbstf.repairMaxOctetsPerSession. The defaults are the operator's to change: the retention has to outlast the
@@ -88,8 +87,6 @@ public:
     std::shared_ptr<RepairRegistry> repairRegistry;   /* null unless the MBS AS is configured and running */
     /** Start the MBS AS if mbstf.mbsAs is configured. A failure to listen is reported and leaves the MBS AS off; nothing else depends on it. */
     void startMbsAs();
-    /** The base URL of a Distribution Session's objects on the MBS AS, "http://{host}:{port}/{id}", or nothing when the MBS AS is not running. */
-    std::optional<std::string> mbsAsBaseUrl(const std::string &distribution_session_id) const;
 
     enum ServerType {
         SERVER_DISTRIBUTION_SESSION,

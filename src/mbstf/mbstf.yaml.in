@@ -252,9 +252,10 @@ mbstf:
       - addr: 127.0.0.61
         port: 0 # ephemeral
     # The MBS AS co-located with the MBSTF (TS 26.502 clause 4.3.4): the HTTP server through which an MBSTF Client repairs objects it did not
-    # receive intact (TS 26.517 clause 10). An object is served at {base URL}/{Distribution Session id}/{path of the object}, the base URL being
-    # "http://{host}:{port}" with this address and port, or the "advertise" name or address if the entry has one. The MBS AS is only started when
-    # this entry is present, and only the first entry is used. The MBSF announces the base URL to the clients (mbsf.objectRepairParameters).
+    # receive intact (TS 26.517 clause 10). An object is served at {base URL}/{Distribution Session id}/{path of the object}. The MBS AS is only
+    # started when this entry is present, and only the first entry is used; the entry takes no "advertise" name. It listens on this address and
+    # port, so give it a port (not 0). The MBSF announces the base URL to the clients: set mbsf.objectRepairParameters.objectRepairBaseLocator to
+    # "http://{address}:{port}" of this entry and mbsf.objectRepairParameters.hostedBy to mbstf.
     #mbsAs:
     #  - addr: 127.0.0.68
     #    port: 8889
