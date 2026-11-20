@@ -1,14 +1,14 @@
-# Pinned to main. This repository and rt-mbs-client depend on the MBS profile work in rt-libflute
+# Pinned to development. This repository and rt-mbs-client depend on the MBS profile work in rt-libflute
 # (the TS 26.346 annex L.6 profiled FDT schema, the scheme-specific FEC OTI, suppression of
 # Transfer-Length under the MBMS Download Profile, the split expiry setter and the RFC 5053 Raptor
-# scheme), which is on feature/mbs-profile until it reaches main. Until then, build with
-# revision = feature/mbs-profile.
+# scheme), which is on development until it reaches main and is released. When it does, set
+# revision = main.
 #
 # If subprojects/rt-libflute exists as a checkout, Meson uses it and ignores this file, so the
 # checkout must be on the branch to test.
 [wrap-git]
 url = https://github.com/5G-MAG/rt-libflute.git
-revision = main
+revision = development
 method = cmake
 
 #diff_files = rt-libflute/IpSec-xfrm_algo.patch
