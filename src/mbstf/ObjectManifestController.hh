@@ -111,6 +111,7 @@ private:
     std::thread m_scheduledPullThread;
     std::atomic_bool m_scheduledPullCancel;
     std::atomic_bool m_scheduledPullRunning;
+    std::atomic_bool m_scheduledPullRestart;
 };
 
 MBSTF_NAMESPACE_STOP

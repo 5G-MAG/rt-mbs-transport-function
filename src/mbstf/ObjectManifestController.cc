@@ -62,6 +62,7 @@ ObjectManifestController::ObjectManifestController(DistributionSession &dist_ses
         :ObjectController(dist_session)
         ,m_manifestHandler(nullptr)
         ,m_scheduledPullCancel(false)
+        ,m_scheduledPullRestart(false)
 
 {
     validate_pull_acquisition_method(dist_session);
@@ -296,7 +297,15 @@ void ObjectManifestController::startWorker()
 
        compare_exchange_strong makes exactly one caller the starter. Every exit from workerLoop()
        clears the flag before returning, so a genuinely finished worker still allows the next start.
+
+       A caller that finds the slot taken cannot start a worker, and the worker it found may be leaving:
+       it saw an empty list, and has not cleared the flag yet. Such a worker is the only thing that
+       schedules the next fetch of the manifest, so the manifest update that made this call would then
+       never be followed by another one and the stream would stop. The request is therefore recorded
+       first, before the slot is tried; a worker that leaves on an empty list reads it after it has
+       cleared the flag (workerLoop()), and takes the slot again if it was made.
        code-derived, no spec claim. */
+    m_scheduledPullRestart = true;
     bool expected = false;
     if (!m_scheduledPullRunning.compare_exchange_strong(expected, true)) return;
 
@@ -409,6 +418,11 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
             }
         }
 
+        /* Every restart requested before this point is covered by the list read below, because the
+           manifest handler is updated before startWorker() records one. A request made after it is
+           left for the exit on an empty list to find. */
+        controller->m_scheduledPullRestart = false;
+
         std::pair<ManifestHandler::time_type, ManifestHandler::ingest_list> next_ingest_items;
         ManifestHandler::durn_type default_deadline;
         // Get the next ingest items
@@ -422,7 +436,19 @@ void ObjectManifestController::workerLoop(ObjectManifestController *controller)
             ogs_error("While fetching next manifest ingest item: %s", err.what());
         }
 
-        if (next_ingest_items.second.empty()) break;
+        if (next_ingest_items.second.empty()) {
+            /* Nothing to fetch until the manifest changes, and a changed manifest starts the worker again
+               (startWorker()). The flag is cleared first and the request read after, so a request made
+               while this pass ran is either seen here or finds the slot free and starts a worker itself;
+               it cannot fall between the two. */
+            controller->m_scheduledPullRunning = false;
+            bool expected = false;
+            if (controller->m_scheduledPullRestart.load() &&
+                    controller->m_scheduledPullRunning.compare_exchange_strong(expected, true)) {
+                continue;
+            }
+            return;
+        }
 
         auto fetch_time = next_ingest_items.first; // Get fetch_time using .first
 
